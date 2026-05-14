@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "mode": "chat",
+      "crafterQAgentId": "019c7237-478b-7f98-9a5c-87144c3fb010",
+      "label": "Authoring Assistant",
+      "icon": "@mui/icons-material/AutoAwesomeRounded",
+      "llm": "openAI",
+      "llmModel": "gpt-4o-mini",
+      "imageModel": "gpt-image-1",
+      "enableTools": true,
+      "prompts": [
+        "What can you help me with?",
+        "Summarize this page in bullet points"
+      ]
+    },
+    {
+      "mode": "autonomous",
+      "name": "Prototype agent",
+      "schedule": "0 * * * * ?",
+      "prompt": "You are an autonomous assistant. Reply with JSON only as instructed by the server.",
+      "scope": "project",
+      "llm": "openAI",
+      "llmModel": "gpt-4o-mini",
+      "imageModel": "gpt-image-1",
+      "manageOtherAgentsHumanTasks": false
+    }
+  ]
+}

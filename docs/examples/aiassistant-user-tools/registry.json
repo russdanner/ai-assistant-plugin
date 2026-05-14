@@ -1,0 +1,9 @@
+{
+  "tools": [
+    {
+      "id": "hello",
+      "script": "hello.groovy",
+      "description": "Example site user tool: returns a greeting; optional args.name"
+    }
+  ]
+}

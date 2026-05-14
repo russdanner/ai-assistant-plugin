@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reference fragments for config/studio/ui.xml (Studio AI assistant plugin).
+  Merge each block under the parent shown in the comment. After editing, commit the site sandbox
+  and sync in Studio. Re-run marketplace/copy from this plugin repo to apply descriptor-driven merges,
+  or paste these fragments manually if you maintain ui.xml by hand.
+
+  Example site sandbox (maintainer local Authoring 4.4.xE):
+    /home/russdanner/crafter-installs/4-4-xE/crafter-authoring/data/repos/sites/new-demo/sandbox
+  → edit: .../sandbox/config/studio/ui.xml
+
+  Plugin bundle: id="org.craftercms.aiassistant.studio" type="aiassistant" name="components" file="index.js"
+  Widget ids must match sources/src/consts.ts (Helper, AutonomousAssistants, etc.).
+  Default install (craftercms-plugin.yaml): **Preview toolbar only** — Helper **appended** under PreviewToolbar **`configuration/rightSection/widgets`** (marketplace-safe wiring). **Tools Panel** (left rail) Helper / Autonomous widgets are **not** merged by the descriptor; paste the blocks below under **`ToolsPanel/configuration/widgets`** only if your policy allows. For an icon **next to the URL bar**, move the merged **`<widget id="craftercms.components.aiassistant.Helper">…</widget>`** to **`configuration/middleSection/widgets`**. One **`openAI`** vendor agent with llmModel + imageModel; **`OPENAI_API_KEY`** on Studio host.
+
+  CRITICAL — Tools Panel placement: every sidebar tool row must live under
+  //widget[@id='craftercms.components.ToolsPanel']/configuration/widgets as a <widget> child.
+  Do NOT put Helper or AutonomousAssistants after </configuration> as a sibling of <configuration>;
+  Studio ignores those for the left rail, and descriptor merge used to match the wrong node.
+-->
+<!-- ========== Tools Panel (//widget[@id='craftercms.components.ToolsPanel']/configuration/widgets) ========== -->
+<widget id="craftercms.components.aiassistant.Helper">
+  <plugin id="org.craftercms.aiassistant.studio" type="aiassistant" name="components" file="index.js"/>
+  <configuration>
+    <!-- ui="IconButton" = compact toolbar icon; omit attribute for list-style row in Tools Panel -->
+    <agents>
+      <!-- Primary: tools-loop chat + CMS tools (set OPENAI_API_KEY on the Studio host for the openAI vendor row). -->
+      <agent>
+        <crafterQAgentId>019c7237-478b-7f98-9a5c-87144c3fb010</crafterQAgentId>
+        <label>Authoring Assistant</label>
+        <llm>openAI</llm>
+        <llmModel>gpt-4o-mini</llmModel>
+        <imageModel>gpt-image-1</imageModel>
+        <enableTools>true</enableTools>
+        <icon id="@mui/icons-material/AutoAwesomeRounded"/>
+        <prompts>
+          <prompt>What can you help me with?</prompt>
+          <prompt>List components used on the current page</prompt>
+        </prompts>
+      </agent>
+      <!-- Optional second agent: hosted chat only (no GetContent/WriteContent on this adapter). Same UUID field is agentId for /v1/chats. -->
+      <!--
+      <agent>
+        <crafterQAgentId>019c7237-478b-7f98-9a5c-87144c3fb010</crafterQAgentId>
+        <label>Hosted chat only</label>
+        <llm>crafterQ</llm>
+        <icon id="@mui/icons-material/ChatRounded"/>
+        <prompts>
+          <prompt>What can you help me with?</prompt>
+        </prompts>
+      </agent>
+      -->
+    </agents>
+  </configuration>
+</widget>
+
+<widget id="craftercms.components.aiassistant.AutonomousAssistants">
+  <plugin id="org.craftercms.aiassistant.studio" type="aiassistant" name="components" file="index.js"/>
+  <configuration>
+    <title>Autonomous Agents</title>
+    <!-- Default mark matches sources/src/AiAssistant.tsx (plugin bundle) and craftercms-plugin.yaml installation. -->
+    <icon><![CDATA[<svg width="800px" height="800px" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <title>ai</title>
+  <g id="Layer_2" data-name="Layer 2">
+    <g id="invisible_box" data-name="invisible box">
+      <rect width="48" height="48" fill="none"/>
+    </g>
+    <g id="Q3_icons" data-name="Q3 icons">
+      <g>
+        <path fill="currentColor" d="M45.6,18.7,41,14.9V7.5a1,1,0,0,0-.6-.9L30.5,2.1h-.4l-.6.2L24,5.9,18.5,2.2,17.9,2h-.4L7.6,6.6a1,1,0,0,0-.6.9v7.4L2.4,18.7a.8.8,0,0,0-.4.8v9H2a.8.8,0,0,0,.4.8L7,33.1v7.4a1,1,0,0,0,.6.9l9.9,4.5h.4l.6-.2L24,42.1l5.5,3.7.6.2h.4l9.9-4.5a1,1,0,0,0,.6-.9V33.1l4.6-3.8a.8.8,0,0,0,.4-.7V19.4h0A.8.8,0,0,0,45.6,18.7Zm-5.1,6.8H42v1.6l-3.5,2.8-.4.3-.4-.2a1.4,1.4,0,0,0-2,.7,1.5,1.5,0,0,0,.6,2l.7.3h0v5.4l-6.6,3.1-4.2-2.8-.7-.5V25.5H27a1.5,1.5,0,0,0,0-3H25.5V9.7l.7-.5,4.2-2.8L37,9.5v5.4h0l-.7.3a1.5,1.5,0,0,0-.6,2,1.4,1.4,0,0,0,1.3.9l.7-.2.4-.2.4.3L42,20.9v1.6H40.5a1.5,1.5,0,0,0,0,3ZM21,25.5h1.5V38.3l-.7.5-4.2,2.8L11,38.5V33.1h0l.7-.3a1.5,1.5,0,0,0,.6-2,1.4,1.4,0,0,0-2-.7l-.4.2-.4-.3L6,27.1V25.5H7.5a1.5,1.5,0,0,0,0-3H6V20.9l3.5-2.8.4-.3.4.2.7.2a1.4,1.4,0,0,0,1.3-.9,1.5,1.5,0,0,0-.6-2L11,15h0V9.5l6.6-3.1,4.2,2.8.7.5V22.5H21a1.5,1.5,0,0,0,0,3Z"/>
+        <path fill="currentColor" d="M13.9,9.9a1.8,1.8,0,0,0,0,2.2l2.6,2.5v2.8l-4,4v5.2l4,4v2.8l-2.6,2.5a1.8,1.8,0,0,0,0,2.2,1.5,1.5,0,0,0,1.1.4,1.5,1.5,0,0,0,1.1-.4l3.4-3.5V29.4l-4-4V22.6l4-4V13.4L16.1,9.9A1.8,1.8,0,0,0,13.9,9.9Z"/>
+        <path fill="currentColor" d="M31.5,14.6l2.6-2.5a1.8,1.8,0,0,0,0-2.2,1.8,1.8,0,0,0-2.2,0l-3.4,3.5v5.2l4,4v2.8l-4,4v5.2l3.4,3.5a1.7,1.7,0,0,0,2.2,0,1.8,1.8,0,0,0,0-2.2l-2.6-2.5V30.6l4-4V21.4l-4-4Z"/>
+      </g>
+    </g>
+  </g>
+</svg>]]></icon>
+    <autonomousAgents>
+      <agent>
+        <name>Prototype agent</name>
+        <schedule>0 * * * * ?</schedule>
+        <prompt>You are an autonomous assistant. Reply with JSON only as instructed by the server.</prompt>
+        <scope>project</scope>
+        <llm>openAI</llm>
+        <llmModel>gpt-4o-mini</llmModel>
+        <imageModel>gpt-image-1</imageModel>
+        <manageOtherAgentsHumanTasks>false</manageOtherAgentsHumanTasks>
+      </agent>
+    </autonomousAgents>
+  </configuration>
+</widget>
+
+<!-- ========== Preview Toolbar — descriptor merge: rightSection/widgets; move here to middleSection/widgets for icon next to URL bar ========== -->
+<widget id="craftercms.components.aiassistant.Helper">
+  <plugin id="org.craftercms.aiassistant.studio" type="aiassistant" name="components" file="index.js"/>
+  <configuration ui="IconButton">
+    <agents>
+      <agent>
+        <crafterQAgentId>019c7237-478b-7f98-9a5c-87144c3fb010</crafterQAgentId>
+        <label>Authoring Assistant</label>
+        <llm>openAI</llm>
+        <llmModel>gpt-4o-mini</llmModel>
+        <imageModel>gpt-image-1</imageModel>
+        <enableTools>true</enableTools>
+        <icon id="@mui/icons-material/AutoAwesomeRounded"/>
+        <prompts>
+          <prompt>What can you help me with?</prompt>
+        </prompts>
+      </agent>
+    </agents>
+  </configuration>
+</widget>

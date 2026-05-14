@@ -1,0 +1,29 @@
+---
+description: Do not change product UI/UX unless the user explicitly asks in that task
+alwaysApply: true
+---
+
+# No unauthorized UI or UX changes
+
+The maintainer **does not** want the Studio plugin’s **user-visible or user-interaction behavior** altered unless they **explicitly** ask for that change in the **same** request.
+
+## Treat as UI/UX (do not change without explicit direction)
+
+- Layout, spacing, typography, colors, shadows, borders, responsive breakpoints
+- Wording of labels, help text, empty states, errors, button titles, tooltips
+- Accordion / expand / collapse / panel / dialog / menu **behavior or structure**
+- Adding, removing, or reordering visible controls or sections **for aesthetics or “improvement”**
+- Default open/closed state, cycling vs single-expand, or any interaction pattern the user did not ask to change
+
+## Allowed without a separate “change the UI” request
+
+- **Code organization**: extract types/modules, rename internals, move files — **only if** the rendered DOM, styles, and interactions stay the same (pixel- and behavior-parity).
+- **Build / tooling**: bundler, paths, CI, typings — no user-facing change.
+- **Bug fixes** that **restore** behavior the user described as broken (e.g. agents not listing) — not a redesign.
+- **Features the user asked for** that are **strictly non-UI** (API body fields, server scripts, prompt appendix, data wiring) — touch **only** the files needed for that; **do not** “polish” the chat shell or form panel while doing it.
+
+## Default when the user says “add a feature”
+
+Assume the feature is **functional** (data, API, orchestration, correctness). **Do not** bundle in UI tweaks, copy changes, or layout refactors “while you’re there.”
+
+If a feature seems to require a minimal UI hook, implement the **smallest** change that satisfies the request; if anything visible would change beyond that, **stop and ask** first.
