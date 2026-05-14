@@ -1,0 +1,13 @@
+---
+description: Crafter Studio API baseline for this plugin — support/4.x, not develop-only APIs
+alwaysApply: true
+---
+
+# Studio `support/4.x` API baseline
+
+This plugin targets **Crafter Studio [support/4.x](https://github.com/craftercms/studio/tree/support/4.x)**. When wiring Spring beans or mirroring Studio Java APIs:
+
+- **v2 `contentService`** (`org.craftercms.studio.api.v2.service.content.ContentService`) on 4.x includes reads (e.g. `getContentByCommitId`, `getContentVersionHistory`) but **does not define `write`**.
+- **Repository writes** use **v1** `cstudioContentService`. For **`/site/...`** paths, `StudioToolOperations` uses **8-arg** `writeContent` (form/asset `processContent` pipeline) + `notifyContentEvent` + `SyncFromRepoEvent` — not `writeContentAndNotify`, which on `support/4.x` calls 3-arg `writeContent` and skips `doWriteContent` (git updates but Studio sidebar/item state can lag). Outside `/site/`, prefer `writeContentAndNotify` when present.
+
+Do not assume **`ContentService.write(siteId, path, InputStream, comment)`** exists; that shape is from newer Studio lines (e.g. `develop`), not `support/4.x`.

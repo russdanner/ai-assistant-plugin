@@ -1,0 +1,164 @@
+# This file describes a plugin for use in CrafterCMS
+# The version of the format for this file
+descriptorVersion: 2
+
+# Describe the plugin
+plugin:
+  type: site
+  id: org.craftercms.aiassistant.studio
+  name: AI Assistant for Crafter Studio
+  tags:
+    - authoring
+    - tools
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  description: AI Assistant — Studio chat, form control, tools, and autonomous agents (optional CrafterQ RAG tool).
+  documentation: "https://raw.githubusercontent.com/craftercms/CrafterQ Studio -plugin/main/README.md"
+  website:
+    name: AI Assistant Studio Plugin
+    url: https://github.com/craftercms/crafterQ-plugin
+  media:
+    screenshots:
+      - title: Crafter Studio AI Assistant Plugin
+        description: CrafterCMS Crafter Studio AI Assistant Plugin
+        url: "https://raw.githubusercontent.com/craftercms/CrafterQ Studio -plugin/main/.crafter/logo.png"
+  developer:
+    company:
+      name: CrafterCMS
+      email: info@craftercms.com
+      url: https://craftercms.com
+  build:
+    id: babeb4b44e6a24b5e0481c6ba97901d0b02716c9
+    date: 2024-01-20T00:00:00Z
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  crafterCmsVersions:
+    - major: 4
+      minor: 2
+      patch: 2
+  crafterCmsEditions:
+    - community
+    - enterprise
+  # No install-time plugin parameters — authors configure assistants in Project Tools → AI Assistant Agents
+  # (`config/studio/ai-assistant/agents.json`). Omit `parameters:` so Studio does not prompt for empty params.
+  installation:
+    # Merges into config/studio/administration/site-config-tools.xml so the form engine lists this datasource.
+    # See https://docs.craftercms.org/en/4.2/by-role/developer/composable/extensions/resources/form-data-source-plugins.html
+    - type: form-datasource
+      elementXpath: //datasource/plugin[pluginId='org.craftercms.aiassistant.studio' and name='aiassistant-img-from-url']
+      element:
+        name: datasource
+        children:
+          - name: plugin
+            children:
+              - name: pluginId
+                value: org.craftercms.aiassistant.studio
+                children: []
+              - name: type
+                value: datasource
+                children: []
+              - name: name
+                value: aiassistant-img-from-url
+                children: []
+              - name: filename
+                value: main.js
+                children: []
+          - name: icon
+            children:
+              - name: class
+                value: fa-link
+                children: []
+    # Do not merge Helper or AutonomousAssistants under ToolsPanel (left sidebar) — product policy: no auto-install
+    # there. Access: Preview toolbar (below), Project Tools → AI Assistant, form-engine control, and/or manual ui.xml.
+    # Preview toolbar Helper: merge under rightSection/widgets (Studio wiring walks singleton XML levels;
+    # middleSection/widgets often has only PreviewAddressBar and triggers IndexOutOfBoundsException / bad merge).
+    # The Studio plugin moves the Helper into middleSection/widgets at runtime (see aiAssistantPreviewToolbarUiXmlFix.ts).
+    - type: preview-app
+      parentXpath: //widget[@id='craftercms.components.PreviewToolbar']/configuration/rightSection/widgets
+      elementXpath: //widget[@id='craftercms.components.PreviewToolbar']//widget[@id='craftercms.components.aiassistant.Helper'][.//plugin[@id='org.craftercms.aiassistant.studio']]
+      element:
+        name: widget
+        attributes:
+          - name: id
+            value: craftercms.components.aiassistant.Helper
+        children:
+          - name: plugin
+            attributes:
+              - name: id
+                value: org.craftercms.aiassistant.studio
+              - name: type
+                value: aiassistant
+              - name: name
+                value: components
+              - name: file
+                value: index.js
+          - name: configuration
+            attributes:
+              - name: ui
+                value: IconButton
+            children: []
+          # Chat agents: `config/studio/ai-assistant/agents.json` (Project Tools) or legacy `<agents>` here / in `ui.xml`.
+    - type: preview-app
+      parentXpath: //reference[@id='craftercms.siteTools']
+      elementXpath: //widget[@id='craftercms.components.aiassistant.ProjectToolsConfiguration']
+      element:
+        name: tools
+        children:
+          - name: tool
+            children:
+              - name: title
+                attributes:
+                  - name: id
+                    value: craftercms.aiassistant.projectToolsConfig.title
+                  - name: defaultMessage
+                    value: AI Assistant
+              - name: icon
+                attributes:
+                  - name: id
+                    value: "@mui/icons-material/TuneOutlined"
+              - name: url
+                value: ai-assistant-config
+              - name: widget
+                attributes:
+                  - name: id
+                    value: craftercms.components.aiassistant.ProjectToolsConfiguration
+                children:
+                  - name: plugin
+                    attributes:
+                      - name: id
+                        value: org.craftercms.aiassistant.studio
+                      - name: type
+                        value: aiassistant
+                      - name: name
+                        value: components
+                      - name: file
+                        value: index.js
+    # Merges into config/studio/administration/site-config-tools.xml so the form engine lists this control in the Content Types builder.
+    # See https://docs.craftercms.org/en/4.2/by-role/developer/composable/extensions/resources/form-control-plugins.html
+    - type: form-control
+      elementXpath: //control/plugin[pluginId='org.craftercms.aiassistant.studio' and name='ai-assistant']
+      element:
+        name: control
+        children:
+          - name: plugin
+            children:
+              - name: pluginId
+                value: org.craftercms.aiassistant.studio
+                children: []
+              - name: type
+                value: control
+                children: []
+              - name: name
+                value: ai-assistant
+                children: []
+              - name: filename
+                value: main.js
+                children: []
+          - name: icon
+            children:
+              - name: class
+                value: fa-comments
+                children: []

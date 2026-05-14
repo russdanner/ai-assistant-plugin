@@ -1,0 +1,6 @@
+.idea
+chatgpt-plugin.iml
+
+# Local Studio auth (never commit)
+scripts/.studio-token
+.env.local
