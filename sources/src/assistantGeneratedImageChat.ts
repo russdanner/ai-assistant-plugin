@@ -9,7 +9,8 @@
 
 const MIN_EXTRACT_IMAGE_CHARS = 200;
 
-const DATA_IMAGE_BASE64_IN_TEXT_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
+const DATA_IMAGE_BASE64_IN_TEXT_RE =
+  /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+?(?=(?:\s*data:image\/)|(?:\s*[)\]>])|$)/gi;
 
 /** Provider temp links are almost always HTTPS markdown images. */
 const HTTPS_IMAGE_IN_MARKDOWN_RE = /!\[[^\]]*\]\(\s*<?\s*(https:\/\/[^)\s>]+)\s*>?\s*\)/gi;

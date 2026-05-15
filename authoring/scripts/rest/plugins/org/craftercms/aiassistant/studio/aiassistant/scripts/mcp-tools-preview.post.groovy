@@ -15,7 +15,8 @@ if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
   return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
-String siteId = (params?.siteId ?: body.siteId ?: request.getParameter('siteId'))?.toString()?.trim()
+Map reqBody = (body instanceof Map) ? (Map) body : [:]
+String siteId = (params?.siteId ?: reqBody.get('siteId') ?: request.getParameter('siteId'))?.toString()?.trim()
 if (!siteId) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
   return [ok: false, message: 'Missing siteId']
@@ -27,12 +28,12 @@ if (!ops.httpFetchGloballyEnabled()) {
   return [ok: false, message: 'Outbound HTTP is disabled (aiassistant.httpFetch.enabled=false); MCP preview is unavailable.']
 }
 
-boolean mcpOn = Boolean.TRUE.equals(body.mcpEnabled)
+boolean mcpOn = Boolean.TRUE.equals(reqBody.get('mcpEnabled'))
 if (!mcpOn) {
   return [ok: true, mcpEnabled: false, servers: []]
 }
 
-Object rawServers = body.mcpServers
+Object rawServers = reqBody.get('mcpServers')
 if (!(rawServers instanceof List) || ((List) rawServers).isEmpty()) {
   return [ok: true, mcpEnabled: true, servers: []]
 }

@@ -35,6 +35,21 @@ final class ParallelToolExecutor {
     return defaultValue
   }
 
+  /** Prefer {@code aiassistant.*}; fall back to legacy {@code crafterq.*} JVM keys (compatibility). */
+  private static int resolveIntPropPrimaryOrLegacy(String primaryKey, String legacyKey, int defaultValue, int min, int max) {
+    try {
+      def p = System.getProperty(primaryKey)?.toString()?.trim()
+      if (!p) {
+        p = System.getProperty(legacyKey)?.toString()?.trim()
+      }
+      if (p) {
+        int v = Integer.parseInt(p)
+        return Math.max(min, Math.min(max, v))
+      }
+    } catch (Throwable ignored) {}
+    return defaultValue
+  }
+
   static ThreadPoolExecutor executor() {
     ThreadPoolExecutor ex = INSTANCE
     if (ex != null && !ex.isShutdown()) {
@@ -46,12 +61,30 @@ final class ParallelToolExecutor {
         return ex
       }
       int n = Math.max(1, Runtime.runtime.availableProcessors())
-      int maxPool = resolveIntProp('aiassistant.parallelToolPoolMax', Math.min(32, Math.max(8, n * 2)), 2, 64)
-      int corePool = resolveIntProp('aiassistant.parallelToolPoolCore', Math.min(maxPool, Math.max(2, n)), 1, maxPool)
+      int maxPool = resolveIntPropPrimaryOrLegacy(
+        'aiassistant.parallelToolPoolMax',
+        'crafterq.parallelToolPoolMax',
+        Math.min(32, Math.max(8, n * 2)),
+        2,
+        64
+      )
+      int corePool = resolveIntPropPrimaryOrLegacy(
+        'aiassistant.parallelToolPoolCore',
+        'crafterq.parallelToolPoolCore',
+        Math.min(maxPool, Math.max(2, n)),
+        1,
+        maxPool
+      )
       if (corePool > maxPool) {
         corePool = maxPool
       }
-      int queueCap = resolveIntProp('aiassistant.parallelToolPoolQueue', 512, 16, 4096)
+      int queueCap = resolveIntPropPrimaryOrLegacy(
+        'aiassistant.parallelToolPoolQueue',
+        'crafterq.parallelToolPoolQueue',
+        512,
+        16,
+        4096
+      )
       ThreadFactory tf = { Runnable r ->
         Thread t = new Thread(r, 'aiassistant-parallel-tools-' + THREAD_SEQ.getAndIncrement())
         t.setDaemon(true)

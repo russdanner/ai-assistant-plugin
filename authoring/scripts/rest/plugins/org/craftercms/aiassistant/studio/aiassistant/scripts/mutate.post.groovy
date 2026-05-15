@@ -22,13 +22,14 @@ if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
   return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
-String siteId = (params?.siteId ?: body.siteId ?: request.getParameter('siteId'))?.toString()?.trim()
+Map reqBody = (body instanceof Map) ? (Map) body : [:]
+String siteId = (params?.siteId ?: reqBody.get('siteId') ?: request.getParameter('siteId'))?.toString()?.trim()
 if (!siteId) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
   return [ok: false, message: 'Missing siteId']
 }
 
-String action = body.action?.toString()?.trim()?.toLowerCase() ?: ''
+String action = reqBody.action?.toString()?.trim()?.toLowerCase() ?: ''
 def ops = new StudioToolOperations(request, applicationContext, params)
 String approver = ''
 try {
@@ -47,8 +48,8 @@ try {
     return [ok: true, message: 'Tool prompt cache invalidated']
   }
   if ('writestudioutf8' == action || 'write' == action) {
-    String sp = body.studioPath?.toString()?.trim() ?: ''
-    String utf8 = body.utf8 != null ? body.utf8.toString() : ''
+    String sp = reqBody.studioPath?.toString()?.trim() ?: ''
+    String utf8 = reqBody.utf8 != null ? reqBody.utf8.toString() : ''
     if (!sp.startsWith('/')) {
       sp = "/${sp}"
     }
@@ -64,7 +65,7 @@ try {
     return [ok: true, message: 'Written', studioPath: sp]
   }
   if ('deletestudiorepo' == action || 'delete' == action) {
-    String rp = body.repoPath?.toString()?.trim() ?: ''
+    String rp = reqBody.repoPath?.toString()?.trim() ?: ''
     if (!rp.startsWith('/')) {
       rp = "/${rp}"
     }
@@ -80,7 +81,7 @@ try {
     return [ok: true, message: 'Deleted', repoPath: rp]
   }
   if ('removeusertool' == action) {
-    String tid = body.toolId?.toString()?.trim() ?: ''
+    String tid = reqBody.toolId?.toString()?.trim() ?: ''
     if (!tid) {
       response.status = HttpServletResponse.SC_BAD_REQUEST
       return [ok: false, message: 'Missing toolId']

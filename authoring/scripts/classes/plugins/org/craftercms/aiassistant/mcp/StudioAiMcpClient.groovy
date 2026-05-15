@@ -34,6 +34,9 @@ final class StudioAiMcpClient {
     int cap = 500_000
     try {
       def p = System.getProperty('aiassistant.mcp.maxResponseChars')?.toString()?.trim()
+      if (!p) {
+        p = System.getProperty('crafterq.mcp.maxResponseChars')?.toString()?.trim()
+      }
       if (p) {
         cap = Integer.parseInt(p)
       }
