@@ -14,7 +14,7 @@ plugin:
     major: 1
     minor: 0
     patch: 0
-  description: AI Assistant — Studio chat, form control, tools, and autonomous agents (optional CrafterQ RAG tool).
+  description: AI Assistant — Studio chat, form control, tools, and autonomous agents. Requires a configured LLM provider per agent (see plugin docs).
   documentation: "https://raw.githubusercontent.com/craftercms/CrafterQ Studio -plugin/main/README.md"
   website:
     name: AI Assistant Studio Plugin

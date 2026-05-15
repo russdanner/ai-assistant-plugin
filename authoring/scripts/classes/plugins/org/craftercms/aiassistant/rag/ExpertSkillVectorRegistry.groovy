@@ -57,7 +57,7 @@ class ExpertSkillVectorRegistry {
     Set<String> seen = new HashSet<>()
     int cap = 12
     try {
-      def p = System.getProperty('crafterq.expertSkill.maxSkills')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.expertSkill.maxSkills')?.toString()?.trim()
       if (p) {
         cap = Math.min(32, Math.max(1, Integer.parseInt(p)))
       }
@@ -92,7 +92,7 @@ class ExpertSkillVectorRegistry {
   }
 
   static String resolveEmbeddingModelName() {
-    def p = System.getProperty('crafterq.expertSkill.embeddingModel')?.toString()?.trim()
+    def p = System.getProperty('aiassistant.expertSkill.embeddingModel')?.toString()?.trim()
     return p ?: 'text-embedding-3-small'
   }
 
@@ -164,7 +164,7 @@ class ExpertSkillVectorRegistry {
       }
       int maxChunks = 400
       try {
-        def pc = System.getProperty('crafterq.expertSkill.maxChunks')?.toString()?.trim()
+        def pc = System.getProperty('aiassistant.expertSkill.maxChunks')?.toString()?.trim()
         if (pc) {
           maxChunks = Math.min(2000, Math.max(8, Integer.parseInt(pc)))
         }
@@ -173,7 +173,7 @@ class ExpertSkillVectorRegistry {
       }
       int maxChunkChars = 1800
       try {
-        def pcc = System.getProperty('crafterq.expertSkill.maxChunkChars')?.toString()?.trim()
+        def pcc = System.getProperty('aiassistant.expertSkill.maxChunkChars')?.toString()?.trim()
         if (pcc) {
           maxChunkChars = Math.min(8000, Math.max(512, Integer.parseInt(pcc)))
         }

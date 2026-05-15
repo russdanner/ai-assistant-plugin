@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory
 import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 import plugins.org.craftercms.aiassistant.http.CrafterQBearerUiXmlMerge
-import plugins.org.craftercms.aiassistant.llm.StudioAiLlmKind
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 import plugins.org.craftercms.aiassistant.prompt.ToolPromptsSiteContext
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -32,22 +31,19 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  *   "imageGenerator": optional string — **GenerateImage** backend: blank = built-in Images wire when key+imageModel exist; **none** / **off** / **disabled** omits the tool; **script:{id}** runs **`/scripts/aiassistant/imagegen/{id}/generate.groovy`**. Agent ui.xml **imageGenerator**; merged from site ui.xml like **imageModel** when POST omits it.
  *   "expertSkills": optional JSON array of { name, url, description } — per-agent markdown URLs for {@code QueryExpertGuidance} (Spring AI vector store); normalized server-side.
  *   "translateBatchConcurrency": optional integer 1–64 — parallel {@code TranslateContentBatch} workers when the model omits {@code maxConcurrency}; from agent ui.xml; server default 25 when omitted.
- *   "crafterQBearerTokenEnv": optional string — name of a **Studio host environment variable** holding the CrafterQ JWT; server sets {@code Authorization: Bearer} on outbound api.crafterq.ai calls when {@code System.getenv} returns a non-blank value (preferred over literal token in config).
- *   "crafterQBearerToken": optional string — literal CrafterQ JWT (duplicates ui.xml {@code <crafterQBearerToken>}); used when env is unset or empty. **Discouraged** in versioned config.
- *   **Server merge:** when {@code siteId} + {@code agentId} are present, missing {@code crafterQBearerTokenEnv} / {@code crafterQBearerToken} / {@code imageModel} / {@code llmModel} / {@code imageGenerator} / {@code llm} on the POST body may be copied from the matching {@code <agent>} row in site {@code /ui.xml} before auth and orchestration (so GenerateImage sees the configured image model/backend even if the client omitted it).
  *   "previewToken": optional string — Studio {@code crafterPreview} cookie value; enables {@code GetPreviewHtml} without passing the token on every tool call. When omitted, the server still uses {@code crafterPreview} from the **incoming request cookies** (HttpOnly-safe).
  *   Response:  text/event-stream (SSE) on success, or application/json on error
  */
 def log = LoggerFactory.getLogger('plugins.org.craftercms.aiassistant.stream')
 try {
   def body = AiHttpProxy.parseJsonBody(request)
-  if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+  if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
     response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
     response.setContentType('application/json')
     response.getOutputStream().withWriter('UTF-8') {
       it.write(JsonOutput.toJson([
         message: 'Invalid JSON request body',
-        detail   : body?.get('__crafterqInvalidJsonDetail')?.toString() ?: ''
+        detail   : body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: ''
       ]))
     }
     return null
@@ -75,7 +71,7 @@ try {
   def chatId = body?.chatId?.toString()
   if (siteIdBody) {
     try {
-      request.setAttribute('crafterq.siteId', siteIdBody)
+      request.setAttribute('aiassistant.siteId', siteIdBody)
     } catch (Throwable ignored) {
       // non-mutable request in some contexts
     }
@@ -83,12 +79,12 @@ try {
   def previewTokenBody = body?.previewToken?.toString()?.trim()
   if (previewTokenBody) {
     try {
-      request.setAttribute('crafterq.previewToken', previewTokenBody)
+      request.setAttribute('aiassistant.previewToken', previewTokenBody)
     } catch (Throwable ignored) {}
   }
   def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
   try {
-    request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
+    request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
   } catch (Throwable ignored) {}
   def agentToolsRaw = body?.enabledBuiltInTools
   if (agentToolsRaw instanceof List && !((List) agentToolsRaw).isEmpty()) {
@@ -101,7 +97,7 @@ try {
     }
     if (!wl.isEmpty()) {
       try {
-        request.setAttribute('crafterq.agentEnabledBuiltInTools', wl)
+        request.setAttribute('aiassistant.agentEnabledBuiltInTools', wl)
       } catch (Throwable ignoredWl) {}
     }
   }
@@ -114,12 +110,8 @@ try {
     }
   }
   def llm = body?.llm?.toString()
-  if (body instanceof Map) {
-    AiHttpProxy.installCrafterQBearerFromChatBody(request, (Map) body, llm ?: '')
-  }
-  String llmNorm
   try {
-    llmNorm = AiOrchestration.normalizeLlmProvider(llm)
+    AiOrchestration.normalizeLlmProvider(llm)
   } catch (IllegalArgumentException iae) {
     response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
     response.setContentType('application/json')
@@ -151,7 +143,7 @@ try {
           : Integer.parseInt(tbcRaw.toString().trim())
       tbc = Math.max(1, Math.min(64, tbc))
       try {
-        request.setAttribute('crafterq.translateBatchConcurrency', Integer.valueOf(tbc))
+        request.setAttribute('aiassistant.translateBatchConcurrency', Integer.valueOf(tbc))
       } catch (Throwable ignored2) {}
     } catch (Throwable ignored) {}
   }
@@ -180,16 +172,6 @@ try {
     )
   }
   log.info("STREAM endpoint hit: agentId={} llm={} promptLen={} chatIdPresent={} siteId={} contentPathPresent={} previewTokenResolvedPresent={} formEngineSurface={} formEngineClientJsonApply={} formEngineItemPath={} fullSuppressWritesFallback={} omitTools={} enableToolsRequested={} enableToolsEffective={} trivialNoToolsOverride={}", agentId, llm, (promptForOrchestration ?: '').length(), (chatId != null && chatId.toString().trim().length() > 0), siteIdBody ?: params?.siteId, (previewPathForLog ? true : false), previewTokenResolvedPresent, formEngineForLog, clientJsonApplyForLog, formEngineItemNorm ?: '(none)', fullSuppressWritesFallback, omitTools, enableToolsRequested, enableTools, (enableToolsBeforeTrivial && !enableTools))
-
-  // Default remote hosted chat adapter requires agentId; in-studio Spring AI paths (tools-loop chat, Claude, script) may omit it.
-  if (!agentId && StudioAiLlmKind.isCrafterQRemoteApi(llmNorm)) {
-    response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-    response.setContentType('application/json')
-    response.getOutputStream().withWriter('UTF-8') {
-      it.write(JsonOutput.toJson([message: 'Missing required field: agentId (required for the default remote hosted chat adapter)']))
-    }
-    return null
-  }
 
   String siteForPrompts = (siteIdBody ?: params?.siteId?.toString()?.trim() ?: '')
   ToolPromptsSiteContext.enter(applicationContext, siteForPrompts)

@@ -1,6 +1,5 @@
 package plugins.org.craftercms.aiassistant.tools
 
-import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 
 import org.craftercms.studio.api.v2.event.site.SyncFromRepoEvent
@@ -216,14 +215,14 @@ class StudioToolOperations {
   }
 
   /**
-   * Reads {@code crafterPreview} from the servlet request: first {@code crafterq.previewToken} attribute
+   * Reads {@code crafterPreview} from the servlet request: first {@code aiassistant.previewToken} attribute
    * (POST body from the UI), then the {@code crafterPreview} cookie. HttpOnly cookies are invisible to
    * {@code document.cookie} but are still sent on same-origin POSTs and appear here.
    */
   static String readCrafterPreviewTokenFromServletRequest(def request) {
     if (!request) return ''
     try {
-      def a = request.getAttribute('crafterq.previewToken')
+      def a = request.getAttribute('aiassistant.previewToken')
       if (a != null) {
         def s = a.toString()?.trim()
         if (s) return s
@@ -303,7 +302,7 @@ class StudioToolOperations {
     if ('jsessionid'.equals(n)) return true
     if ('refresh_token'.equals(n)) return true
     try {
-      def extra = System.getProperty('crafterq.preview.fetch.stripCookieNames')?.toString()?.trim()
+      def extra = System.getProperty('aiassistant.preview.fetch.stripCookieNames')?.toString()?.trim()
       if (extra) {
         for (String part : extra.split(',')) {
           def p = part.trim().toLowerCase(Locale.ROOT)
@@ -450,13 +449,9 @@ class StudioToolOperations {
   private final def params
   /** Copy of {@link org.springframework.security.core.context.SecurityContext} from the Studio HTTP request thread. */
   private final def securityContextForTools
-  /** CrafterQ API agent id (same as the Studio widget session) for {@link #consultCrafterQExpert}. */
-  private final String crafterqAgentId
-  /** Max chars for CrafterQ consult prompts (aligned with {@link ExpertChatModel}). */
-  private final int crafterqMaxPromptChars
   /**
    * Studio Experience Builder preview cookie value ({@code crafterPreview}), set on the HTTP request as attribute
-   * {@code crafterq.previewToken} by the chat/stream REST scripts when the UI POSTs it.
+   * {@code aiassistant.previewToken} by the chat/stream REST scripts when the UI POSTs it.
    */
   private final String crafterqPreviewToken
   /**
@@ -483,16 +478,12 @@ class StudioToolOperations {
     def request,
     def applicationContext,
     def params = null,
-    def securityContextForTools = null,
-    String crafterqAgentId = null,
-    int crafterqMaxPromptChars = 1000
+    def securityContextForTools = null
   ) {
     this.request = request
     this.applicationContext = applicationContext
     this.params = params
     this.securityContextForTools = securityContextForTools
-    this.crafterqAgentId = crafterqAgentId?.toString()?.trim() ?: ''
-    this.crafterqMaxPromptChars = (crafterqMaxPromptChars >= 256) ? crafterqMaxPromptChars : 1000
     String frozenCookie = ''
     try {
       frozenCookie = request?.getHeader('Cookie')?.toString()?.trim() ?: ''
@@ -527,37 +518,6 @@ class StudioToolOperations {
     applicationContext
   }
 
-  /**
-   * True when the Studio agent row included a non-empty {@code <crafterQAgentId>} (CrafterQ API agent id). When false,
-   * {@link #consultCrafterQExpert} cannot call upstream CrafterQ and the OpenAI tool should not be registered.
-   */
-  boolean isCrafterqAgentIdPresent() {
-    return crafterqAgentId != null && !crafterqAgentId.isEmpty()
-  }
-
-  /**
-   * CrafterQ SaaS agent UUID from the Studio agent row (stream {@code agentId} / {@code <crafterQAgentId>}) — for system prompts.
-   */
-  String crafterqApiAgentId() {
-    (crafterqAgentId ?: '').toString()
-  }
-
-  private static java.time.Instant cqParseIsoInstantUtc(String raw) {
-    String t = (raw ?: '').toString().trim()
-    if (!t) {
-      throw new IllegalArgumentException('empty date')
-    }
-    try {
-      return java.time.Instant.parse(t)
-    } catch (java.time.format.DateTimeParseException ignored) {
-      // allow date-only YYYY-MM-DD
-      if (!t.contains('T')) {
-        return java.time.LocalDate.parse(t).atStartOfDay(java.time.ZoneOffset.UTC).toInstant()
-      }
-      throw new IllegalArgumentException("Invalid ISO-8601 instant: ${t}")
-    }
-  }
-
   private Object resolveRequiredBean(String name, String errorMessage) {
     def s = null
     try {
@@ -567,233 +527,6 @@ class StudioToolOperations {
       throw new IllegalStateException(errorMessage)
     }
     return s
-  }
-
-  private int crafterQConsultEffectiveCap() {
-    int margin = 120
-    return Math.max(200, crafterqMaxPromptChars - margin)
-  }
-
-  private String enforceCrafterQConsultCap(String body) {
-    if (body == null) return ''
-    int cap = crafterQConsultEffectiveCap()
-    String s = body.trim()
-    if (s.length() <= cap) return s
-    return s.substring(0, Math.max(1, cap - 12)) + '...[trim]'
-  }
-
-  /**
-   * One-shot CrafterQ (RAG) call for subject-matter / content expertise. Does not use chatId so consults stay isolated
-   * from the author's main CrafterQ thread.
-   */
-  Map consultCrafterQExpert(String question, String optionalContext = null) {
-    def q = (question ?: '').toString().trim()
-    if (!q) {
-      throw new IllegalArgumentException('Missing required field: question')
-    }
-    def agent = crafterqAgentId
-    if (!agent) {
-      return [
-        ok     : false,
-        error  : true,
-        tool   : 'ConsultCrafterQExpert',
-        message: 'No CrafterQ agentId is available for this session; the author must use an agent configured in the CrafterQ plugin.',
-        hint   : 'Continue with CMS tools only, or ask the author to verify agent configuration.'
-      ]
-    }
-    def ctx = (optionalContext ?: '').toString().trim()
-    StringBuilder body = new StringBuilder(ToolPrompts.CRAFTERQ_SME_CONSULT_PREFIX.length() + q.length() + (ctx ? ctx.length() : 0) + 64)
-    body.append(ToolPrompts.CRAFTERQ_SME_CONSULT_PREFIX)
-    if (ctx) {
-      body.append('Author/context notes:\n').append(ctx).append('\n\n')
-    }
-    body.append('Question for the expert:\n').append(q)
-    String prompt = enforceCrafterQConsultCap(body.toString())
-
-    def payload = [prompt: prompt]
-    try {
-      /** Same contract as browser: {@code ?stream=true&agentId=…}, SSE body; do not use non-stream POST (upstream may 500). */
-      String text = AiHttpProxy.postCrafterQStreamChat(agent, payload, request)
-      if (text == null) text = ''
-      return [
-        tool         : 'ConsultCrafterQExpert',
-        ok           : true,
-        expertAnswer : text.toString(),
-        charCount    : text.toString().length(),
-        promptChars  : prompt.length(),
-        hint         : 'Use this SME guidance when drafting or editing CMS content; call GetContent / WriteContent (or update_* then WriteContent) to apply changes in the repository.'
-      ]
-    } catch (Throwable t) {
-      log.warn('consultCrafterQExpert failed: {}', t.toString())
-      return [
-        ok     : false,
-        error  : true,
-        tool   : 'ConsultCrafterQExpert',
-        message: (t.message ?: t.toString()),
-        hint   : 'CrafterQ API may be unavailable or the agent misconfigured. You may proceed with best-effort content using CMS tools only.'
-      ]
-    }
-  }
-
-  /**
-   * Parses CrafterQ GET failures so tool JSON can steer authors (401/403 are almost always identity).
-   */
-  private static Map crafterqChatApiHttpFailureHint(Throwable t, def servletRequest = null) {
-    String msg = (t?.message ?: t?.toString() ?: '').toString()
-    Map diag = [:]
-    try {
-      if (servletRequest != null) {
-        String tok = servletRequest.getAttribute(AiHttpProxy.CRAFTERRQ_API_BEARER_TOKEN_ATTR)?.toString()?.trim()
-        diag.put('crafterQBearerInstalledFromPost', Boolean.valueOf(tok != null && tok.length() > 0))
-        diag.put('crafterQBearerPreview', tok ? AiHttpProxy.crafterQBearerLogPreview(tok) : '(none)')
-        String cq = servletRequest.getHeader('X-CrafterQ-Chat-User')?.toString()?.trim()
-        diag.put('xCrafterQChatUserPresent', Boolean.valueOf(cq != null && cq.length() > 0))
-      }
-    } catch (Throwable ignoredDiag) {
-    }
-    if (msg.contains('HTTP 401')) {
-      Map m = new LinkedHashMap()
-      m.put('httpStatus', 401)
-      m.put(
-        'authHint',
-        'CrafterQ returned HTTP 401 (unauthorized). List/get hosted chats need CrafterQ identity on this Studio request: ' +
-        '(1) Sign into CrafterQ in the Studio AI widget so the client sends **X-CrafterQ-Chat-User** on each stream/chat POST, ' +
-        'or (2) set **crafterQBearerTokenEnv** (Studio host env var holding a JWT) or **crafterQBearerToken** on the agent / stream body ' +
-        'so the server sends **Authorization: Bearer …** to api.crafterq.ai. Studio **Authorization** is never forwarded to CrafterQ.'
-      )
-      m.putAll(diag)
-      return m
-    }
-    if (msg.contains('HTTP 403')) {
-      Map m = new LinkedHashMap()
-      m.put('httpStatus', 403)
-      m.put(
-        'authHint',
-        'CrafterQ returned HTTP 403 (forbidden). Identity was sent but is not allowed for this agent or operation—check token scope and agent access in CrafterQ.'
-      )
-      m.putAll(diag)
-      return m
-    }
-    return [:]
-  }
-
-  /**
-   * GET {@code https://api.crafterq.ai/v1/agents/{agentId}/chats} with {@code startDate}, {@code endDate}, and optional {@code limit}.
-   * Uses the same forwarded headers as hosted chat ({@link AiHttpProxy#getJson}) — authors must have CrafterQ identity
-   * available in the Studio session (e.g. {@code X-CrafterQ-Chat-User} from the widget).
-   */
-  Map listCrafterQAgentChats(Map input) {
-    Map m = (input instanceof Map) ? (Map) input : [:]
-    String agent = (m.agentId ?: m.agent_id ?: crafterqAgentId)?.toString()?.trim()
-    if (!agent) {
-      return [
-        ok     : false,
-        tool   : 'ListCrafterQAgentChats',
-        message: 'Missing agentId (no session CrafterQ agent and none passed in tool args).'
-      ]
-    }
-    String sdRaw = (m.startDate ?: m.start_date)?.toString()?.trim()
-    String edRaw = (m.endDate ?: m.end_date)?.toString()?.trim()
-    java.time.Instant now = java.time.Instant.now()
-    java.time.Instant startI
-    java.time.Instant endI
-    if (!sdRaw && !edRaw) {
-      endI = now
-      startI = endI.minusSeconds(30L * 24 * 3600)
-    } else if (sdRaw && edRaw) {
-      startI = cqParseIsoInstantUtc(sdRaw)
-      endI = cqParseIsoInstantUtc(edRaw)
-    } else if (sdRaw) {
-      startI = cqParseIsoInstantUtc(sdRaw)
-      endI = now
-    } else {
-      endI = cqParseIsoInstantUtc(edRaw)
-      startI = endI.minusSeconds(30L * 24 * 3600)
-    }
-    if (startI.isAfter(endI)) {
-      java.time.Instant swap = startI
-      startI = endI
-      endI = swap
-    }
-    java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ISO_INSTANT
-    String startDate = fmt.format(startI)
-    String endDate = fmt.format(endI)
-    int lim = 20
-    try {
-      if (m.limit != null) {
-        lim = (m.limit instanceof Number) ? ((Number) m.limit).intValue() : Integer.parseInt(m.limit.toString().trim())
-      }
-    } catch (Throwable ignored) {
-      lim = 20
-    }
-    lim = Math.max(1, Math.min(100, lim))
-    String url =
-      "https://api.crafterq.ai/v1/agents/${URLEncoder.encode(agent, 'UTF-8')}/chats" +
-      "?startDate=${URLEncoder.encode(startDate, 'UTF-8')}" +
-      "&endDate=${URLEncoder.encode(endDate, 'UTF-8')}" +
-      "&limit=${lim}"
-    try {
-      def json = AiHttpProxy.getJson(url, request)
-      return [
-        tool     : 'ListCrafterQAgentChats',
-        ok       : true,
-        agentId  : agent,
-        startDate: startDate,
-        endDate  : endDate,
-        limit    : lim,
-        defaultedLast30DaysUtc: (!sdRaw && !edRaw),
-        data     : json,
-        hint     :
-          'Inspect returned items for feedback fields (e.g. dislikes). Call GetCrafterQAgentChat with a chatId for full message threads.'
-      ]
-    } catch (Throwable t) {
-      log.warn('listCrafterQAgentChats failed: {}', t.toString())
-      Map err = new LinkedHashMap()
-      err.put('ok', false)
-      err.put('tool', 'ListCrafterQAgentChats')
-      err.put('message', (t.message ?: t.toString()))
-      err.putAll(crafterqChatApiHttpFailureHint(t, request))
-      return err
-    }
-  }
-
-  /**
-   * GET {@code https://api.crafterq.ai/v1/agents/{agentId}/chats/{chatId}} for one conversation payload (messages, metadata).
-   */
-  Map getCrafterQAgentChat(Map input) {
-    Map m = (input instanceof Map) ? (Map) input : [:]
-    String chatId = (m.chatId ?: m.chat_id)?.toString()?.trim()
-    if (!chatId) {
-      throw new IllegalArgumentException('Missing required field: chatId')
-    }
-    String agent = (m.agentId ?: m.agent_id ?: crafterqAgentId)?.toString()?.trim()
-    if (!agent) {
-      return [
-        ok     : false,
-        tool   : 'GetCrafterQAgentChat',
-        message: 'Missing agentId (no session CrafterQ agent and none passed in tool args).'
-      ]
-    }
-    String url =
-      "https://api.crafterq.ai/v1/agents/${URLEncoder.encode(agent, 'UTF-8')}/chats/${URLEncoder.encode(chatId, 'UTF-8')}"
-    try {
-      def json = AiHttpProxy.getJson(url, request)
-      return [
-        tool   : 'GetCrafterQAgentChat',
-        ok     : true,
-        agentId: agent,
-        chatId : chatId,
-        data   : json
-      ]
-    } catch (Throwable t) {
-      log.warn('getCrafterQAgentChat failed: {}', t.toString())
-      Map err = new LinkedHashMap()
-      err.put('ok', false)
-      err.put('tool', 'GetCrafterQAgentChat')
-      err.put('message', (t.message ?: t.toString()))
-      err.putAll(crafterqChatApiHttpFailureHint(t, request))
-      return err
-    }
   }
 
   /** Username of the authenticated Studio user (same context as permission checks). */
@@ -816,7 +549,7 @@ class StudioToolOperations {
    */
   int resolveTranslateBatchDefaultMaxConcurrency() {
     try {
-      def v = request?.getAttribute('crafterq.translateBatchConcurrency')
+      def v = request?.getAttribute('aiassistant.translateBatchConcurrency')
       if (v instanceof Number) {
         int n = ((Number) v).intValue()
         return Math.max(1, Math.min(64, n))
@@ -854,7 +587,7 @@ class StudioToolOperations {
     def tool = (fromTool ?: '').toString().trim()
     def reqSite = ''
     try {
-      reqSite = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
+      reqSite = request?.getAttribute('aiassistant.siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('crafterSite')?.toString()?.trim() ?: ''
       if (!reqSite && params != null) {
@@ -2298,7 +2031,7 @@ class StudioToolOperations {
       String nameFromUrl = scheme == 'data' ? '' : suggestedFileNameFromUrlPath(parsed.path ?: '')
       String baseName = (optionalFileName ?: '').toString().trim()
       if (!baseName) {
-        baseName = nameFromUrl ?: "crafterq-import${ext}"
+        baseName = nameFromUrl ?: "aiassistant-import${ext}"
       }
       baseName = sanitizeImageFileName(baseName, ext)
       if (!baseName.contains('.')) {
@@ -2451,7 +2184,7 @@ class StudioToolOperations {
 
   private int previewFetchMaxChars() {
     try {
-      def p = System.getProperty('crafterq.preview.fetch.maxChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.preview.fetch.maxChars')?.toString()?.trim()
       if (p) {
         int n = Integer.parseInt(p)
         if (n >= 4096 && n <= 2_000_000) return n
@@ -2469,7 +2202,7 @@ class StudioToolOperations {
     } catch (Throwable ignored) {}
     if (srv && h == srv) return true
     if (h == 'localhost' || h == '127.0.0.1' || h == '[::1]') return true
-    def extra = System.getProperty('crafterq.preview.fetch.allowedHosts')?.toString()?.trim()
+    def extra = System.getProperty('aiassistant.preview.fetch.allowedHosts')?.toString()?.trim()
     if (extra) {
       for (String part : extra.split(',')) {
         def p = part.trim().toLowerCase(Locale.ROOT)
@@ -2482,7 +2215,7 @@ class StudioToolOperations {
   /**
    * GET an absolute preview URL with the {@code crafterPreview} cookie so Engine returns rendered markup.
    * Host must match the Studio request server name, {@code localhost}, {@code 127.0.0.1}, {@code [::1]}, or
-   * {@code crafterq.preview.fetch.allowedHosts} (comma-separated). Redirects are not followed.
+   * {@code aiassistant.preview.fetch.allowedHosts} (comma-separated). Redirects are not followed.
    */
   Map fetchPreviewRenderedHtml(String absoluteUrl, String toolPreviewToken, String siteIdOpt) {
     def urlStr = (absoluteUrl ?: '').toString().trim()
@@ -2534,7 +2267,7 @@ class StudioToolOperations {
         ok     : false,
         action : 'get_preview_html',
         message:
-          "Host '${host}' is not allowed for preview fetch. Allowed: this Studio server name (${request?.getServerName()}), localhost, 127.0.0.1, [::1], or JVM crafterq.preview.fetch.allowedHosts (comma-separated)."
+          "Host '${host}' is not allowed for preview fetch. Allowed: this Studio server name (${request?.getServerName()}), localhost, 127.0.0.1, [::1], or JVM aiassistant.preview.fetch.allowedHosts (comma-separated)."
       ]
     }
     URL connUrl
@@ -2564,7 +2297,7 @@ class StudioToolOperations {
           conn.setRequestProperty('User-Agent', ua)
         }
         // Studio Bearer JWT is not valid Engine auth; forwarding it often yields 401 on preview GET.
-        if (Boolean.parseBoolean(System.getProperty('crafterq.preview.fetch.forwardAuthorization', 'false'))) {
+        if (Boolean.parseBoolean(System.getProperty('aiassistant.preview.fetch.forwardAuthorization', 'false'))) {
           def authz = request?.getHeader('Authorization')?.toString()?.trim()
           if (authz) {
             conn.setRequestProperty('Authorization', authz)
@@ -2634,7 +2367,7 @@ class StudioToolOperations {
         message   : status >= 200 && status < 300
           ? 'Fetched preview HTML.'
           : (status == 401
-            ? 'HTTP 401 — Engine rejected preview fetch. The plugin sends x-crafter-preview, crafterPreview cookie/query (re-encoded), and crafterSite. Authorization is not forwarded unless JVM crafterq.preview.fetch.forwardAuthorization=true. Ensure previewToken is in the CrafterQ POST body and the author has an active XB preview session.'
+            ? 'HTTP 401 — Engine rejected preview fetch. The plugin sends x-crafter-preview, crafterPreview cookie/query (re-encoded), and crafterSite. Authorization is not forwarded unless JVM aiassistant.preview.fetch.forwardAuthorization=true. Ensure previewToken is in the CrafterQ POST body and the author has an active XB preview session.'
             : "HTTP ${status} — body may be an error page.")
       ]
     } catch (Throwable t) {
@@ -2655,16 +2388,16 @@ class StudioToolOperations {
   }
 
   /**
-   * When {@code false} (JVM {@code crafterq.httpFetch.enabled=false}), {@link #fetchHttpUrl} refuses all requests.
+   * When {@code false} (JVM {@code aiassistant.httpFetch.enabled=false}), {@link #fetchHttpUrl} refuses all requests.
    */
   boolean httpFetchGloballyEnabled() {
-    !'false'.equalsIgnoreCase(System.getProperty('crafterq.httpFetch.enabled', 'true')?.toString()?.trim())
+    !'false'.equalsIgnoreCase(System.getProperty('aiassistant.httpFetch.enabled', 'true')?.toString()?.trim())
   }
 
   private static int httpFetchMaxChars(Integer toolRequested) {
     int cap = 400_000
     try {
-      def p = System.getProperty('crafterq.httpFetch.maxChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.httpFetch.maxChars')?.toString()?.trim()
       if (p) {
         cap = Integer.parseInt(p)
       }
@@ -2746,11 +2479,11 @@ class StudioToolOperations {
   }
 
   /**
-   * When JVM {@code crafterq.httpFetch.allowedHostSuffixes} is set (comma-separated), host must equal a suffix or be a subdomain of it.
+   * When JVM {@code aiassistant.httpFetch.allowedHostSuffixes} is set (comma-separated), host must equal a suffix or be a subdomain of it.
    * @return empty string if allowed, otherwise an error message
    */
   private static String httpFetchAllowedSuffixesViolation(String host) {
-    def prop = System.getProperty('crafterq.httpFetch.allowedHostSuffixes')?.toString()?.trim()
+    def prop = System.getProperty('aiassistant.httpFetch.allowedHostSuffixes')?.toString()?.trim()
     if (!prop) {
       return ''
     }
@@ -2770,7 +2503,7 @@ class StudioToolOperations {
         return ''
       }
     }
-    return "Host '${host}' is not in crafterq.httpFetch.allowedHostSuffixes (${prop})."
+    return "Host '${host}' is not in aiassistant.httpFetch.allowedHostSuffixes (${prop})."
   }
 
   /**
@@ -2780,8 +2513,8 @@ class StudioToolOperations {
    * @return {@code null} if the URL is allowed, otherwise a short error message suitable for logs or tool JSON
    */
   static String validateOutboundHttpUrlForSsrf(String absoluteUrl) {
-    if ('false'.equalsIgnoreCase(System.getProperty('crafterq.httpFetch.enabled', 'true')?.toString()?.trim())) {
-      return 'HTTP outbound is disabled (JVM crafterq.httpFetch.enabled=false).'
+    if ('false'.equalsIgnoreCase(System.getProperty('aiassistant.httpFetch.enabled', 'true')?.toString()?.trim())) {
+      return 'HTTP outbound is disabled (JVM aiassistant.httpFetch.enabled=false).'
     }
     URI start
     try {
@@ -2898,18 +2631,18 @@ class StudioToolOperations {
   /**
    * GET an http(s) URL and return response body as text (HTML, CSS, JSON, etc.) for reference / redesign workflows.
    * <p>SSRF: only public hosts; blocks loopback, link-local, site-local, CGNAT, ULA; optional
-   * {@code crafterq.httpFetch.allowedHostSuffixes}. Redirects are followed manually (max 5) with validation each hop.
+   * {@code aiassistant.httpFetch.allowedHostSuffixes}. Redirects are followed manually (max 5) with validation each hop.
    * Does not forward Studio cookies or Authorization.</p>
    *
    * @param absoluteUrl absolute http(s) URL
-   * @param maxCharsOpt optional cap on returned characters (still bounded by JVM {@code crafterq.httpFetch.maxChars})
+   * @param maxCharsOpt optional cap on returned characters (still bounded by JVM {@code aiassistant.httpFetch.maxChars})
    */
   Map fetchHttpUrl(String absoluteUrl, Integer maxCharsOpt) {
     if (!httpFetchGloballyEnabled()) {
       return [
         ok    : false,
         action: 'fetch_http_url',
-        message: 'HTTP URL fetch is disabled (JVM crafterq.httpFetch.enabled=false).'
+        message: 'HTTP URL fetch is disabled (JVM aiassistant.httpFetch.enabled=false).'
       ]
     }
     def urlStr = (absoluteUrl ?: '').toString().trim()

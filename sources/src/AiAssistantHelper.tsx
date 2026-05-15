@@ -355,8 +355,6 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
       ? (iceChatCfg.expertSkills as ExpertSkillConfig[])
       : undefined;
     const iceTranslateBatch = extractPositiveInt(iceRaw as Record<string, unknown>, 1, 64, 'translateBatchConcurrency', 'translate_batch_concurrency');
-    const iceBearerEnv = (iceRaw.crafterQBearerTokenEnv as string | undefined)?.trim();
-    const iceBearerTok = (iceRaw.crafterQBearerToken as string | undefined)?.trim();
     return (
       <AiAssistantIceChatShell>
         <AiAssistantChat
@@ -372,8 +370,6 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
           configPrompts={configPrompts}
           embedTarget="icePanel"
           {...(iceTranslateBatch != null ? { translateBatchConcurrency: iceTranslateBatch } : {})}
-          {...(iceBearerEnv ? { crafterQBearerTokenEnv: iceBearerEnv } : {})}
-          {...(iceBearerTok ? { crafterQBearerToken: iceBearerTok } : {})}
         />
       </AiAssistantIceChatShell>
     );
@@ -520,12 +516,6 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
                         configPrompts={d.agent.prompts}
                         {...(d.agent.translateBatchConcurrency != null
                           ? { translateBatchConcurrency: d.agent.translateBatchConcurrency }
-                          : {})}
-                        {...(d.agent.crafterQBearerTokenEnv?.trim()
-                          ? { crafterQBearerTokenEnv: d.agent.crafterQBearerTokenEnv.trim() }
-                          : {})}
-                        {...(d.agent.crafterQBearerToken?.trim()
-                          ? { crafterQBearerToken: d.agent.crafterQBearerToken.trim() }
                           : {})}
                       />
                     </Box>

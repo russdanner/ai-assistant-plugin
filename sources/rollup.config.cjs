@@ -91,6 +91,7 @@ module.exports = [
       json(),
       replace({
         preventAssignment: true,
+        'process.env.NODE_ENV': JSON.stringify('production'),
         'import.meta.env.MODE': JSON.stringify('production'),
         'import.meta.env.NODE_ENV': JSON.stringify('production'),
         'import.meta.env.VITE_OPENAI_API_KEY': `"${envFile.VITE_OPENAI_API_KEY}"`
@@ -138,6 +139,7 @@ module.exports = [
       json(),
       replace({
         preventAssignment: true,
+        'process.env.NODE_ENV': JSON.stringify('production'),
         'import.meta.env.MODE': JSON.stringify('production'),
         'import.meta.env.NODE_ENV': JSON.stringify('production'),
         'import.meta.env.VITE_OPENAI_API_KEY': `"${envFile.VITE_OPENAI_API_KEY}"`

@@ -1272,15 +1272,11 @@
             ...configArg,
             strings: {
                 ...mergedStrings,
-                openAiAssistant: mergedStrings.openAiAssistant ??
-                    mergedStrings.crafterqDialog ??
-                    'Open AI Assistant',
-                aiAssistantShortcuts: mergedStrings.aiAssistantShortcuts ??
-                    mergedStrings.crafterqShortcuts ??
-                    'AI Shortcuts'
+                openAiAssistant: mergedStrings.openAiAssistant ?? 'Open AI Assistant',
+                aiAssistantShortcuts: mergedStrings.aiAssistantShortcuts ?? 'AI Shortcuts'
             }
         };
-        const userOpen = configArg?.onOpenAiAssistant ?? configArg?.oncrafterqDialog;
+        const userOpen = configArg?.onOpenAiAssistant;
         if (!userOpen || !configArg?.onShortcutClick) {
             const defaultHandler = createDefaultHandler(instanceConfig);
             instanceConfig.onOpenAiAssistant = defaultHandler;
@@ -1306,7 +1302,7 @@
                 instanceConfig.onOpenAiAssistant(editor, api, messages);
             }
         });
-        editor.ui.registry.addMenuButton('crafterqshortcuts', {
+        editor.ui.registry.addMenuButton('aiassistantShortcuts', {
             icon: 'ai-prompt',
             tooltip: instanceConfig.strings.aiAssistantShortcuts,
             fetch(callback) {

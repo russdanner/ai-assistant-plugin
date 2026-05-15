@@ -33,7 +33,7 @@ final class StudioAiMcpClient {
   private static int maxMcpResponseChars() {
     int cap = 500_000
     try {
-      def p = System.getProperty('crafterq.mcp.maxResponseChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.mcp.maxResponseChars')?.toString()?.trim()
       if (p) {
         cap = Integer.parseInt(p)
       }
@@ -316,7 +316,7 @@ final class StudioAiMcpClient {
       throw new IllegalStateException("MCP url blocked for server '${sid}': ${gate}")
     }
     if (ops != null && !ops.httpFetchGloballyEnabled()) {
-      throw new IllegalStateException('MCP disabled: crafterq.httpFetch.enabled=false')
+      throw new IllegalStateException('MCP disabled: aiassistant.httpFetch.enabled=false')
     }
     int readTimeout = DEFAULT_READ_TIMEOUT_MS
     try {

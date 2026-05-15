@@ -4,8 +4,7 @@ package plugins.org.craftercms.aiassistant.prompt
  * Keys accepted for site overrides {@code /scripts/aiassistant/prompts/&lt;KEY&gt;.md}
  * (must match {@link ToolPrompts} {@code p('KEY', ...)} usages).
  * <p>Prefixes: {@code GENERAL_} (cross-cutting Studio / LLM policy), {@code CMS_CONTENT_} (repository content,
- * translate, preview, publish), {@code CMS_DEVELOPMENT_} (templates, content types, analyze), {@code CRAFTERQ_}
- * (CrafterQ SME and hosted-chat tool prompts).</p>
+ * translate, preview, publish), {@code CMS_DEVELOPMENT_} (templates, content types, analyze).</p>
  * <p>When adding a new {@code p('NEW_KEY', ...)} in {@link ToolPrompts}, append here.</p>
  */
 final class ToolPromptsOverrideCatalog {
@@ -44,14 +43,6 @@ final class ToolPromptsOverrideCatalog {
     'CMS_DEVELOPMENT_UPDATE_CONTENT_TYPE_FORM_ENGINE',
     'CMS_DEVELOPMENT_UPDATE_TEMPLATE',
     'CMS_DEVELOPMENT_UPDATE_TEMPLATE_FORM_ENGINE',
-    'CRAFTERQ_COMPACT_INSTRUCTIONS',
-    'CRAFTERQ_CONTENT_SYSTEM',
-    'CRAFTERQ_DESC_CONSULT_CRAFTERQ_EXPERT',
-    'CRAFTERQ_DESC_GET_AGENT_CHAT',
-    'CRAFTERQ_DESC_LIST_AGENT_CHATS',
-    'CRAFTERQ_MINIMAL_HEADER',
-    'CRAFTERQ_SME_CONSULT_PREFIX',
-    'CRAFTERQ_TRANSCRIPT_CONTEXT',
     'GENERAL_DESC_FETCH_HTTP_URL',
     'GENERAL_DESC_GENERATE_TEXT_NO_TOOLS',
     'GENERAL_DESC_QUERY_EXPERT_GUIDANCE',

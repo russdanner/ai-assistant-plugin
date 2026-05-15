@@ -46,14 +46,14 @@ final class ParallelToolExecutor {
         return ex
       }
       int n = Math.max(1, Runtime.runtime.availableProcessors())
-      int maxPool = resolveIntProp('crafterq.parallelToolPoolMax', Math.min(32, Math.max(8, n * 2)), 2, 64)
-      int corePool = resolveIntProp('crafterq.parallelToolPoolCore', Math.min(maxPool, Math.max(2, n)), 1, maxPool)
+      int maxPool = resolveIntProp('aiassistant.parallelToolPoolMax', Math.min(32, Math.max(8, n * 2)), 2, 64)
+      int corePool = resolveIntProp('aiassistant.parallelToolPoolCore', Math.min(maxPool, Math.max(2, n)), 1, maxPool)
       if (corePool > maxPool) {
         corePool = maxPool
       }
-      int queueCap = resolveIntProp('crafterq.parallelToolPoolQueue', 512, 16, 4096)
+      int queueCap = resolveIntProp('aiassistant.parallelToolPoolQueue', 512, 16, 4096)
       ThreadFactory tf = { Runnable r ->
-        Thread t = new Thread(r, 'crafterq-parallel-tools-' + THREAD_SEQ.getAndIncrement())
+        Thread t = new Thread(r, 'aiassistant-parallel-tools-' + THREAD_SEQ.getAndIncrement())
         t.setDaemon(true)
         t.setUncaughtExceptionHandler(
           new Thread.UncaughtExceptionHandler() {

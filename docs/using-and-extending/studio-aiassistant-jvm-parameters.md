@@ -32,11 +32,12 @@ Use this file when you need to tune timeouts, logging, or defaults that are not 
 
 ---
 
-## Chat Orchestration & CrafterQ (`crafterq.*`)
+## Chat orchestration (`crafterq.*`)
+
+Historical note: property names use the **`crafterq.*`** prefix; they apply to **Spring AI tools-loop** orchestration in Studio, not to a remote hosted chat service.
 
 | Property | Default / notes |
 |----------|-----------------|
-| **`crafterq.maxPromptChars`** | Caps hosted CrafterQ-style prompts (e.g. **`ConsultCrafterQExpert`**, remote **`crafterQ`** adapter compaction). Default **1000**. |
 | **`crafterq.chatFluxAwaitMs`** | Max wait for Spring AI chat flux / tool **Future** (ms). Default **300000**; allowed range **120000–600000** in implementation. |
 | **`crafterq.openai.restReadTimeoutMs`** | Per-request read timeout for sync OpenAI **RestClient** `chat/completions` (ms). Tied to orchestration budget + margin. |
 | **`crafterq.openai.sseWaitHeartbeatMs`** | SSE / wait tuning inside **`AiOrchestration`**. |

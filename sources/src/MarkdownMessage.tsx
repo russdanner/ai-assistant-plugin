@@ -49,6 +49,126 @@ function newBlobRefId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+/** End index (exclusive) of a {@code data:image/...;base64,...} run starting at {@code start}. */
+function dataImageBase64RunEnd(input: string, start: number): number {
+  const head = input.slice(start);
+  const m = /^data:image\/[a-z0-9.+-]+;base64,/i.exec(head);
+  if (!m) {
+    return Math.min(input.length, start + 1);
+  }
+  let i = start + m[0].length;
+  while (i < input.length) {
+    const c = input[i]!;
+    if (/[A-Za-z0-9+/=]/.test(c)) {
+      i++;
+    } else if (/\s/.test(c)) {
+      // PEM-style wrapping / JSON pretty-print — still part of the payload until non-base64 char.
+      i++;
+    } else {
+      break;
+    }
+  }
+  return i;
+}
+
+/**
+ * Strip whitespace inside {@code data:image/*;base64,...} payloads so markdown parsers see one contiguous URL and
+ * {@link StudioDraggableImage} gets valid base64 for {@code atob}.
+ */
+function compactAllDataImageBase64Runs(text: string): string {
+  if (!text || text.indexOf('data:image') < 0) {
+    return text;
+  }
+  const lower = text.toLowerCase();
+  const parts: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf('data:image/', i);
+    if (idx < 0) {
+      parts.push(text.slice(i));
+      break;
+    }
+    parts.push(text.slice(i, idx));
+    const head = text.slice(idx);
+    const m = /^data:image\/[a-z0-9.+-]+;base64,/i.exec(head);
+    if (!m) {
+      parts.push(text[idx]!);
+      i = idx + 1;
+      continue;
+    }
+    const dataStart = idx + m[0].length;
+    let j = dataStart;
+    while (j < text.length) {
+      const c = text[j]!;
+      if (/[A-Za-z0-9+/=]/.test(c)) {
+        j++;
+      } else if (/\s/.test(c)) {
+        j++;
+      } else {
+        break;
+      }
+    }
+    parts.push(text.slice(idx, dataStart) + text.slice(dataStart, j).replace(/\s+/g, ''));
+    i = j;
+  }
+  return parts.join('');
+}
+
+function isDataImageUrlInsideMarkdownImageDestination(input: string, startIdx: number): boolean {
+  const lookback = input.slice(Math.max(0, startIdx - 12), startIdx);
+  return /\]\(\s*<?\s*$/i.test(lookback);
+}
+
+/**
+ * Models and the server sometimes emit a raw {@code data:image/...;base64,...} payload without
+ * {@code ![alt](url)}. GFM leaves that as paragraph / autolink text (a giant blob). Wrap as image markdown first.
+ */
+export function wrapBareLongDataImageUrlsAsMarkdown(input: string, minUrlChars = 256): string {
+  if (!input || input.indexOf('data:image') < 0) {
+    return input;
+  }
+  const lower = input.toLowerCase();
+  const parts: string[] = [];
+  let i = 0;
+  while (i < input.length) {
+    const idx = lower.indexOf('data:image/', i);
+    if (idx < 0) {
+      parts.push(input.slice(i));
+      break;
+    }
+    if (isDataImageUrlInsideMarkdownImageDestination(input, idx)) {
+      const end = dataImageBase64RunEnd(input, idx);
+      parts.push(input.slice(i, end));
+      i = end;
+      continue;
+    }
+    const end = dataImageBase64RunEnd(input, idx);
+    const url = input.slice(idx, end);
+    parts.push(input.slice(i, idx));
+    if (url.length >= minUrlChars) {
+      parts.push(`\n\n![](<${url}>)\n\n`);
+    } else {
+      parts.push(url);
+    }
+    i = end;
+  }
+  return parts.join('');
+}
+
+/** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
+export function preprocessAssistantMarkdownImages(text: string): {
+  displayText: string;
+  longDataImageBlobRefMap: Map<string, string>;
+} {
+  const longDataImageBlobRefMap = new Map<string, string>();
+  const normalized = normalizeOpenAiLiteralEscapes(text);
+  const compactData = compactAllDataImageBase64Runs(normalized);
+  const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
+  const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
+  const displayText = wrapDataImageMarkdownDestInAngleBrackets(shortened);
+  return { displayText, longDataImageBlobRefMap };
+}
+
 /**
  * Micromark / GFM can leave {@code ![alt](data:image/...;base64,...)} as plain text when the destination is huge.
  * Replace long {@code data:image/} destinations with short {@code studio-ai-blob-ref://<id>} URLs and record the
@@ -190,13 +310,112 @@ function assistantMarkdownUnresolvedStudioInlineImageRef(src: string): boolean {
   return src.trim().toLowerCase().startsWith('studio-ai-inline-image:');
 }
 
-/** Resolves {@code studio-ai-blob-ref://}; avoids passing unresolved custom schemes to {@link StudioDraggableImage}. */
+function reactNodeToPlainText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeToPlainText).join('');
+  if (React.isValidElement(node)) return reactNodeToPlainText((node.props as { children?: React.ReactNode }).children);
+  return '';
+}
+
+/**
+ * Micromark can still leave image markdown or a raw {@code data:} URL as a single paragraph of text.
+ * Recover by rendering {@link StudioDraggableImage} instead of a wall of base64.
+ */
+function findFirstMarkdownAssistantImage(plain: string): {
+  alt: string;
+  url: string;
+  start: number;
+  end: number;
+} | null {
+  const re =
+    /!\[([^\]]*)\]\(\s*(?:<(data:image\/[a-z0-9.+-]+;base64,[\s\S]*?)>|(data:image\/[a-z0-9.+-]+;base64,[\s\S]*?)|(studio-ai-blob-ref:\/\/[^)\s]+)|(studio-ai-inline-image:\/\/[^)\s]+))\s*\)/gi;
+  const m = re.exec(plain);
+  if (!m) {
+    return null;
+  }
+  const alt = m[1] ?? '';
+  const rawUrl = (m[2] || m[3] || m[4] || m[5] || '').trim();
+  const url =
+    rawUrl.startsWith('studio-ai-blob-ref://') ? rawUrl : rawUrl.replace(/\s+/g, '').trim();
+  if (!url) {
+    return null;
+  }
+  return { alt, url, start: m.index, end: m.index + m[0].length };
+}
+
+function AssistantMarkdownParagraph(props: Readonly<{
+  children?: React.ReactNode;
+  longDataImageBlobRefMap: Map<string, string>;
+  studioAiInlineImageUrls?: Record<string, string>;
+}>) {
+  const { children, longDataImageBlobRefMap, studioAiInlineImageUrls } = props;
+  const plain = reactNodeToPlainText(children).trim();
+  if (!plain) {
+    return (
+      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 0.75 }}>
+        {children}
+      </Typography>
+    );
+  }
+  const bareData = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i.exec(plain);
+  if (bareData && bareData[0].replace(/\s+/g, '').length > 256) {
+    return <StudioDraggableImage src={bareData[0].replace(/\s+/g, '')} alt="" />;
+  }
+  const rawImg = /^!\[([^\]]*)\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)$/.exec(plain);
+  if (rawImg) {
+    const url = (rawImg[2] || rawImg[3] || '').trim();
+    if (url) {
+      return (
+        <AssistantMarkdownImg
+          src={url}
+          alt={rawImg[1]}
+          longDataImageBlobRefMap={longDataImageBlobRefMap}
+          studioAiInlineImageUrls={studioAiInlineImageUrls}
+        />
+      );
+    }
+  }
+  const recovered = findFirstMarkdownAssistantImage(plain);
+  if (
+    recovered &&
+    (recovered.url.length > 120 ||
+      recovered.url.startsWith('studio-ai-blob-ref://') ||
+      assistantMarkdownUnresolvedStudioInlineImageRef(recovered.url))
+  ) {
+    const before = plain.slice(0, recovered.start).trim();
+    const after = plain.slice(recovered.end).trim();
+    return (
+      <Box sx={{ mb: 0.75 }}>
+        {before ? (
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 0.5 }}>
+            {before}
+          </Typography>
+        ) : null}
+        <AssistantMarkdownImg src={recovered.url} alt={recovered.alt} longDataImageBlobRefMap={longDataImageBlobRefMap} studioAiInlineImageUrls={studioAiInlineImageUrls} />
+        {after ? (
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.5 }}>
+            {after}
+          </Typography>
+        ) : null}
+      </Box>
+    );
+  }
+  return (
+    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 0.75 }}>
+      {children}
+    </Typography>
+  );
+}
+
+/** Resolves {@code studio-ai-blob-ref://} and {@code studio-ai-inline-image://toolCallId} (via optional SSE metadata map). */
 function AssistantMarkdownImg(props: Readonly<{
   src?: string | null;
   alt?: string | null;
   longDataImageBlobRefMap: Map<string, string>;
+  studioAiInlineImageUrls?: Record<string, string>;
 }>) {
-  const { src, alt, longDataImageBlobRefMap } = props;
+  const { src, alt, longDataImageBlobRefMap, studioAiInlineImageUrls } = props;
   const s = src?.trim() ?? '';
   if (s.startsWith('studio-ai-blob-ref://')) {
     const id = s.slice('studio-ai-blob-ref://'.length);
@@ -211,11 +430,20 @@ function AssistantMarkdownImg(props: Readonly<{
       </Typography>
     );
   }
+  // Unresolved studio-ai-inline-image refs: resolve from tool-progress metadata when present (see writeToolProgressSse).
   if (assistantMarkdownUnresolvedStudioInlineImageRef(s)) {
+    const marker = 'studio-ai-inline-image://';
+    const low = s.trim().toLowerCase();
+    const idx = low.indexOf(marker);
+    const id = idx >= 0 ? s.trim().slice(idx + marker.length).trim() : '';
+    const resolved = id && studioAiInlineImageUrls ? studioAiInlineImageUrls[id] : undefined;
+    if (resolved && resolved.length > 12) {
+      return <StudioDraggableImage src={resolved} alt={alt} />;
+    }
     return (
       <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', my: 0.5 }}>
-        {(alt || '').toString().trim() ? `${(alt || '').toString().trim()}: ` : ''}
-        Image preview unavailable (inline image reference was not expanded by the server).
+        {(alt || '').toString().trim() ? `${(alt || '').toString().trim()} — ` : ''}
+        Image preview is still loading or was not received from Studio (try again or check Studio logs).
       </Typography>
     );
   }
@@ -255,16 +483,13 @@ function fencedBlockSanitizeSchema() {
 }
 
 /** Rendered markdown inside a fenced markdown code block; nested fenced code renders as pre/code only (no CodeBlock recursion). */
-function DraftMarkdownPreview(props: Readonly<{ value: string }>) {
+function DraftMarkdownPreview(props: Readonly<{ value: string; studioAiInlineImageUrls?: Record<string, string> }>) {
   const theme = useTheme();
   const sanitizeSchema = useMemo(() => fencedBlockSanitizeSchema(), []);
-  const { value } = props;
+  const { value, studioAiInlineImageUrls } = props;
   const { md, longDataImageBlobRefMap } = useMemo(() => {
-    const map = new Map<string, string>();
-    const normalized = normalizeOpenAiLiteralEscapes(value);
-    const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
-    const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-    return { md: wrapped, longDataImageBlobRefMap: map };
+    const { displayText, longDataImageBlobRefMap: map } = preprocessAssistantMarkdownImages(value);
+    return { md: displayText, longDataImageBlobRefMap: map };
   }, [value]);
 
   const mdComponents = useMemo(
@@ -285,9 +510,12 @@ function DraftMarkdownPreview(props: Readonly<{ value: string }>) {
         </Typography>
       ),
       p: ({ children }: { children?: React.ReactNode }) => (
-        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 0.75 }}>
+        <AssistantMarkdownParagraph
+          longDataImageBlobRefMap={longDataImageBlobRefMap}
+          studioAiInlineImageUrls={studioAiInlineImageUrls}
+        >
           {children}
-        </Typography>
+        </AssistantMarkdownParagraph>
       ),
       ul: ({ children }: { children?: React.ReactNode }) => (
         <Box component="ul" sx={{ m: 0, pl: 2.2, mb: 0.75 }}>
@@ -315,7 +543,12 @@ function DraftMarkdownPreview(props: Readonly<{ value: string }>) {
         </Box>
       ),
       img: ({ src, alt }: { src?: string | null; alt?: string | null }) => (
-        <AssistantMarkdownImg src={src} alt={alt} longDataImageBlobRefMap={longDataImageBlobRefMap} />
+        <AssistantMarkdownImg
+          src={src}
+          alt={alt}
+          longDataImageBlobRefMap={longDataImageBlobRefMap}
+          studioAiInlineImageUrls={studioAiInlineImageUrls}
+        />
       ),
       code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
         const raw = String(children ?? '').replace(/\n$/, '');
@@ -356,7 +589,7 @@ function DraftMarkdownPreview(props: Readonly<{ value: string }>) {
         );
       }
     }),
-    [theme, longDataImageBlobRefMap]
+    [theme, longDataImageBlobRefMap, studioAiInlineImageUrls]
   );
 
   return (
@@ -394,12 +627,44 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
-function CodeBlock(props: { language?: string; value: string }) {
+/**
+ * Models sometimes fence assistant prose as {@code ```text} even when it contains markdown (e.g. {@code ![alt](studio-ai-inline-image://…)}).
+ * Without this, the chat shows a raw code block and images never resolve.
+ */
+function fencedCodeValueLooksLikeAssistantMarkdown(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  if (v.includes('studio-ai-inline-image:')) return true;
+  if (/!\[[^\]]*\]\([^)]+\)/.test(v)) return true;
+  if (/^#{1,6}\s/m.test(v)) return true;
+  return false;
+}
+
+/** Short prose-only fenced blocks (e.g. image-only wrap-up) skip the heavy “Draft preview” chrome — render markdown inline. */
+function compactProseMarkdownFence(value: string): boolean {
+  const v = value.trim();
+  if (!v || v.length > 8000) return false;
+  if (v.includes('```')) return false;
+  if (/(\n|^)#{1,6}\s/.test(v)) return false;
+  if (v.includes('📋')) return false;
+  if (/\n##\s*Plan\b/i.test(v) || /^##\s*Plan\b/i.test(v)) return false;
+  return true;
+}
+
+function CodeBlock(props: {
+  language?: string;
+  value: string;
+  /** When the fenced block is rendered as markdown preview, resolve {@code studio-ai-inline-image://} refs. */
+  studioAiInlineImageUrls?: Record<string, string>;
+}) {
   const theme = useTheme();
-  const { language, value } = props;
+  const { language, value, studioAiInlineImageUrls } = props;
   const lang = (language || '').toLowerCase();
   const isHtml = lang === 'html' || lang === 'htm';
   const isMarkdownDraft = lang === 'markdown' || lang === 'md';
+  const isTextFencedAsMarkdown =
+    (lang === 'text' || lang === 'txt') && fencedCodeValueLooksLikeAssistantMarkdown(value);
+  const renderMarkdownFencedBlock = isMarkdownDraft || isTextFencedAsMarkdown;
   const [htmlMode, setHtmlMode] = useState<'preview' | 'source'>('preview');
   const [mdMode, setMdMode] = useState<'preview' | 'source'>('preview');
 
@@ -517,7 +782,11 @@ function CodeBlock(props: { language?: string; value: string }) {
             )}
           </Box>
         </>
-      ) : isMarkdownDraft ? (
+      ) : renderMarkdownFencedBlock && compactProseMarkdownFence(value) ? (
+        <Box sx={{ px: 0.5, py: 0.25 }}>
+          <DraftMarkdownPreview value={value} studioAiInlineImageUrls={studioAiInlineImageUrls} />
+        </Box>
+      ) : renderMarkdownFencedBlock ? (
         <>
           <Box sx={{ px: 1.5, pt: 1.5, pb: 0.75 }}>
             <Typography variant="subtitle1" component="div" sx={{ fontWeight: 700, lineHeight: 1.35 }}>
@@ -561,7 +830,7 @@ function CodeBlock(props: { language?: string; value: string }) {
             </Tabs>
             {mdMode === 'preview' ? (
               <Box sx={{ p: 1 }}>
-                <DraftMarkdownPreview value={value} />
+                <DraftMarkdownPreview value={value} studioAiInlineImageUrls={studioAiInlineImageUrls} />
               </Box>
             ) : (
               <Box
@@ -602,17 +871,11 @@ function CodeBlock(props: { language?: string; value: string }) {
   );
 }
 
-export default function MarkdownMessage(props: Readonly<{ text: string }>) {
+export default function MarkdownMessage(props: Readonly<{ text: string; studioAiInlineImageUrls?: Record<string, string> }>) {
   const theme = useTheme();
-  const { text } = props;
+  const { text, studioAiInlineImageUrls } = props;
 
-  const { displayText, longDataImageBlobRefMap } = useMemo(() => {
-    const map = new Map<string, string>();
-    const normalized = normalizeOpenAiLiteralEscapes(text);
-    const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
-    const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-    return { displayText: wrapped, longDataImageBlobRefMap: map };
-  }, [text]);
+  const { displayText, longDataImageBlobRefMap } = useMemo(() => preprocessAssistantMarkdownImages(text), [text]);
 
   const sanitizeSchema = useMemo(() => {
     const base = studioAiChatMarkdownSanitizeSchema();
@@ -643,9 +906,9 @@ export default function MarkdownMessage(props: Readonly<{ text: string }>) {
         </Typography>
       ),
       p: ({ children }: { children?: React.ReactNode }) => (
-        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 0.75 }}>
+        <AssistantMarkdownParagraph longDataImageBlobRefMap={longDataImageBlobRefMap} studioAiInlineImageUrls={studioAiInlineImageUrls}>
           {children}
-        </Typography>
+        </AssistantMarkdownParagraph>
       ),
       ul: ({ children }: { children?: React.ReactNode }) => (
         <Box component="ul" sx={{ m: 0, pl: 2.2, mb: 0.75 }}>
@@ -692,7 +955,12 @@ export default function MarkdownMessage(props: Readonly<{ text: string }>) {
         </Box>
       ),
       img: ({ src, alt }: { src?: string | null; alt?: string | null }) => (
-        <AssistantMarkdownImg src={src} alt={alt} longDataImageBlobRefMap={longDataImageBlobRefMap} />
+        <AssistantMarkdownImg
+          src={src}
+          alt={alt}
+          longDataImageBlobRefMap={longDataImageBlobRefMap}
+          studioAiInlineImageUrls={studioAiInlineImageUrls}
+        />
       ),
       table: ({ children }: { children?: React.ReactNode }) => (
         <TableContainer
@@ -776,10 +1044,10 @@ export default function MarkdownMessage(props: Readonly<{ text: string }>) {
 
         const match = /language-(\w+)/.exec(className || '');
         const language = match?.[1];
-        return <CodeBlock language={language} value={raw.replace(/\n$/, '')} />;
+        return <CodeBlock language={language} value={raw.replace(/\n$/, '')} studioAiInlineImageUrls={studioAiInlineImageUrls} />;
       }
     }),
-    [theme, longDataImageBlobRefMap]
+    [theme, longDataImageBlobRefMap, studioAiInlineImageUrls]
   );
 
   return (

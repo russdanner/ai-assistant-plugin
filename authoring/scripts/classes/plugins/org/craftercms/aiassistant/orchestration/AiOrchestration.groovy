@@ -8,6 +8,7 @@ import plugins.org.craftercms.aiassistant.llm.StudioAiRuntimeBuildRequest
 import plugins.org.craftercms.aiassistant.plan.PlanOrchestration
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 import plugins.org.craftercms.aiassistant.rag.PluginRagVectorRegistry
+import plugins.org.craftercms.aiassistant.orchestration.chatcompletions.ChatCompletionsToolWire
 import plugins.org.craftercms.aiassistant.tools.AiOrchestrationTools
 import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
 
@@ -47,7 +48,6 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.text.Normalizer
 import java.util.Locale
@@ -64,7 +64,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -76,10 +75,9 @@ import reactor.core.publisher.Flux
  * Central place for server-side orchestration for the <strong>Studio AI Assistant</strong> plugin.
  *
  * <p><strong>LLM adapters:</strong> Chat sessions are built through {@link StudioAiLlmRuntime} implementations
- * ({@link OpenAiSpringAiLlmRuntime}, {@link ExpertApiLlmRuntime}, {@link StudioAiScriptLlmContainerRuntime} for
- * {@code script:…} site Groovy). The token {@link StudioAiLlmKind#CRAFTERRQ_REMOTE_API} ({@code llm=crafterQ}) selects the
- * <strong>remote hosted chat</strong> adapter; Tools-loop wire, Claude, and script LLMs are separate paths. Additional
- * providers should implement {@link StudioAiLlmRuntime}, register in {@link StudioAiLlmRuntimeFactory}, and extend
+ * ({@link OpenAiSpringAiLlmRuntime}, {@link AnthropicSpringAiLlmRuntime}, {@link StudioAiScriptLlmContainerRuntime} for
+ * {@code script:…} site Groovy). Each agent must configure a supported {@code llm}; there is no implicit hosted remote chat adapter.
+ * Additional providers should implement {@link StudioAiLlmRuntime}, register in {@link StudioAiLlmRuntimeFactory}, and extend
  * {@link StudioAiLlmKind}.</p>
  *
  * <p>Provider-specific wire/stream logic (e.g. Chat Completions–style RestClient native tool loops) still lives here
@@ -101,14 +99,15 @@ class AiOrchestration {
   private static final long CHAT_FLUX_AWAIT_MS = resolveChatFluxAwaitMs()
 
   /** Worker throws {@link InterruptedException} with this message when the SSE client disconnects or Stop cancels the pipeline. */
-  private static final String CRAFTQ_PIPELINE_CANCELLED = 'crafterq.pipeline.cancelled'
+  private static final String AIASSISTANT_PIPELINE_CANCELLED = 'crafterq.pipeline.cancelled'
 
   /**
    * Max characters per {@code role:tool} message in the native-tools RestClient loop. Huge tool JSON (e.g.
    * {@code ListPagesAndComponents} with a large {@code size}) must not blow the model context window.
    * <p><strong>{@code GenerateImage}:</strong> bitmaps are <strong>not</strong> sent in {@code role:tool} content — a
    * compact JSON with {@code inlineImageRef} is wired instead; the full {@code data:image/...;base64,...} is
-   * held server-side and expanded into the final assistant text for SSE only (see {@link #STUDIO_AI_INLINE_IMAGE_REF_PREFIX}).</p>
+   * held server-side and expanded into the final assistant text for SSE only (see
+   * {@link ChatCompletionsToolWire#STUDIO_AI_INLINE_IMAGE_REF_PREFIX}).</p>
    */
   /** Cap for tools-loop {@code /v1/chat/completions} JSON body size (any native-tools vendor — not OpenAI-specific). */
   private static final int NATIVE_TOOLS_WIRE_JSON_MAX_CHARS = 36_000
@@ -121,11 +120,11 @@ class AiOrchestration {
   private static final int NATIVE_TOOLS_FINAL_SSE_TEXT_CHUNK_CHARS = 48_000
 
   /**
-   * Markdown / assistant-text placeholder expanded server-side before SSE (not a network URL). Value in markdown is
-   * the wire {@code tool_call_id} (e.g. {@code call_…}). {@link #openAiExpandInlineImageRefs} swaps this for the real
-   * image URL in the author-facing response.
+   * Omit huge {@code data:image} payloads from tool-progress JSON metadata — the browser drops the whole SSE line if
+   * {@code JSON.parse} fails (see {@code aiAssistantApi} guard). Large images ship in final assistant markdown instead
+   * (chunked + client blob-ref preprocess).
    */
-  private static final String STUDIO_AI_INLINE_IMAGE_REF_PREFIX = 'studio-ai-inline-image://'
+  private static final int GENERATE_IMAGE_TOOL_PROGRESS_METADATA_MAX_URL_CHARS = 28_000
 
   /**
    * Latest worker phase for logs and **SSE heartbeats** (Tools-loop+tools worker sets it; servlet thread reads it while
@@ -1098,21 +1097,8 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     return []
   }
 
-  /** Max merged prompt length for remote hosted chat and {@code ConsultCrafterQExpert} (chars). JVM {@code -Dcrafterq.maxPromptChars} (plugin descriptor cannot declare this name in all Studio versions). */
-  int resolveMaxCrafterQPromptChars() {
-    try {
-      def p = System.getProperty('crafterq.maxPromptChars')
-      if (p != null && p.toString().trim()) {
-        int n = Integer.parseInt(p.toString().trim())
-        if (n >= 256 && n <= 500_000) return n
-      }
-    } catch (Throwable ignored) {}
-    return 1000
-  }
-
   /**
-   * Builds the Spring AI chat client + tools via {@link StudioAiLlmRuntime} ({@link OpenAiSpringAiLlmRuntime} vs
-   * {@link ExpertApiLlmRuntime}).
+   * Builds the Spring AI chat client + tools via {@link StudioAiLlmRuntime} ({@link OpenAiSpringAiLlmRuntime}, Claude, script hosts).
    */
   private Map buildSpringAiChatClient(
     String agentId,
@@ -1138,8 +1124,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
         securityContextForTools = copy
       }
     } catch (Throwable ignored) {}
-    int crafterQCap = resolveMaxCrafterQPromptChars()
-    def studioOps = new StudioToolOperations(request, applicationContext, params, securityContextForTools, agentId, crafterQCap)
+    def studioOps = new StudioToolOperations(request, applicationContext, params, securityContextForTools)
     String llmNorm = StudioAiLlmKind.normalize(llmRaw)
     Collection agentToolSubset = null
     try {
@@ -1213,17 +1198,6 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       if (exList != null && !exList.isEmpty()) {
         sys += ToolPrompts.expertSkillsRagAppendix(exList)
       }
-    }
-    if (toolSchemasOnApi && studioOps != null) {
-      try {
-        if (studioOps.isCrafterqAgentIdPresent()) {
-          String cq = studioOps.crafterqApiAgentId()
-          sys +=
-            '\n\n**CrafterQ hosted-chat tools:** **ListCrafterQAgentChats** and **GetCrafterQAgentChat** are on the wire for this session. Default **agentId** = "' +
-            cq +
-            '" (from agent configuration) — **omit agentId** in tool arguments unless overriding. **ListCrafterQAgentChats:** you may pass **no arguments** (empty object) or only **limit** — the server fills **startDate**/**endDate** as the **last 30 days UTC** when both are omitted. **Hard match:** your **`tool_calls`** in the first tool round must include **ListCrafterQAgentChats** for hosted-chat analytics asks — **never** substitute **ListContentTranslationScope** or **GetContent** for that intent.'
-        }
-      } catch (Throwable ignored) {}
     }
     if (toolSchemasOnApi) {
       sys += PlanOrchestration.machineInstructionsAddendum()
@@ -2372,7 +2346,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     try {
     if (crafterQPipelineCancelEffective()) {
       crafterQToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_pipeline_cancelled')
-      throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+      throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
     }
     int effMaxOut = openAiClampMaxOutTokensForToolsLoopWire(model, maxOutTokens, toolsLoopSessionBundle)
     if (effMaxOut < maxOutTokens) {
@@ -2426,7 +2400,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       conn.outputStream.flush()
       if (crafterQPipelineCancelEffective()) {
         crafterQToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_after_request_body_pipeline_cancelled')
-        throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+        throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
       crafterQToolWorkerDiagPhase(
         phasePfx +
@@ -2638,6 +2612,59 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       return sb.toString()
     }
     return content != null ? content.toString() : ''
+  }
+
+  private static boolean openAiWireToolsIncludeGenerateImage(List wireTools) {
+    if (!(wireTools instanceof List) || wireTools.isEmpty()) {
+      return false
+    }
+    for (def t : wireTools) {
+      if (!(t instanceof Map)) {
+        continue
+      }
+      def fn = ((Map) t).get('function')
+      if (fn instanceof Map) {
+        String n = (fn.get('name') ?: '').toString()
+        if ('GenerateImage'.equals(n)) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  /**
+   * Short author prompts that ask only for a new bitmap (no CMS write) — used to set {@code tool_choice} to
+   * {@code GenerateImage} on tools-loop round 0 so hosts cannot return prose-only “here is the image” hallucinations.
+   */
+  private static boolean openAiPlainTextLooksLikeImageOnlyGenerateRequest(String visibleUserText) {
+    String u = (visibleUserText ?: '').trim()
+    if (!u) {
+      return false
+    }
+    if (u.length() > 2400) {
+      return false
+    }
+    String low = u.toLowerCase(Locale.ROOT)
+    if (low.contains('writecontent') || low.contains('write content')) {
+      return false
+    }
+    if (u.matches(/(?is).*\b(save|apply|insert|replace|upload|commit|publish)\b.{0,48}\b(to|into|on|in)\b.{0,48}\b(page|component|field|xml|content|repo)\b.*/)) {
+      return false
+    }
+    boolean verb =
+      u.matches(/(?is).*\b(generate|creating|create|draw|drawing|sketch|paint|making|make|render|illustrate)\b.*/) ||
+        u.matches(/(?is).*\b(show me|give me|i want|i need|can you)\b.{0,48}\b(an?\s+)?(image|picture|illustration|drawing|photo|render)\b.*/)
+    if (!verb) {
+      return false
+    }
+    boolean noun =
+      u.matches(/(?is).*\b(image|images|picture|pictures|illustration|illustrations|drawing|drawings|photo|photos|render|hero|cover|banner|logo|artwork|graphic|icon|bitmap)\b.*/) ||
+        u.matches(/(?is).*\b(image|picture|illustration|drawing|photo)\s+of\b.*/)
+    if (!noun) {
+      noun = u.matches(/(?is).*\b(draw|sketch|paint)\b.{0,100}\b(an?\s+|the\s+)?[a-z][a-z0-9\\-]{2,}\b.*/)
+    }
+    return noun
   }
 
   /**
@@ -2912,6 +2939,16 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     if (n.contains('use tools as described') && n.contains('system')) {
       return true
     }
+    // Memorized “present generated image as markdown” slop (Studio uses the chat image strip; markdown duplicates/breaks UX).
+    if (n.contains('present the generated image as markdown')) {
+      return true
+    }
+    if (n.contains('prepare to present') && n.contains('markdown')) {
+      return true
+    }
+    if (n.contains('present') && n.contains('generated image') && n.contains('as markdown')) {
+      return true
+    }
     return false
   }
 
@@ -2958,416 +2995,63 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       i++
     }
     String joined = out.join('\n')
+    // Drop orphan / truncated markdown image lines (Studio uses the chat image strip).
+    joined = joined.replaceAll(/(?m)^\s*!\[[^\]]*]\(\s*$\n?/, '')
     return joined.replaceAll(/(?m)\n{3,}/, '\n\n').trim()
   }
 
-  /** CMS tools that must not run when the author only asked about CrafterQ hosted chat logs (api.crafterq.ai). */
-  private static final Set<String> CRAFTERRQ_HOSTED_CHAT_BLOCKED_TOOL_NAMES =
-    [
-      'ListContentTranslationScope',
-      'TranslateContentBatch',
-      'TranslateContentItem'
-    ].toSet()
-
-  /** First planned tool name from {@code <!--CRAFTERRQ_ORCH ... -->} when present. */
-  private static String openAiPlannedFirstToolNameFromOrch(String assistantRaw) {
-    List<Map> steps = PlanOrchestration.parseOrchestrationSteps(assistantRaw ?: '')
-    if (steps.isEmpty()) {
-      return ''
-    }
-    Map st0 = steps[0] as Map
-    def tls = st0.get('tools')
-    if (tls instanceof List && !((List) tls).isEmpty()) {
-      return ((List) tls).get(0)?.toString()?.trim() ?: ''
-    }
-    def one = st0.get('tool')
-    return one != null ? one.toString().trim() : ''
-  }
-
-  private static String openAiToolCallNameAt(List runList, int index) {
-    if (runList == null || index < 0 || index >= runList.size()) {
-      return ''
-    }
-    def tcObj = runList.get(index)
-    if (!(tcObj instanceof Map)) {
-      return ''
-    }
-    def fn = ((Map) tcObj).get('function')
-    if (!(fn instanceof Map)) {
-      return ''
-    }
-    return fn.get('name')?.toString()?.trim() ?: ''
-  }
-
   /**
-   * True when the user message is about **hosted CrafterQ chat** analytics (not CMS page work).
-   * Conservative: requires {@code crafterq} plus at least one analytics phrase.
+   * Before appending an assistant {@code message} to {@code wireMessages}, replace any known huge {@code data:image}
+   * URLs (same bytes as a prior {@code GenerateImage} tool result) with {@link ChatCompletionsToolWire#STUDIO_AI_INLINE_IMAGE_REF_PREFIX} refs
+   * so follow-up {@code POST /v1/chat/completions} requests stay within context limits.
    */
-  private static boolean openAiCrafterqHostedChatAnalyticsIntent(String userText) {
-    String n = openAiPlanGateNormalizeForScan(userText)
-    if (!n || !n.contains('crafterq')) {
-      return false
-    }
-    return n.contains('number one') ||
-      n.contains('top question') ||
-      n.contains('what people') ||
-      n.contains('people ask') ||
-      n.contains('people asked') ||
-      n.contains('hosted chat') ||
-      n.contains('chat log') ||
-      n.contains('chat analytics') ||
-      n.contains('dislike') ||
-      n.contains('most common') ||
-      n.contains('most frequent') ||
-      n.contains('most asked') ||
-      n.contains('frequent question') ||
-      (n.contains('question') && (n.contains(' in crafterq') || n.contains('from crafterq')))
-  }
-
-  private static Map openAiSyntheticSameIdToolCall(Map original, String newToolName, String newArgumentsJson) {
-    Map tc = new LinkedHashMap((Map) original)
-    Map fn = new LinkedHashMap()
-    def oldFn = original.get('function')
-    if (oldFn instanceof Map) {
-      fn.putAll((Map) oldFn)
-    }
-    fn.put('name', newToolName)
-    fn.put('arguments', newArgumentsJson != null ? newArgumentsJson : '{}')
-    tc.put('function', fn)
-    tc
-  }
-
-  /**
-   * Round 0 only: if the model’s first tool is a common CMS mis-route for CrafterQ hosted-chat questions,
-   * replace it with {@code ListCrafterQAgentChats} and drop sibling translate/scope calls in the same assistant turn.
-   */
-  private static List openAiRepairToolCallsForCrafterqHostedChatIntent(
-    int round,
-    List runList,
-    String assistantRawForOrchestration,
-    String agentId
+  /** Merge compact-wire + SSE-backlog maps so author-visible sanitization sees every GenerateImage URL keyed by tool_call id. */
+  private static Map<String, String> openAiMergedGenerateImageUrlByToolCallId(
+    Map<String, String> compactWireUrlByToolCallId,
+    Map<String, String> sseBacklogUrlByToolCallId
   ) {
-    if (runList == null || runList.isEmpty() || round != 0) {
-      return runList
+    Map<String, String> out = new LinkedHashMap<>()
+    if (compactWireUrlByToolCallId != null && !compactWireUrlByToolCallId.isEmpty()) {
+      out.putAll(compactWireUrlByToolCallId)
     }
-    List out = new ArrayList(runList)
-    String plannedFirst = openAiPlannedFirstToolNameFromOrch(assistantRawForOrchestration)
-    String firstName = openAiToolCallNameAt(out, 0)
-    boolean cmsMisrouteFirst =
-      'ListContentTranslationScope'.equals(firstName) ||
-        ('ListCrafterQAgentChats'.equals(plannedFirst) &&
-          firstName &&
-          !'ListCrafterQAgentChats'.equals(firstName) &&
-          !'GetCrafterQAgentChat'.equals(firstName) &&
-          (
-            'ListPagesAndComponents'.equals(firstName) ||
-              'ListStudioContentTypes'.equals(firstName) ||
-              'GetContent'.equals(firstName) ||
-              'GetContentTypeFormDefinition'.equals(firstName) ||
-              'GetPreviewHtml'.equals(firstName) ||
-              'analyze_template'.equals(firstName)
-          ))
-    if (cmsMisrouteFirst && out.get(0) instanceof Map) {
-      out.set(0, openAiSyntheticSameIdToolCall((Map) out.get(0), 'ListCrafterQAgentChats', '{}'))
-      log.warn(
-        'Tools-loop tools-on: repaired first tool call to ListCrafterQAgentChats for CrafterQ hosted-chat analytics intent agentId={} was={} plannedOrchFirst={}',
-        agentId,
-        firstName,
-        plannedFirst
-      )
-    }
-    for (int i = out.size() - 1; i >= 1; i--) {
-      String n = openAiToolCallNameAt(out, i)
-      if (CRAFTERRQ_HOSTED_CHAT_BLOCKED_TOOL_NAMES.contains(n)) {
-        out.remove(i)
-        log.warn(
-          'Tools-loop tools-on: removed same-round {} after CrafterQ hosted-chat repair agentId={}',
-          n,
-          agentId
-        )
+    if (sseBacklogUrlByToolCallId != null && !sseBacklogUrlByToolCallId.isEmpty()) {
+      for (Map.Entry<String, String> e : sseBacklogUrlByToolCallId.entrySet()) {
+        String id = e.getKey() != null ? e.getKey().toString().trim() : ''
+        String u = e.getValue() != null ? e.getValue().toString().trim() : ''
+        if (id && u && !out.containsKey(id)) {
+          out.put(id, u)
+        }
       }
     }
     return out
   }
 
   /**
-   * Spring AI / adapters sometimes wrap tool JSON as {@code { result: { ... } }}, {@code { output: { ... } }}, or
-   * {@code { data: { url, b64_json }}}. Walk those wrappers so {@link #openAiCompactGenerateImageToolWireForOpenAiContext}
-   * and SSE backlog capture still find {@code url} / {@code b64_json}.
+   * Replace raw {@code data:image} payloads that duplicate GenerateImage results with {@link ChatCompletionsToolWire#STUDIO_AI_INLINE_IMAGE_REF_PREFIX} refs
+   * so author SSE does not stream huge base64 in markdown (UI loads bytes from {@code studioAiInlineImageUrls} metadata).
    */
-  private static Map openAiUnwrapGenerateImageToolResultMap(Map root) {
-    Map m = root != null ? root : [:]
-    int guard = 0
-    while (guard++ < 12) {
-      if (m.get('result') instanceof Map) {
-        m = (Map) m.get('result')
-        continue
-      }
-      if (m.get('output') instanceof Map) {
-        m = (Map) m.get('output')
-        continue
-      }
-      if (m.get('data') instanceof Map) {
-        Map inner = (Map) m.get('data')
-        if (inner.get('url') != null || inner.get('b64_json') != null || inner.get('ok') != null) {
-          m = inner
-          continue
-        }
-      }
-      break
-    }
-    return m
-  }
-
-  /**
-   * Best-effort URL string from a {@code GenerateImage} tool result map (after {@link #openAiUnwrapGenerateImageToolResultMap}).
-   */
-  private static String openAiGenerateImageResultUrlString(Map m) {
-    if (m == null || m.isEmpty()) {
-      return ''
-    }
-    String url = m.get('url') != null ? m.get('url').toString().trim() : ''
-    if (url) {
-      return url
-    }
-    String b64 = m.get('b64_json') != null ? m.get('b64_json').toString().trim() : ''
-    if (!b64) {
-      return ''
-    }
-    String of = (m.get('output_format') ?: m.get('outputFormat'))?.toString()?.trim()?.toLowerCase(Locale.ROOT) ?: ''
-    String mime = 'image/png'
-    if (of == 'jpeg' || of == 'jpg') {
-      mime = 'image/jpeg'
-    } else if (of == 'webp') {
-      mime = 'image/webp'
-    } else if (of == 'png') {
-      mime = 'image/png'
-    }
-    return 'data:' + mime + ';base64,' + b64
-  }
-
-  /**
-   * When {@code GenerateImage} returns a large {@code data:image/...;base64,...} or a temporary {@code https://} image
-   * {@code url}, stores the full URL in {@code generateImageDataUrlByToolCallId} under {@code toolCallId} and returns
-   * compact JSON for the {@code role:tool} wire (avoids {@code context_length_exceeded}). Returns {@code null} if not applicable.
-   */
-  private static String openAiCompactGenerateImageToolWireForOpenAiContext(
-    String toolOutJson,
-    String toolCallId,
-    Map<String, String> generateImageDataUrlByToolCallId
-  ) {
-    if (!toolOutJson?.trim() || !toolCallId?.trim() || generateImageDataUrlByToolCallId == null) {
-      return null
-    }
-    Object parsed
-    try {
-      parsed = new JsonSlurper().parseText(toolOutJson)
-    } catch (Throwable ignored) {
-      return null
-    }
-    if (!(parsed instanceof Map)) {
-      return null
-    }
-    Map m = openAiUnwrapGenerateImageToolResultMap((Map) parsed)
-    String url = openAiGenerateImageResultUrlString(m)
-    if (!url) {
-      return null
-    }
-    String tid = toolCallId.trim()
-    boolean isDataImage = url.startsWith('data:image')
-    boolean isHttpImage = url.startsWith('https://') || url.startsWith('http://')
-    if (!isDataImage && !isHttpImage) {
-      return null
-    }
-    if (isDataImage) {
-      String urlLower = url.toLowerCase(Locale.ROOT)
-      if (!urlLower.contains(';base64,')) {
-        return null
-      }
-    }
-    generateImageDataUrlByToolCallId.put(tid, url)
-    Map compact = new LinkedHashMap<>()
-    for (String k : ['ok', 'tool', 'model', 'revised_prompt', 'hint']) {
-      if (m.containsKey(k) && m.get(k) != null) {
-        compact.put(k, m.get(k))
-      }
-    }
-    compact.put('inlineImageRef', tid)
-    compact.put(
-      'authorMarkdownInstruction',
-      'In your next assistant message, include exactly ONE markdown image line using this URL in the parentheses (verbatim): ' +
-        STUDIO_AI_INLINE_IMAGE_REF_PREFIX + tid +
-        ' Example: ![Generated illustration](' + STUDIO_AI_INLINE_IMAGE_REF_PREFIX + tid +
-        ') Do not use a data: URL.'
-    )
-    log.info(
-      'Tools-loop native tools: GenerateImage compact tool wire toolCallId={} storedUrlChars={} data={}',
-      tid,
-      url.length(),
-      isDataImage
-    )
-    return JsonOutput.toJson(compact)
-  }
-
-  /**
-   * Merges {@code toolCallId → imageUrl} entries from {@code backlogByToolCallId} into {@code eff} for placeholders in
-   * {@code text}. When the flux path only captured a URL (no tool call id), applies that URL only if there is exactly
-   * one unresolved placeholder and one orphan URL.
-   */
-  private static void openAiAugmentEffMapWithGenerateImageBacklog(
-    String text,
-    Map<String, String> eff,
-    Map<String, String> backlogByToolCallId,
-    Collection<String> imageUrlsWithoutToolCallId = null
-  ) {
-    if (eff == null) {
-      return
-    }
-    if (backlogByToolCallId != null && !backlogByToolCallId.isEmpty()) {
-      for (Map.Entry<String, String> e : backlogByToolCallId.entrySet()) {
-        String id = e.getKey() != null ? e.getKey().toString().trim() : ''
-        String u = e.getValue() != null ? e.getValue().toString().trim() : ''
-        if (id && u && !eff.containsKey(id)) {
-          eff.put(id, u)
-        }
-      }
-    }
-    if (text == null || imageUrlsWithoutToolCallId == null || imageUrlsWithoutToolCallId.isEmpty()) {
-      return
-    }
-    Pattern pat = Pattern.compile(Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) + '([A-Za-z0-9_-]+)')
-    Matcher scan = pat.matcher(text.toString())
-    List<String> unresolved = new ArrayList<>()
-    while (scan.find()) {
-      String id = scan.group(1)
-      if (id && !eff.containsKey(id)) {
-        unresolved.add(id)
-      }
-    }
-    if (unresolved.size() == 1 && imageUrlsWithoutToolCallId.size() == 1) {
-      String u = imageUrlsWithoutToolCallId.iterator().next()?.toString()?.trim()
-      if (u) {
-        eff.put(unresolved.get(0), u)
-      }
-    }
-  }
-
-  /**
-   * Replaces {@code studio-ai-inline-image://<toolCallId>} with stored image URLs for author-visible output.
-   *
-   * @param generateImageBacklogByToolCallId optional {@code toolCallId → url} from {@code GenerateImage} tool-progress
-   *        when the compacted RestClient map is empty (Spring-AI {@code chatResponse()} flux path).
-   * @param generateImageUrlsWithoutToolCallId optional URLs captured without a tool call id; used only when there is
-   *        exactly one unresolved {@link #STUDIO_AI_INLINE_IMAGE_REF_PREFIX} placeholder.
-   */
-  private static String openAiExpandInlineImageRefs(
-    String text,
-    Map<String, String> generateImageDataUrlByToolCallId,
-    Map<String, String> generateImageBacklogByToolCallId = null,
-    Collection<String> generateImageUrlsWithoutToolCallId = null
-  ) {
-    if (text == null) {
-      return ''
-    }
-    String out = text.toString()
-    Map<String, String> eff = new LinkedHashMap<>()
-    if (generateImageDataUrlByToolCallId != null && !generateImageDataUrlByToolCallId.isEmpty()) {
-      eff.putAll(generateImageDataUrlByToolCallId)
-    }
-    openAiAugmentEffMapWithGenerateImageBacklog(out, eff, generateImageBacklogByToolCallId, generateImageUrlsWithoutToolCallId)
-    if (eff.isEmpty()) {
-      if (out.contains(STUDIO_AI_INLINE_IMAGE_REF_PREFIX)) {
-        log.warn(
-          'Tools-loop native tools: assistant text still contains inline image ref placeholder(s) but inline image map is empty (GenerateImage wire may not have been compacted).'
-        )
-      }
-      return out
-    }
-    String soleUrl = eff.size() == 1 ? eff.values().iterator().next() : null
-    Pattern pat = Pattern.compile(Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) + '([A-Za-z0-9_-]+)')
-    Matcher mat = pat.matcher(out)
-    StringBuffer sb = new StringBuffer()
-    while (mat.find()) {
-      String id = mat.group(1)
-      String url = eff.get(id)
-      if (url == null && soleUrl != null) {
-        url = soleUrl
-      }
-      if (url != null && url.length() > 0) {
-        mat.appendReplacement(sb, Matcher.quoteReplacement(url))
-      } else {
-        mat.appendReplacement(sb, Matcher.quoteReplacement(mat.group(0)))
-      }
-    }
-    mat.appendTail(sb)
-    return sb.toString()
-  }
-
-  /**
-   * If the model never echoed {@link #STUDIO_AI_INLINE_IMAGE_REF_PREFIX} (or the inline {@code data:} bytes) in the final
-   * assistant message, the author would see no image. Appends one markdown image line per stored {@code tool_call_id}
-   * that is still missing, then {@link #openAiExpandInlineImageRefs} replaces refs with real image URLs.
-   */
-  private static String openAiEnsureGenerateImageMarkdownLinesPresent(
+  private static String openAiSanitizeAssistantMarkdownReplaceGenerateImageDataUrlsWithRefs(
     String assistantText,
-    Map<String, String> generateImageDataUrlByToolCallId
+    Map<String, String> urlByToolCallId
   ) {
-    if (generateImageDataUrlByToolCallId == null || generateImageDataUrlByToolCallId.isEmpty()) {
-      return assistantText != null ? assistantText.toString() : ''
+    if (assistantText == null || assistantText.isEmpty()) {
+      return assistantText ?: ''
     }
-    String text = (assistantText != null ? assistantText.toString() : '')
-    int appended = 0
-    StringBuilder tail = new StringBuilder()
-    for (Map.Entry<String, String> e : generateImageDataUrlByToolCallId.entrySet()) {
+    if (urlByToolCallId == null || urlByToolCallId.isEmpty()) {
+      return assistantText.toString()
+    }
+    String s = assistantText.toString()
+    for (Map.Entry<String, String> e : urlByToolCallId.entrySet()) {
       String id = e.getKey() != null ? e.getKey().toString().trim() : ''
-      String url = e.getValue() != null ? e.getValue().toString() : ''
-      if (!id || !url) {
+      String url = e.getValue() != null ? e.getValue().toString().trim() : ''
+      if (!id || !url || !s.contains(url)) {
         continue
       }
-      String ref = STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id
-      if (text.contains(ref) || text.contains(url)) {
-        continue
-      }
-      tail.append('\n\n![](').append(ref).append(')')
-      appended++
+      s = s.replace(url, ChatCompletionsToolWire.STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id)
     }
-    if (appended > 0) {
-      log.info(
-        'Tools-loop native tools: appended {} fallback markdown image line(s) for GenerateImage (assistant omitted inline image refs).',
-        appended
-      )
-      return text + tail.toString()
-    }
-    return text
+    return s
   }
 
-  /**
-   * When {@code GenerateImage} completed on the flux path with a URL but no {@code tool_call_id}, append one markdown
-   * image line if the assistant text has no image yet (single orphan URL only).
-   */
-  private static String openAiEnsureOrphanGenerateImageUrlMarkdown(
-    String assistantText,
-    Collection<String> imageUrlsWithoutToolCallId
-  ) {
-    if (imageUrlsWithoutToolCallId == null || imageUrlsWithoutToolCallId.size() != 1) {
-      return assistantText != null ? assistantText.toString() : ''
-    }
-    String url = imageUrlsWithoutToolCallId.iterator().next()?.toString()?.trim()
-    if (!url) {
-      return assistantText != null ? assistantText.toString() : ''
-    }
-    String text = (assistantText != null ? assistantText.toString() : '')
-    if (text.contains(url) || Pattern.compile('!\\[[^\\]]*\\]\\([^)]+\\)').matcher(text).find()) {
-      return text
-    }
-    return text + '\n\n![](' + url + ')'
-  }
-
-  /**
-   * Before appending an assistant {@code message} to {@code wireMessages}, replace any known huge {@code data:image}
-   * URLs (same bytes as a prior {@code GenerateImage} tool result) with {@link #STUDIO_AI_INLINE_IMAGE_REF_PREFIX} refs
-   * so follow-up {@code POST /v1/chat/completions} requests stay within context limits.
-   */
   private static void openAiMutateAssistantWireContentElideKnownGenerateImageDataUrls(
     Map msgCopy,
     Map<String, String> generateImageDataUrlByToolCallId
@@ -3391,7 +3075,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       if (!id || !url || !s.contains(url)) {
         continue
       }
-      s = s.replace(url, STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id)
+      s = s.replace(url, ChatCompletionsToolWire.STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id)
       changed = true
     }
     if (changed) {
@@ -3408,7 +3092,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     String s = toolOutRaw != null ? toolOutRaw.toString() : ''
     if ('GenerateImage'.equals((fnName ?: '').toString().trim())) {
       if (generateImageDataUrlByToolCallId != null && toolCallId?.toString()?.trim()) {
-        String compact = openAiCompactGenerateImageToolWireForOpenAiContext(s, toolCallId.trim(), generateImageDataUrlByToolCallId)
+        String compact = ChatCompletionsToolWire.compactGenerateImageToolWire(s, toolCallId.trim(), generateImageDataUrlByToolCallId)
         if (compact != null) {
           return compact
         }
@@ -3456,14 +3140,31 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     for (int round = 0; round < maxRounds; round++) {
       if (cancelRequested != null && cancelRequested.get()) {
         Thread.currentThread().interrupt()
-        throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+        throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
       crafterQToolWorkerDiagPhase("native_tool_loop_round_${round}_build_request wireMsgCount=${wireMessages.size()}")
+      Object toolChoice = 'auto'
+      if (round == 0 && openAiWireToolsIncludeGenerateImage(wireTools)) {
+        Map lastUserRound0 = openAiLastUserWireMessage(wireMessages)
+        String lastPlain = lastUserRound0 ? ((openAiFlattenWireUserContent(lastUserRound0.get('content')) ?: '').trim()) : ''
+        String visible = lastPlain
+        try {
+          visible = (AuthoringPreviewContext.stripStudioInjectedPromptBlocks(lastPlain) ?: '').trim() ?: lastPlain
+        } catch (Throwable ignoredStrip) {
+        }
+        if (openAiPlainTextLooksLikeImageOnlyGenerateRequest(visible)) {
+          toolChoice = [type: 'function', function: [name: 'GenerateImage']]
+          log.info(
+            'Tools-loop tools-on: tool_choice forced to GenerateImage (image-only author request, round 0) agentId={}',
+            agentId
+          )
+        }
+      }
       def reqMap = [
         model: model,
         messages: wireMessages,
         tools: wireTools,
-        tool_choice: 'auto',
+        tool_choice: toolChoice,
         stream: false
       ]
       int effMaxOut = openAiClampMaxOutTokensForToolsLoopWire(model, 16000, toolsLoopSessionBundle)
@@ -3483,12 +3184,12 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       openAiEmitRoundWaitSse(ssePreToolAssistantText, round, model, agentId, jsonBody.length(), previousRoundHadRepoMutation)
       if (cancelRequested != null && cancelRequested.get()) {
         Thread.currentThread().interrupt()
-        throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+        throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
       String raw = openAiHttpPostChatCompletionsReadBody(apiKey, jsonBody, false, wireBaseUrl)
       if (cancelRequested != null && cancelRequested.get()) {
         Thread.currentThread().interrupt()
-        throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+        throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
       if (!raw?.trim()) {
         throw new IllegalStateException('Tools-loop chat: empty response body')
@@ -3551,14 +3252,10 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           List tcl = (List) tcl0
           List ordered = PlanOrchestration.reorderToolCallsByPlan(new ArrayList(tcl), assistantRawForOrchestration)
           List runListPrep = ordered != null ? ordered : new ArrayList(tcl)
-          String guardPre = openAiLastUserWireMessage(wireMessages)?.get('content')?.toString() ?: ''
-          if (openAiCrafterqHostedChatAnalyticsIntent(guardPre) && byName.containsKey('ListCrafterQAgentChats')) {
-            runListPrep = openAiRepairToolCallsForCrafterqHostedChatIntent(round, runListPrep, assistantRawForOrchestration, agentId)
-          }
           msgCopy.put('tool_calls', runListPrep)
           if (ordered != null) {
             log.info(
-              'Tools-loop tools-on: plan orchestrator reordered {} tool_calls to match CRAFTERRQ_ORCH block agentId={}',
+              'Tools-loop tools-on: plan orchestrator reordered {} tool_calls to match plan orchestration block agentId={}',
               ordered.size(),
               agentId
             )
@@ -3603,14 +3300,11 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       if (hasTc) {
         def runList = msgCopy.get('tool_calls') as List
         boolean repoMutationThisRound = false
-        String guardLoop = openAiLastUserWireMessage(wireMessages)?.get('content')?.toString() ?: ''
-        boolean cqHostChatGuard =
-          openAiCrafterqHostedChatAnalyticsIntent(guardLoop) && byName.containsKey('ListCrafterQAgentChats')
         boolean anySuccessfulFetchHttpUrl = false
         for (def tcObj : runList) {
           if (cancelRequested != null && cancelRequested.get()) {
             Thread.currentThread().interrupt()
-            throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+            throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
           }
           if (!(tcObj instanceof Map)) {
             continue
@@ -3620,14 +3314,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           def fn = tc.get('function') as Map
           String fnName = fn instanceof Map ? (fn.get('name')?.toString() ?: '') : ''
           String argsStr = fn instanceof Map ? (fn.get('arguments')?.toString() ?: '{}') : '{}'
-          boolean blockedCqMisroute = cqHostChatGuard && CRAFTERRQ_HOSTED_CHAT_BLOCKED_TOOL_NAMES.contains(fnName)
-          if (blockedCqMisroute) {
-            log.warn(
-              'Tools-loop tools-on: blocked {} for CrafterQ hosted-chat analytics user intent (use ListCrafterQAgentChats / GetCrafterQAgentChat) agentId={}',
-              fnName,
-              agentId
-            )
-          } else if (fnName == 'WriteContent' ||
+          if (fnName == 'WriteContent' ||
             fnName == 'publish_content' ||
             fnName == 'TranslateContentItem' ||
             fnName == 'TranslateContentBatch' ||
@@ -3639,24 +3326,18 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           crafterQToolWorkerDiagPhase(
             "native_tool_loop_round_${round}_repository_tool name=${fnName ?: '?'} argsChars=${(argsStr ?: '').length()}"
           )
-          if (blockedCqMisroute) {
-            toolOut = JsonOutput.toJson([
-              ok                           : false,
-              tool                         : fnName,
-              blockedForCrafterqHostedChatIntent: true,
-              message                      :
-                'Tool not executed: the author asked about CrafterQ hosted chat logs (api.crafterq.ai), not CMS translation or scope walks. Call ListCrafterQAgentChats (arguments may be {}) then GetCrafterQAgentChat with a chatId from the listing.',
-              hint                         : 'ListCrafterQAgentChats'
-            ])
-          } else if (tcb == null) {
+          if (tcb == null) {
             toolOut = JsonOutput.toJson([ok: false, error: 'unknown_tool', tool: fnName])
             log.warn('Tools-loop tools-on: unknown tool {} agentId={}', fnName, agentId)
           } else {
             try {
+              ChatCompletionsToolWire.nativeToolCallIdBindingSet(id)
               toolOut = tcb.call(argsStr)
             } catch (Throwable tex) {
               log.warn('Tools-loop tools-on: tool {} failed: {}', fnName, tex.message)
               toolOut = JsonOutput.toJson([ok: false, error: tex.message?.toString()])
+            } finally {
+              ChatCompletionsToolWire.nativeToolCallIdBindingClear()
             }
           }
           crafterQToolWorkerDiagPhase(
@@ -3670,7 +3351,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           } else {
             toolOut = toolOut.toString()
           }
-          if ('FetchHttpUrl'.equals(fnName) && !blockedCqMisroute) {
+          if ('FetchHttpUrl'.equals(fnName)) {
             try {
               def parsedFetch = slurper.parseText(toolOut.toString())
               if (parsedFetch instanceof Map && Boolean.TRUE.equals(((Map) parsedFetch).get('ok'))) {
@@ -3771,12 +3452,11 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     AtomicBoolean cancelRequested = null,
     String wireBaseUrl = null,
     Map toolsLoopSessionBundle = null,
-    Map<String, String> generateImageBacklogByToolCallId = null,
-    Collection<String> generateImageUrlsWithoutToolCallId = null
+    Map<String, String> generateImageBacklogByToolCallId = null
   ) {
     markPipelineWallStart(toolTimingCtx)
     if (cancelRequested != null && cancelRequested.get()) {
-      throw new InterruptedException(CRAFTQ_PIPELINE_CANCELLED)
+      throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
     }
     crafterQPipelineCancelBindingSet(cancelRequested)
     try {
@@ -3871,7 +3551,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     }
     if (sseOut != null) {
       try {
-        def hint = [text: '', metadata: [status: 'crafterq-chat-phase', phase: 'summarizing-results']]
+        def hint = [text: '', metadata: [status: 'aiassistant-chat-phase', phase: 'summarizing-results']]
         synchronized (sseOut) {
           sseOut.write(("data: ${JsonOutput.toJson(hint)}\n\n").getBytes(StandardCharsets.UTF_8))
           sseOut.flush()
@@ -3880,16 +3560,43 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
         // never break return path
       }
     }
-    String stitched = openAiEnsureGenerateImageMarkdownLinesPresent((assistantAccum ?: '').toString(), cqGenerateImageDataUrlByToolCallId)
-    return openAiExpandInlineImageRefs(
-      stitched,
+    Map<String, String> mergedImgUrls =
+      openAiMergedGenerateImageUrlByToolCallId(cqGenerateImageDataUrlByToolCallId, generateImageBacklogByToolCallId)
+    String sanitized =
+      openAiSanitizeAssistantMarkdownReplaceGenerateImageDataUrlsWithRefs((assistantAccum ?: '').toString(), mergedImgUrls)
+    String authorMarkdown =
+      ChatCompletionsToolWire.appendMissingInlineImageRefs(
+        sanitized,
+        cqGenerateImageDataUrlByToolCallId,
+        generateImageBacklogByToolCallId
+      )
+    /** Expand refs for author-visible SSE only here (not in streaming flux mid-chunks). Client preprocess maps huge {@code data:} to short blob refs. */
+    return ChatCompletionsToolWire.expandInlineImageRefs(
+      authorMarkdown,
       cqGenerateImageDataUrlByToolCallId,
-      generateImageBacklogByToolCallId,
-      generateImageUrlsWithoutToolCallId
+      generateImageBacklogByToolCallId
     )
     } finally {
       crafterQPipelineCancelBindingClear()
     }
+  }
+
+  /**
+   * {@code String} indices are UTF-16 code units — never split between a high and low surrogate when chunking SSE JSON.
+   */
+  private static int openAiToolsLoopSseTextChunkEndExclusive(String s, int start, int step) {
+    int len = s.length()
+    if (start >= len) {
+      return len
+    }
+    int end = Math.min(len, start + step)
+    if (end >= len) {
+      return len
+    }
+    while (end > start && Character.isHighSurrogate(s.charAt(end - 1))) {
+      end--
+    }
+    return end > start ? end : Math.min(len, start + 1)
   }
 
   /**
@@ -3913,10 +3620,11 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       t.length(),
       step
     )
-    for (int i = 0; i < t.length(); i += step) {
-      int end = Math.min(t.length(), i + step)
+    for (int i = 0; i < t.length();) {
+      int end = openAiToolsLoopSseTextChunkEndExclusive(t, i, step)
       String part = t.substring(i, end)
       out.write(("data: ${JsonOutput.toJson([text: part, metadata: [:]])}\n\n").getBytes(StandardCharsets.UTF_8))
+      i = end
     }
   }
 
@@ -3932,8 +3640,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     AtomicBoolean terminalEmitted = null,
     String wireBaseUrl = null,
     Map toolsLoopSessionBundle = null,
-    Map<String, String> generateImageBacklogByToolCallId = null,
-    Collection<String> generateImageUrlsWithoutToolCallId = null
+    Map<String, String> generateImageBacklogByToolCallId = null
   ) {
     crafterQToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
     String text
@@ -3949,8 +3656,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
         cancelRequested,
         wireBaseUrl,
         toolsLoopSessionBundle,
-        generateImageBacklogByToolCallId,
-        generateImageUrlsWithoutToolCallId
+        generateImageBacklogByToolCallId
       )
     } catch (InterruptedException ie) {
       log.warn(
@@ -4161,15 +3867,6 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       def elided = openAiBody.length() > 2000 ? openAiBody.substring(0, 2000) + '…' : openAiBody
       return 'Chat request failed. HTTP detail: ' + elided
     }
-    if (msg.contains('HTTP 5') && msg.contains('api.crafterq.ai')) {
-      return '''The remote chat service (api.crafterq.ai) returned a server error (HTTP 5xx). The Studio plugin is working; the failure is upstream.
-
-If Studio logs show a small prompt (well under the configured max), this is not the prompt-length limit—check agent ID, remote service health, and upstream logs. The plugin forwards nearly all inbound request headers to the remote API (except hop-by-hop and outbound Content-Type/Accept/Length).
-
-Please try again or contact your administrator.
-
-Technical detail: ''' + msg
-    }
     if (msg.contains('timed out') || msg.contains('Timed out')) {
       return 'The request to the remote chat service timed out. Please try again.'
     }
@@ -4282,7 +3979,7 @@ Technical detail: ''' + msg
   /** Expert guidance / SME tools — server progress lines use {@code 🛠️🤓} before the category emoji. */
   private static boolean isExpertGuidanceToolName(String toolName) {
     def n = (toolName ?: '').toString().trim()
-    return n == 'QueryExpertGuidance' || n == 'ConsultCrafterQExpert' || n == 'GetCrafterizingPlaybook'
+    return n == 'QueryExpertGuidance' || n == 'GetCrafterizingPlaybook'
   }
 
   /**
@@ -4301,8 +3998,6 @@ Technical detail: ''' + msg
       case 'QueryExpertGuidance':
       case 'ListPagesAndComponents':
       case 'GetCrafterizingPlaybook':
-      case 'ListCrafterQAgentChats':
-      case 'GetCrafterQAgentChat':
         return '🔍'
       case 'Tools-loop chat':
         // Waiting on chat.completions between tool rounds — not a repo read; distinct from 🔍 tools.
@@ -4320,7 +4015,6 @@ Technical detail: ''' + msg
       case 'GetContentSubgraph':
         return '✏️'
       case 'analyze_template':
-      case 'ConsultCrafterQExpert':
         return '📈'
       default:
         return '🔄'
@@ -4508,6 +4202,26 @@ Technical detail: ''' + msg
         line = line + formatCqDurationSuffix(taskDurationMs) + '\n'
       }
       def event = [text: line, metadata: [status: 'tool-progress', tool: toolName, phase: phase]]
+      if (
+        'GenerateImage'.equalsIgnoreCase(toolName ?: '') &&
+        ('done'.equals(phase) || 'warn'.equals(phase)) &&
+        toolResult instanceof Map
+      ) {
+        try {
+          Map gm = ChatCompletionsToolWire.unwrapGenerateImageToolResultMap((Map) toolResult)
+          String tid = ChatCompletionsToolWire.generateImageBacklogToolCallId(gm)?.trim()
+          String url = ChatCompletionsToolWire.generateImageResultUrlString(gm)?.trim()
+          boolean okHttp = url && (url.startsWith('http://') || url.startsWith('https://'))
+          boolean okSmallData =
+            url &&
+              url.startsWith('data:image') &&
+              url.length() <= GENERATE_IMAGE_TOOL_PROGRESS_METADATA_MAX_URL_CHARS
+          if (tid && url && (okHttp || okSmallData)) {
+            event.metadata.studioAiInlineImageUrls = [(tid): url]
+          }
+        } catch (Throwable ignoredGenImgMeta) {
+        }
+      }
       if ('done'.equals(phase)) {
         def tn = toolName?.toString() ?: ''
         if (tn.equalsIgnoreCase('WriteContent')) {
@@ -4807,28 +4521,33 @@ Technical detail: ''' + msg
       crafterQPipelineCancelBindingClear()
 
       def genImgBacklogByToolCallId = new ConcurrentHashMap<String, String>()
-      def genImgUrlsWithoutToolCallId = new ConcurrentLinkedQueue<String>()
       def toolTimingCtx = createToolTimingContext()
       def toolProgressListener = { String tn, String ph, Map inp, Throwable er = null, Object tres = null, Long taskDurMs = null ->
         if ('GenerateImage'.equals(tn) && tres instanceof Map && ('done'.equals(ph) || 'warn'.equals(ph))) {
           try {
-            Map gm = openAiUnwrapGenerateImageToolResultMap((Map) tres)
-            String url = openAiGenerateImageResultUrlString(gm)
-            if (Boolean.TRUE.equals(gm.ok) || url) {
-              if (url) {
-                boolean okData = url.startsWith('data:image') && url.toLowerCase(Locale.ROOT).contains(';base64,')
-                boolean okHttp = url.startsWith('https://') || url.startsWith('http://')
-                if (okData || okHttp) {
-                  String tid = gm.inlineImageRef?.toString()?.trim() ?: gm.toolCallId?.toString()?.trim()
-                  if (tid) {
-                    genImgBacklogByToolCallId.put(tid, url)
-                  } else {
-                    genImgUrlsWithoutToolCallId.add(url)
-                  }
+            Map gm = ChatCompletionsToolWire.unwrapGenerateImageToolResultMap((Map) tres)
+            String url = ChatCompletionsToolWire.generateImageResultUrlString(gm)?.trim()
+            if (url) {
+              boolean okData = url.startsWith('data:image')
+              boolean okHttp = url.startsWith('https://') || url.startsWith('http://')
+              if (okData || okHttp) {
+                String tid = ChatCompletionsToolWire.generateImageBacklogToolCallId(gm)
+                if (tid) {
+                  genImgBacklogByToolCallId.put(tid, url)
+                } else {
+                  log.warn(
+                    'GenerateImage tool-progress: image URL present but tool_call_id missing — cannot map for SSE expansion.'
+                  )
                 }
+              } else {
+                log.warn(
+                  'GenerateImage tool-progress: skip backlog — url is not data:image or http(s) (chars={})',
+                  url.length()
+                )
               }
             }
-          } catch (Throwable ignoredGenImg) {
+          } catch (Throwable genImgEx) {
+            log.warn('GenerateImage tool-progress: backlog capture failed: {}', genImgEx.message)
           }
         }
         writeToolProgressSse(out, tn, ph, inp ?: [:], er, tres, taskDurMs)
@@ -4953,7 +4672,7 @@ Technical detail: ''' + msg
         def sentCompletedAtomic = new AtomicBoolean(false)
         def sawFirstClientChunk = new AtomicBoolean(false)
         def loggedEmptyAssistantTextDelta = new AtomicBoolean(false)
-        /** Merge stream deltas so {@code studio-ai-inline-image://…} is never split across {@link #openAiExpandInlineImageRefs} calls. */
+        /** Merge stream deltas so {@code studio-ai-inline-image://…} is never split mid-token across SSE chunks. */
         StringBuilder fluxAssistRawAcc = new StringBuilder()
         AtomicInteger fluxAssistExpandedSentLen = new AtomicInteger(0)
 
@@ -5033,17 +4752,26 @@ Technical detail: ''' + msg
             }
             String fullRaw = fluxAssistRawAcc.toString()
             if (streamFinished) {
-              Map<String, String> fluxImgMap = new LinkedHashMap<>(genImgBacklogByToolCallId)
               fullRaw = openAiStripForbiddenMetaPlanFromAssistantText(fullRaw)
-              fullRaw = openAiEnsureGenerateImageMarkdownLinesPresent(fullRaw, fluxImgMap)
-              fullRaw = openAiEnsureOrphanGenerateImageUrlMarkdown(fullRaw, genImgUrlsWithoutToolCallId)
               fluxAssistRawAcc.setLength(0)
               fluxAssistRawAcc.append(fullRaw)
             } else {
               fullRaw = openAiStripForbiddenMetaPlanFromAssistantText(fullRaw)
             }
-            String expandedFull =
-              openAiExpandInlineImageRefs(fullRaw, null, genImgBacklogByToolCallId, genImgUrlsWithoutToolCallId)
+            Map<String, String> fluxMerged =
+              genImgBacklogByToolCallId != null && !genImgBacklogByToolCallId.isEmpty()
+                ? new LinkedHashMap<String, String>(genImgBacklogByToolCallId)
+                : [:]
+            String sanitizedFlux =
+              openAiSanitizeAssistantMarkdownReplaceGenerateImageDataUrlsWithRefs(fullRaw, fluxMerged)
+            String rawForImgExpand = sanitizedFlux
+            if (streamFinished && genImgBacklogByToolCallId != null && !genImgBacklogByToolCallId.isEmpty()) {
+              rawForImgExpand =
+                ChatCompletionsToolWire.appendMissingInlineImageRefs(sanitizedFlux, null, genImgBacklogByToolCallId)
+              rawForImgExpand =
+                ChatCompletionsToolWire.expandInlineImageRefs(rawForImgExpand, null, genImgBacklogByToolCallId)
+            }
+            String expandedFull = rawForImgExpand
             int sent = fluxAssistExpandedSentLen.get()
             int expLen = expandedFull.length()
             String fluxChunkText = sent < expLen ? expandedFull.substring(sent) : ''
@@ -5183,8 +4911,7 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
                   openAiToolsTerminalEmitted,
                   StudioAiLlmKind.toolsLoopChatBaseUrlFromBundle(springAi),
                   springAi,
-                  genImgBacklogByToolCallId,
-                  genImgUrlsWithoutToolCallId
+                  genImgBacklogByToolCallId
                 )
                 null
               } finally {
@@ -5282,7 +5009,7 @@ If this is unexpected: verify outbound HTTPS from Studio to your configured chat
                 return null
               } catch (ExecutionException ee) {
                 Throwable c = ee.getCause() != null ? ee.getCause() : ee
-                if (c instanceof InterruptedException && CRAFTQ_PIPELINE_CANCELLED == (c.message ?: '').toString()) {
+                if (c instanceof InterruptedException && AIASSISTANT_PIPELINE_CANCELLED == (c.message ?: '').toString()) {
                   log.warn(
                     'AI Assistant chat stream: Tools-loop tool pipeline exited cooperatively after CLIENT_ABORT cancel flag. agentId={}',
                     agentId
@@ -5372,54 +5099,6 @@ If this is unexpected: verify outbound HTTPS from Studio to your configured chat
         return null
       }
       return [message: "Spring AI stream failed: ${t.message}"]
-    }
-  }
-
-  Object chatStreamProxy(String agentId, String prompt, String chatId = null) {
-    def streamUrl = "https://api.crafterq.ai/v1/chats?agentId=${URLEncoder.encode(agentId, 'UTF-8')}&stream=true"
-    def payload = (chatId ? [prompt: prompt, chatId: chatId] : [prompt: prompt])
-    def payloadBytes = JsonOutput.toJson(payload).getBytes('UTF-8')
-
-    HttpURLConnection conn = null
-    InputStream inputStream = null
-
-    try {
-      conn = (HttpURLConnection) new URL(streamUrl).openConnection()
-      conn.setRequestMethod('POST')
-      conn.setRequestProperty('Content-Type', 'application/json')
-      conn.setRequestProperty('Accept', 'text/event-stream')
-      conn.setDoOutput(true)
-      conn.setChunkedStreamingMode(0)
-
-      def chatUserHeader = request?.getHeader('X-CrafterQ-Chat-User')
-      if (chatUserHeader) conn.setRequestProperty('X-CrafterQ-Chat-User', chatUserHeader)
-
-      def os = conn.getOutputStream()
-      try { os.write(payloadBytes) } finally { os.close() }
-
-      def status = conn.getResponseCode()
-      if (status < 200 || status >= 300) {
-        response?.setStatus(status)
-        def err = conn.getErrorStream()?.text ?: conn.getResponseMessage()
-        return [message: "Upstream error: ${err}"]
-      }
-
-      inputStream = conn.getInputStream()
-      response?.setContentType('text/event-stream')
-      response?.setHeader('Cache-Control', 'no-cache')
-      response?.setHeader('X-Accel-Buffering', 'no')
-
-      def out = response?.getOutputStream()
-      byte[] buf = new byte[4096]
-      int n
-      while ((n = inputStream.read(buf)) != -1) {
-        out.write(buf, 0, n)
-        out.flush()
-      }
-      return null
-    } finally {
-      try { inputStream?.close() } catch (ignored) {}
-      try { conn?.disconnect() } catch (ignored) {}
     }
   }
 

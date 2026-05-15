@@ -1,8 +1,10 @@
 # Chat, CMS Tools, and Runtime Behavior
 
-Companion to **[`spec.md`](spec.md)** for tools, REST bodies, CrafterQ/SaaS HTTP, MCP, and runtime troubleshooting contracts. When those behaviors change, update **this file** and the relevant **`spec.md`** sections.
+Companion to **[`spec.md`](spec.md)** for tools, REST bodies, MCP, and runtime troubleshooting contracts. When those behaviors change, update **this file** and the relevant **`spec.md`** sections.
 
-**Audience:** Maintainers and advanced integrators working on **tools**, **SSE**, **optional hosted SaaS identity**, or **Studio integration**. For **`<llm>`** selection and keys, see [llm-configuration.md](../using-and-extending/llm-configuration.md).
+**Audience:** Maintainers and advanced integrators working on **tools**, **SSE**, or **Studio integration**. For **`<llm>`** selection and keys, see [llm-configuration.md](../using-and-extending/llm-configuration.md).
+
+**Hosted remote chat:** earlier releases could call CrafterQ SaaS (`api.crafterq.ai`) for hosted-only **`llm`** values or optional SME/chat-audit tools. That integration **has been removed**. Chat always runs against **your configured provider** (**`openAI`**, **`claude`**, **`script:{id}`**, etc.); legacy spellings such as **`crafterQ`**, **`aiassistant`**, and **`hostedchat`** are **rejected** by **`StudioAiLlmKind.normalize`** (**HTTP 400**).
 
 **LLM ids, keys, and provider behavior:** [llm-configuration.md](../using-and-extending/llm-configuration.md)  
 **Admin checklist and `ui.xml` surfaces:** [configuration-guide.md](../using-and-extending/configuration-guide.md)  
@@ -18,8 +20,6 @@ Companion to **[`spec.md`](spec.md)** for tools, REST bodies, CrafterQ/SaaS HTTP
 - **Reads:** v1 `getContent`-style methods when present; otherwise v2 `getContentAsResource` and `getItemDescriptor` (see `StudioToolOperations.groovy`).
 - **Content item XML:** Pages and components are stored as `<page>` / `<component>` XML whose child element names come from the **content type** (form-definition field ids). Prompts and tool descriptions tell the model **not** to invent unrelated tags (e.g. generic `<article>` trees). The **`update_content`** tool loads the item’s **`form-definition.xml`** (when `<content-type>` is present in the file) and returns **`contentTypeId`**, **`formFieldIds`**, and the full **`formDefinitionForContentType`** so the model can edit **in place** before **`WriteContent`**. (Typical Studio forms + page XML are small relative to modern LLM context windows.) On **`WriteContent`**, the server may also append **`checkbox-group`** **`item`** rows for **taxonomy-backed** datasources when the form requires selections but the model omitted them (see **[spec.md](spec.md)**).
 - **`ListContentTranslationScope`:** Returns a **nested tree** and **`pathChunks`** of `/site/.../*.xml` paths reachable from a page (or component) via `<key>` references — **metadata only** (no bulk XML). Default **`pathChunks`** use **one path per chunk** so full-page translate/copy uses **`GetContent`** / **`WriteContent`** per item and stays within LLM context.
-- **`ConsultCrafterQExpert` (tools-loop chat sessions only):** Calls **`api.crafterq.ai/v1/chats`** with the **same `agentId`** as the widget session so the **hosted expert API** can answer as a **subject-matter / RAG** consult (copy, tone, SEO, IA). Does **not** read or write the repository. Prompt length is capped and long transcripts are compacted (default cap **1000** characters; tunable only via JVM — see **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)**).
-- **`ListCrafterQAgentChats` / `GetCrafterQAgentChat` (tools-loop chat sessions only, when `<crafterQAgentId>` is set):** Read-only **GET** calls to **`/v1/agents/{agentId}/chats`** (optional **startDate**/**endDate** — omit both for **last 30 days UTC**; session **`agentId`** from config when omitted in args) and **`/v1/agents/{agentId}/chats/{chatId}`** for hosted conversation payloads (e.g. audit dislikes, then **`ConsultCrafterQExpert`** or CMS tools for fixes). Same forwarded-header contract as other CrafterQ calls (**`authorization`** is never forwarded — CrafterQ identity uses headers such as **`X-CrafterQ-Chat-User`** from the widget when the author signed into CrafterQ in Studio).
 - **`GetContentTypeFormDefinition`:** Prefer **`contentPath`** (same repository path as the page/component XML). The server reads **`<content-type>`** from that file so the model must not guess types from filenames (e.g. `/site/website/index.xml` → **`/page/index`** is wrong). If **`contentPath`** and **`contentTypeId`** disagree, **`contentPath`** wins.
 - **`GenerateImage` (OpenAI only):** Calls **`POST /v1/images/generations`** with the same API key as chat. The image model comes only from **`<imageModel>`** / POST **`imageModel`** (no JVM default). OpenAI’s Images API targets **GPT Image** models. The request does not send **`response_format`** (rejected for GPT image); the tool adds **`output_format`** where appropriate and sets **`url`** to a **`data:`** URL when the API returns **`b64_json`** only (the raw tool map omits **`b64_json`** once **`url`** is populated so the payload is not doubled). Configure **`size`** / **`quality`** per OpenAI’s GPT Image docs; persist assets under **`/static-assets/`** for production. In the **native tools-loop**, **`GenerateImage`** results with a **`data:`** bitmap are **not** sent in full on the **`role:tool` wire** (that would exceed the chat context limit). The server stores the bitmap keyed by **`tool_call_id`**, sends the model a **compact** JSON (**`inlineImageRef`** + instructions), and expands **`studio-ai-inline-image://…`** placeholders into the real image URL in the **final** assistant text delivered to Studio.
 
@@ -43,7 +43,8 @@ Use only for **local testing** when you cannot set **`OPENAI_API_KEY`** on the S
 
 ```xml
 <agent>
-  <crafterQAgentId>ANOTHER_AGENT_UUID</crafterQAgentId>
+  <!-- Stable agent id for stream/chat agentId + ui.xml merge (XML tag name is legacy: crafterQAgentId) -->
+  <crafterQAgentId>YOUR_AGENT_UUID</crafterQAgentId>
   <label>OpenAI tools</label>
   <llm>openAI</llm>
   <llmModel>gpt-4o-mini</llmModel>
@@ -63,62 +64,25 @@ See `craftercms-plugin.yaml` under `installation` → `configuration` → `agent
 
 ```xml
 <agent>
-  <crafterQAgentId>ANOTHER_AGENT_UUID</crafterQAgentId>
-  <label>OpenAI tools</label>
+  <crafterQAgentId>019c7237-478b-7f98-9a5c-87144c3fb010</crafterQAgentId>
+  <label>OpenAI authoring</label>
   <llm>openAI</llm>
   <llmModel>gpt-4o</llmModel>
   <imageModel>gpt-image-1</imageModel>
 </agent>
-<agent>
-  <crafterQAgentId>YOUR_CRAFTERQ_AGENT_UUID</crafterQAgentId>
-  <label>Hosted chat only (no repo tools)</label>
-  <llm>crafterQ</llm>
-</agent>
 ```
+
+Each **`crafterQAgentId`** value is the stable **`agentId`** sent on **`/ai/stream`** and **`/ai/agent/chat`** (the XML tag name is historical only).
 
 ---
 
-## Hosted SaaS API Tools on the Tool-capable Path (`ConsultCrafterQExpert`, `ListCrafterQAgentChats`, `GetCrafterQAgentChat`) {#crafterq-api-tools-tools-loop}
+## `ui.xml` merge helper (`CrafterQBearerUiXmlMerge`)
 
-These three tools are registered **only** for agents that use the **Spring AI native tool loop** with the shared **`AiOrchestrationTools`** catalog (e.g. **`openAI`**, **`xAI`**, **`deepSeek`**, **`llama`**, **`genesis`/`gemini`**, **`claude`**). They are **not** registered for **`crafterQ`** hosted chat alone (`ExpertChatModel` — no function tools on that adapter).
+Despite the class name, this helper **only** merges **`llm`**, **`llmModel`**, **`imageModel`**, and **`imageGenerator`** from the matching **`<agent>`** row when those fields are missing on the POST body. Matching uses **`crafterQAgentId`** **===** request **`agentId`**.
 
-**Configure the agent in `ui.xml` (or the equivalent widget JSON):**
-
-1. **`<llm>`** — use a **tool-capable** value from [llm-configuration.md](../using-and-extending/llm-configuration.md) (**not** `crafterQ` if you need these tools).
-2. **`<crafterQAgentId>`** — set to your **CrafterQ SaaS agent UUID** (same id you use in the hosted app / API URLs). If this element is missing or empty, **`ConsultCrafterQExpert`**, **`ListCrafterQAgentChats`**, and **`GetCrafterQAgentChat`** are **omitted** from the tool list for that agent.
-3. **Tools enabled for the request** — same as other CMS tools: do **not** use **`omitTools: true`** for turns where the model should call them; ensure **`&lt;enableTools&gt;false&lt;/enableTools&gt;`** is **not** set on the agent if you want tools at all (see **[spec.md](spec.md)** / agent XML for `enableTools`).
-
-**Server guard (native tools-loop):** When the user message matches **hosted CrafterQ chat analytics** (e.g. “number one question in CrafterQ”, “what people ask” in chat) and **`ListCrafterQAgentChats`** is registered, **`AiOrchestration`** may **rewrite** a misrouted first-round **`ListContentTranslationScope`** call to **`ListCrafterQAgentChats`** and **block** **`TranslateContentBatch`** / **`TranslateContentItem`** / **`ListContentTranslationScope`** for that same user turn so the model cannot burn translate inner calls or touch repo XML for a non-translation ask.
-
-**Minimal example (OpenAI vendor row + optional hosted SaaS API tools):**
-
-```xml
-<agent>
-  <label>Authoring with optional SaaS chat audit</label>
-  <crafterQAgentId>019a4b75-9cb9-7814-a032-14242950d5bc</crafterQAgentId>
-  <llm>openAI</llm>
-  <llmModel>gpt-4o-mini</llmModel>
-  <!-- Optional: admin JWT via Studio host env (recommended). Literal <crafterQBearerToken> is also supported. -->
-  <crafterQBearerTokenEnv>CRAFTQ_ADMIN_JWT</crafterQBearerTokenEnv>
-</agent>
-```
-
-**Identity / auth:** Server-side CrafterQ HTTP calls **do not** forward the Studio **`Authorization`** header to `api.crafterq.ai` (that value is the Studio session, not CrafterQ). Authors can still authenticate CrafterQ in two ways:
-
-- **Widget / browser session:** **`X-CrafterQ-Chat-User`** (from localStorage after CrafterQ login in the widget), forwarded like other inbound headers.
-- **Configured CrafterQ JWT (admin or service token):** per-agent **`&lt;crafterQBearerTokenEnv&gt;`** — element text is the **name of an environment variable on the Studio host** whose value is the JWT (read at request time with `System.getenv`). Optional **`&lt;crafterQBearerToken&gt;`** — literal JWT in config (**discouraged** in Git-tracked repos; use env + `crafterQBearerTokenEnv` in production). The plugin sends **`Authorization: Bearer &lt;token&gt;`** to `api.crafterq.ai` when either resolves to a non-empty string (**env wins** when both are set and the env value is non-blank). Same fields are sent on the stream/chat JSON body from the widget (mirroring ui.xml). JSON keys **`crafter-q-bearer-token-env`** / **`crafter_q_bearer_token_env`** (and token variants) are accepted as aliases.
-
-**Crafter `${env:…}` vs this plugin:** CrafterCMS documents **`${env:ENVIRONMENT_VARIABLE}`** substitution for **Studio server configuration** (for example properties in `studio-config.yaml` and related override files). See [Studio configuration](https://craftercms.com/docs/4.1/reference/modules/studio/configuration/index.html). This plugin **does not** implement or interpret that syntax inside **`&lt;crafterQBearerToken&gt;`** / JSON mirror fields; bearer values there are **literal strings** (after optional `Bearer ` strip). For a JWT from the host environment, use **`&lt;crafterQBearerTokenEnv&gt;`** as above.
-
-**Diagnostics (no full secrets in logs):** When a bearer is installed from the stream/chat POST body, Studio logs **INFO** with **source** (`env:VAR` or `literal:POST`), **character count**, and a **short preview** (first/last characters only). If **`crafterQBearerTokenEnv`** is present but **`System.getenv`** returns blank, Studio logs **WARN** (env name not resolved — check JVM env and Studio restart). On CrafterQ **401/403** from GET/POST to `api.crafterq.ai`, Studio logs **WARN** with whether a bearer was stored on the request, the same preview, and whether **`X-CrafterQ-Chat-User`** was present. **`ListCrafterQAgentChats` / `GetCrafterQAgentChat`** error payloads may include **`crafterQBearerInstalledFromPost`**, **`crafterQBearerPreview`**, and **`xCrafterQChatUserPresent`** for the model.
-
-If listing or chat calls return **401/403**, verify **`X-CrafterQ-Chat-User`** and/or the bearer env/token above and that CrafterQ accepts that identity. On **401**, the tool result JSON also includes **`authHint`** (server-added) with the same checklist so the model can quote it in chat.
-
-**HTTP 401 on `ListCrafterQAgentChats` / `GetCrafterQAgentChat`:** The CrafterQ API requires **either** a valid **`X-CrafterQ-Chat-User`** header on the Studio stream/chat request (after signing into CrafterQ in the widget) **or** a configured **`Authorization: Bearer …`** to `api.crafterq.ai` via **`crafterQBearerTokenEnv`** / **`crafterQBearerToken`** (see above). Having only a Studio session cookie is not enough.
+---
 
 **Optional user-tools registry noise:** If the site has no `config/studio/scripts/aiassistant/user-tools/registry.json`, Studio may log **`ContentNotFoundException`** when the plugin probes for that file during tool catalog build; it is **non-fatal**. To silence it, add an empty registry at that path with body **`[]`** (JSON array) or a valid `{ "tools": [] }` object.
-
-**Tool arguments (reminder):** **`ListCrafterQAgentChats`:** optional **`startDate`** / **`endDate`** (ISO-8601 UTC instants, or date-only `YYYY-MM-DD` treated as UTC midnight). **Omit both** to let the server use the **last 30 days UTC** and the session **`crafterQAgentId`** from the agent row (same as stream **`agentId`**). Optional **`limit`** (1–100, default 20); optional **`agentId`** to override. **`GetCrafterQAgentChat`** requires **`chatId`**; optional **`agentId`** the same way.
 
 ---
 
@@ -163,7 +127,7 @@ Inside an `<agent>` that uses `<llm>openAI</llm>`, add one or more **`<expertSki
 
 Element form is also supported: `<expertSkill><name>…</name><url>…</url><description>…</description></expertSkill>`.
 
-**Optional tuning (expert skills only):** Markdown from `<expertSkill>` URLs is chunked and embedded into a per-skill in-memory index on the Studio server; defaults are usually enough. If you hit size or memory limits, optional JVM tuning keys are documented in **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (section **Expert skills**). This is **not** agent `ui.xml` configuration and is unrelated to CrafterQ bearer tokens.
+**Optional tuning (expert skills only):** Markdown from `<expertSkill>` URLs is chunked and embedded into a per-skill in-memory index on the Studio server; defaults are usually enough. If you hit size or memory limits, optional JVM tuning keys are documented in **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (section **Expert skills**). This is **not** agent `ui.xml` configuration.
 
 ---
 
@@ -175,9 +139,9 @@ The Studio React client stops reading the SSE body as soon as it sees **`metadat
 
 ### Author-visible Progress (Tools-loop + Tools)
 
-- **Prompts** (built-in system text from `ToolPrompts.getLlm_AUTHORING_INSTRUCTIONS()` — site override file `GENERAL_LLM_AUTHORING_INSTRUCTIONS.md` — plus `[TOOL-GUARD]` and optional user prefix): the model must stream a **## Plan** heading and numbered steps **before** the first tool call, follow that plan, **re-post the same checklist after each tool** with **✅** / **❌** / **⚠️** / **⬜** (pending — not the hourglass emoji, to avoid mimicking server logs), and prefix **🛠️** when narrating tool use in its own words (use **🤓** when narrating **QueryExpertGuidance**, **GetCrafterizingPlaybook**, or **ConsultCrafterQExpert**). It must **not** fabricate server-style tool-progress lines; real progress is SSE-injected. The closing message repeats the checklist with the same markers.
+- **Prompts** (built-in system text from `ToolPrompts.getLlm_AUTHORING_INSTRUCTIONS()` — site override file `GENERAL_LLM_AUTHORING_INSTRUCTIONS.md` — plus `[TOOL-GUARD]` and optional user prefix): the model must stream a **## Plan** heading and numbered steps **before** the first tool call, follow that plan, **re-post the same checklist after each tool** with **✅** / **❌** / **⚠️** / **⬜** (pending — not the hourglass emoji, to avoid mimicking server logs), and prefix **🛠️** when narrating tool use in its own words (use **🤓** when narrating **QueryExpertGuidance** or **GetCrafterizingPlaybook**). It must **not** fabricate server-style tool-progress lines; real progress is SSE-injected. The closing message repeats the checklist with the same markers.
 - **Tools-loop + tools (RestClient loop):** the model emits **`## Plan`** and **`tool_calls` in the same** `stream:false` **chat.completions** round when the API allows; the plan text is **streamed to the client** (SSE) **before** server-executed tools run. There is **no separate author “approve plan” step** in Studio — the gate only **withholds tools** briefly if the plan is empty/meta, then retries with a nudge (see `ToolPrompts` / `AiOrchestration`).
-- **Server SSE:** while tools run, **`AiOrchestration`** injects SSE chunks with **`metadata.status: "tool-progress"`** and **`metadata.phase`**. Each injected line starts with **🛠️** plus a category emoji: **🔍** read tools (including **ListCrafterQAgentChats**, **GetCrafterQAgentChat**), **✏️** write/revert/publish and `update_*` / **GenerateImage**, **📈** **analyze_template** (and **ConsultCrafterQExpert** uses **📈** after **🤓**), **🔄** other tools. **Expert** tools **QueryExpertGuidance**, **GetCrafterizingPlaybook**, and **ConsultCrafterQExpert** use **🛠️🤓** before the category (e.g. `start` → `🛠️🤓🔍 **QueryExpertGuidance** …`, `🛠️🤓📈 **ConsultCrafterQExpert** …`). Other tools stay `🛠️` + category only (e.g. `🛠️🔍 **GetContent** …`). The generic “tools working” hint uses **🛠️🔄**. The chat UI appends **`text`** like normal stream tokens.
+- **Server SSE:** while tools run, **`AiOrchestration`** injects SSE chunks with **`metadata.status: "tool-progress"`** and **`metadata.phase`**. Each injected line starts with **🛠️** plus a category emoji: **🔍** read tools (e.g. **GetContent**, **ListPagesAndComponents**), **✏️** write/revert/publish and `update_*` / **GenerateImage**, **📈** **analyze_template**, **🔄** other tools. **Expert** tools **QueryExpertGuidance** and **GetCrafterizingPlaybook** use **🛠️🤓** before the category (e.g. `start` → `🛠️🤓🔍 **QueryExpertGuidance** …`, `🛠️🤓📈 **GetCrafterizingPlaybook** …`). Other tools stay `🛠️` + category only (e.g. `🛠️🔍 **GetContent** …`). The generic “tools working” hint uses **🛠️🔄**. The chat UI appends **`text`** like normal stream tokens.
 
 ---
 
@@ -191,7 +155,7 @@ If a tool throws mid-stream (e.g. Spring AI `MessageAggregator` / `UndeclaredThr
 
 `POST` … `/ai/stream` and `/ai/agent/chat` accept:
 
-- `llm`: `crafterQ` | `openAI` | `xAI` | `deepSeek` | `llama` | `genesis` | `gemini` | `claude` | `script:{id}` — **required** on the wire after merge: missing, blank, invalid **`script:…`** ids, or unknown strings → **400** (`StudioAiLlmKind.normalize`). When **`siteId`** + **`agentId`** are set, the server may copy **`llm`** from the matching **`<agent>`** in **`/ui.xml`** if the POST omitted it. Matching aliases are normalized server-side (e.g. `grok` → xAI, `ollama` → llama). **`script:myid`** → **`scriptLlm:myid`** and loads site Groovy from `/scripts/aiassistant/llm/myid/runtime.groovy`.
+- `llm`: `openAI` | `xAI` | `deepSeek` | `llama` | `genesis` | `gemini` | `claude` | `script:{id}` — **required** on the wire after merge: missing, blank, invalid **`script:…`** ids, unknown strings, or legacy hosted-only ids (**`crafterQ`**, **`aiassistant`**, **`hostedchat`**, …) → **400** (`StudioAiLlmKind.normalize`). When **`siteId`** + **`agentId`** are set, the server may copy **`llm`** from the matching **`<agent>`** in **`/ui.xml`** if the POST omitted it. Matching aliases are normalized server-side (e.g. `grok` → xAI, `ollama` → llama). **`script:myid`** → **`scriptLlm:myid`** and loads site Groovy from `/scripts/aiassistant/llm/myid/runtime.groovy`.
 - `llmModel`: optional string
 - `imageModel`: optional string — OpenAI **Images** model id for **GenerateImage**; must be set on the agent and/or this body field when the model should call **GenerateImage** (no server default). Prefer **`gpt-image-1`** or **`gpt-image-1-mini`**.
 - `openAiApiKey`: optional string — **testing only**; per-provider precedence (OpenAI, xAI, DeepSeek, etc.): ignored when the matching server-side key is set (host **env** vars per **[llm-configuration.md](../using-and-extending/llm-configuration.md)**, plus JVM fallbacks in **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)**). For **`claude`**, the same field can carry the Anthropic key when no **`ANTHROPIC_API_KEY`** is configured.
@@ -259,7 +223,7 @@ CMS tools call Studio **in-process** (`cstudioContentService`, configuration bea
 The plugin **captures** `SecurityContextHolder.getContext()` on the **Studio servlet thread** when building the Spring AI client (`AiOrchestration.buildSpringAiChatClient`) and passes a **copy** into `StudioToolOperations`, which calls `SecurityContextHolder.setContext(...)` around tool I/O (`writeContent`, `getContent`, `DeploymentService.deploy`, v1 `revertContentItem`, OpenSearch-backed listing, etc.). `@HasPermission` checks use that context.
 
 - If you still see this error, confirm the chat/stream REST call is authenticated as a **Studio user** with **write** permission on the path (not an anonymous session with no `Authentication`).
-- Custom entry points that construct `StudioToolOperations` without going through `AiOrchestration` must pass the same **security context copy** (4th argument) or tools will log a one-time warning and may fail on worker threads. Optional **5th** = remote hosted **`agentId`** for **`ConsultCrafterQExpert`**; **6th** = max consult prompt chars (defaults match the hosted-prompt cap described in **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)**).
+- Custom entry points that construct `StudioToolOperations` without going through `AiOrchestration` must pass the same **security context copy** (4th argument) or tools will log a one-time warning and may fail on worker threads.
 
 ---
 
@@ -271,4 +235,4 @@ The **Tools Panel** widget **`craftercms.components.aiassistant.AutonomousAssist
 
 ## Future
 
-Additional hosted-tool contracts or provider rows may be documented in [llm-configuration.md](../using-and-extending/llm-configuration.md) as they ship. **`ConsultCrafterQExpert`** already calls the hosted stack as a **CMS tool** from **tools-loop chat** sessions.
+Additional provider rows or MCP integrations may be documented in [llm-configuration.md](../using-and-extending/llm-configuration.md) as they ship.

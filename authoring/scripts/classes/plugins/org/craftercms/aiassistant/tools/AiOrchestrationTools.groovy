@@ -10,6 +10,7 @@ import plugins.org.craftercms.aiassistant.imagegen.StudioAiImageGenerator
 import plugins.org.craftercms.aiassistant.imagegen.StudioAiImageGeneratorFactory
 import plugins.org.craftercms.aiassistant.mcp.StudioAiMcpClient
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
+import plugins.org.craftercms.aiassistant.orchestration.chatcompletions.ChatCompletionsToolWire
 import plugins.org.craftercms.aiassistant.playbook.CrafterizingPlaybookLoader
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -237,12 +238,6 @@ class AiOrchestrationTools {
     '{"type":"object","properties":{"siteId":{"type":"string"},"contentPath":{"type":"string","description":"Root page or component XML under /site/... ending in .xml"},"path":{"type":"string","description":"Alias for contentPath"},"chunkSize":{"type":"integer","description":"Paths per batch for GetContent/WriteContent rounds (default 1 — one item at a time; max 50)"},"maxItems":{"type":"integer","description":"Optional max items in scope (default 300, cap 2000)"},"maxDepth":{"type":"integer","description":"Optional max reference depth from root (default 40, cap 100)"}},"required":["siteId"]}'
   private static final String SCHEMA_CRAFTERIZING_PLAYBOOK =
     '{"type":"object","properties":{"topic":{"type":"string","description":"Optional focus keyword for future use; full playbook is returned regardless."}}}'
-  private static final String SCHEMA_CONSULT_CRAFTERQ_EXPERT =
-    '{"type":"object","properties":{"question":{"type":"string","description":"What to ask the CrafterQ content expert (e.g. headline options, body copy, tone, SEO, section ideas)"},"context":{"type":"string","description":"Optional grounding: audience, page purpose, current field, or short draft excerpt"}},"required":["question"]}'
-  private static final String SCHEMA_LIST_CRAFTERQ_AGENT_CHATS =
-    '{"type":"object","properties":{"agentId":{"type":"string","description":"CrafterQ API agent UUID. Omit to use this chat session agent (from agent ui.xml / stream agentId)."},"startDate":{"type":"string","description":"ISO-8601 UTC lower bound (inclusive), e.g. 2026-04-27T04:00:00.000Z. Optional if endDate is set alone (then start = end minus 30 days) or if both startDate and endDate are omitted (server uses last 30 days ending now)."},"endDate":{"type":"string","description":"ISO-8601 UTC upper bound (inclusive). Optional if startDate is set alone (then end = now UTC) or if both are omitted (server uses last 30 days ending now)."},"limit":{"type":"integer","description":"Max chats to return (1–100, default 20)"}},"required":[]}'
-  private static final String SCHEMA_GET_CRAFTERQ_AGENT_CHAT =
-    '{"type":"object","properties":{"chatId":{"type":"string","description":"CrafterQ chat UUID from ListCrafterQAgentChats or the hosted app"},"agentId":{"type":"string","description":"CrafterQ API agent UUID. Omit to use this chat widget session agent."}},"required":["chatId"]}'
   /** Shared shape for authoring helpers (update_*, analyze, publish, revert). */
   private static final String SCHEMA_CMS_LOOSE =
     '{"type":"object","properties":{"siteId":{"type":"string"},"site_id":{"type":"string"},"path":{"type":"string"},"contentPath":{"type":"string"},"templatePath":{"type":"string"},"contentType":{"type":"string"},"contentTypeId":{"type":"string"},"instructions":{"type":"string"},"date":{"type":"string"},"publishingTarget":{"type":"string"},"revertType":{"type":"string"},"version":{"type":"string","description":"Studio ItemVersion versionNumber from GetContentVersionHistory"},"revertToPrevious":{"type":"boolean","description":"If true, revert to the immediate prior revertible version (no version string needed)"}}}'
@@ -1542,6 +1537,14 @@ class AiOrchestrationTools {
     }
     try {
       def result = work.call()
+      if ('GenerateImage'.equals(toolName) && result instanceof Map) {
+        String wireTcId = ChatCompletionsToolWire.nativeToolCallIdBindingGet()
+        if (wireTcId && !((Map) result).inlineImageRef) {
+          Map enriched = new LinkedHashMap<>((Map) result)
+          enriched.put('inlineImageRef', wireTcId)
+          result = enriched
+        }
+      }
       long elapsedMs = (System.nanoTime() - t0) / 1_000_000L
       if (listener) {
         try {
@@ -1609,8 +1612,6 @@ class AiOrchestrationTools {
    * @param openAiTextModel resolved OpenAI chat model id for inner completions ({@code TranslateContentItem} / bulk subgraph when enabled) default {@code llmModel}; ignored when no API key
    * @param llmNormalized {@link plugins.org.craftercms.aiassistant.llm.StudioAiLlmKind#normalize} result for the active session (image wire defaults)
    * @param imageGeneratorParam optional {@code openAiWire} (default when blank), {@code none}|{@code off}|{@code disabled}, or {@code script:id} — see site docs
-   * <p>{@code ConsultCrafterQExpert}, {@code ListCrafterQAgentChats}, and {@code GetCrafterQAgentChat} are registered only when {@link StudioToolOperations#isCrafterqAgentIdPresent()} is true
-   * (agent {@code <crafterQAgentId>} in ui.xml — the CrafterQ API agent id).</p>
    * <p>Built-in tool visibility may be constrained by site {@code /scripts/aiassistant/config/tools.json} — see {@link StudioAiAssistantProjectConfig}.
  * Optional <strong>MCP</strong> servers register additional {@code mcp_*} tools when {@code mcpEnabled} is JSON {@code true} in the same file — see {@link StudioAiAssistantProjectConfig#mcpClientEnabled} and {@link plugins.org.craftercms.aiassistant.mcp.StudioAiMcpClient}.</p>
    */
@@ -2303,58 +2304,6 @@ class AiOrchestrationTools {
       .invokeMethod('toolCallResultConverter', converter)
       .build()
 
-    def consultCrafterQExpertTool = null
-    def listCrafterQAgentChatsTool = null
-    def getCrafterQAgentChatTool = null
-    if (ops.isCrafterqAgentIdPresent()) {
-      consultCrafterQExpertTool = FunctionToolCallback.builder('ConsultCrafterQExpert', new Function<Map, Map>() {
-        @Override Map apply(Map input) {
-          runWithToolProgress('ConsultCrafterQExpert', input, toolProgressListener, {
-            logToolInvocation('ConsultCrafterQExpert', (Map) (input ?: [:]))
-            def q = input?.question?.toString()?.trim()
-            if (!q && input?.query) q = input?.query?.toString()?.trim()
-            if (!q?.trim()) throw new IllegalArgumentException('Missing required field: question')
-            def ctx = input?.context?.toString()?.trim()
-            if (!ctx && input?.optionalContext) ctx = input?.optionalContext?.toString()?.trim()
-            ops.consultCrafterQExpert(q, ctx)
-          })
-        }
-      })
-        .description(ToolPrompts.DESC_CONSULT_CRAFTERQ_EXPERT)
-        .inputSchema(SCHEMA_CONSULT_CRAFTERQ_EXPERT)
-        .inputType(Map.class)
-        .invokeMethod('toolCallResultConverter', converter)
-        .build()
-
-      listCrafterQAgentChatsTool = FunctionToolCallback.builder('ListCrafterQAgentChats', new Function<Map, Map>() {
-        @Override Map apply(Map input) {
-          runWithToolProgress('ListCrafterQAgentChats', input, toolProgressListener, {
-            logToolInvocation('ListCrafterQAgentChats', (Map) (input ?: [:]))
-            ops.listCrafterQAgentChats((Map) (input ?: [:]))
-          })
-        }
-      })
-        .description(ToolPrompts.DESC_LIST_CRAFTERQ_AGENT_CHATS)
-        .inputSchema(SCHEMA_LIST_CRAFTERQ_AGENT_CHATS)
-        .inputType(Map.class)
-        .invokeMethod('toolCallResultConverter', converter)
-        .build()
-
-      getCrafterQAgentChatTool = FunctionToolCallback.builder('GetCrafterQAgentChat', new Function<Map, Map>() {
-        @Override Map apply(Map input) {
-          runWithToolProgress('GetCrafterQAgentChat', input, toolProgressListener, {
-            logToolInvocation('GetCrafterQAgentChat', (Map) (input ?: [:]))
-            ops.getCrafterQAgentChat((Map) (input ?: [:]))
-          })
-        }
-      })
-        .description(ToolPrompts.DESC_GET_CRAFTERQ_AGENT_CHAT)
-        .inputSchema(SCHEMA_GET_CRAFTERQ_AGENT_CHAT)
-        .inputType(Map.class)
-        .invokeMethod('toolCallResultConverter', converter)
-        .build()
-    }
-
     def getCrafterizingPlaybookTool = FunctionToolCallback.builder('GetCrafterizingPlaybook', new Function<Map, Map>() {
       @Override Map apply(Map input) {
         runWithToolProgress('GetCrafterizingPlaybook', input, toolProgressListener, {
@@ -2482,11 +2431,6 @@ class AiOrchestrationTools {
       tools.add(writeContentTool)
     }
     tools.add(listPagesTool)
-    if (consultCrafterQExpertTool != null) {
-      tools.add(consultCrafterQExpertTool)
-      tools.add(listCrafterQAgentChatsTool)
-      tools.add(getCrafterQAgentChatTool)
-    }
     tools.addAll([
       getCrafterizingPlaybookTool,
       updateTemplateTool,

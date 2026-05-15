@@ -9,7 +9,7 @@ function withSite(url: string, siteId: string): string {
   return `${url}${sep}siteId=${encodeURIComponent(siteId)}`;
 }
 
-/** Studio plugin controller wraps the Groovy script return map under `result` (see `crafterqImportApi.ts`). */
+/** Studio plugin controller wraps the Groovy script return map under `result` (see `aiAssistantImportApi.ts`). */
 function unwrapPluginScriptBody(body: unknown): unknown {
   if (!body || typeof body !== 'object') return body;
   const o = body as Record<string, unknown>;

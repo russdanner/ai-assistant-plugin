@@ -79,6 +79,15 @@ function parseLlmVendorAndScript(llm: unknown): { vendor: string; scriptId: stri
   if (low === 'script' || low.startsWith('script:')) {
     return { vendor: 'script', scriptId: low.startsWith('script:') ? s.slice('script:'.length).trim() : '' };
   }
+  if (
+    low === 'aiassistant' ||
+    low === 'hostedchat' ||
+    low === 'hosted-chat' ||
+    low === 'crafterq' ||
+    low === 'crafter-q'
+  ) {
+    return { vendor: 'openAI', scriptId: '' };
+  }
   return { vendor: s || 'openAI', scriptId: '' };
 }
 
@@ -197,9 +206,12 @@ function normalizeCatalogForSave(f: CentralAgentsFile): CentralAgentsFile {
         llmModel: String(e.llmModel ?? 'gpt-4o-mini').trim() || 'gpt-4o-mini'
       } as CentralAgentFileEntry;
       const outRec = out as Record<string, unknown>;
+      const lzAuto = String(out.llm ?? '').trim().toLowerCase();
+      if (lzAuto === 'crafterq' || lzAuto === 'crafter-q') outRec.llm = 'openAI';
       delete outRec.prompts;
       const llmS = String(out.llm ?? '').toLowerCase();
-      if (!llmS.includes('crafterq') && !String(out.imageModel ?? '').trim()) {
+      const scriptish = llmS === 'script' || llmS.startsWith('script:');
+      if (!scriptish && !String(out.imageModel ?? '').trim()) {
         out.imageModel = STUDIO_AI_DEFAULT_IMAGE_MODEL;
       }
       if (out.enableTools === false) {
@@ -217,6 +229,8 @@ function normalizeCatalogForSave(f: CentralAgentsFile): CentralAgentsFile {
       ...(id != null && String(id).trim() !== '' ? { crafterQAgentId: String(id).trim() } : {})
     } as CentralAgentFileEntry;
     const recChat = outChat as Record<string, unknown>;
+    const lzChat = String(outChat.llm ?? '').trim().toLowerCase();
+    if (lzChat === 'crafterq' || lzChat === 'crafter-q') recChat.llm = 'openAI';
     delete recChat.prompt;
     delete recChat.schedule;
     delete recChat.scope;
@@ -232,7 +246,8 @@ function normalizeCatalogForSave(f: CentralAgentsFile): CentralAgentsFile {
       delete recChat.enabled_built_in_tools;
     }
     const llmChat = String(outChat.llm ?? '').toLowerCase();
-    if (!llmChat.includes('crafterq') && !String(outChat.imageModel ?? '').trim()) {
+    const chatScriptish = llmChat === 'script' || llmChat.startsWith('script:');
+    if (!chatScriptish && !String(outChat.imageModel ?? '').trim()) {
       outChat.imageModel = STUDIO_AI_DEFAULT_IMAGE_MODEL;
     }
     const opensPopup =
@@ -776,7 +791,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                 : CQ_SCRIPT_IMAGE_SELECT_CUSTOM;
               const presets = llmModelPresetRows(sp.vendor);
               const modelSelectValue =
-                sp.vendor === 'script' || sp.vendor === 'crafterQ'
+                sp.vendor === 'script'
                   ? '__na__'
                   : presets.includes(String(draft.llmModel ?? '').trim())
                     ? String(draft.llmModel ?? '').trim()
@@ -797,7 +812,6 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                             const first = scriptsRowsRef.current.llm[0]?.id?.trim();
                             return { ...d, llm: first ? `script:${first}` : 'script', llmModel: 'composer-2' };
                           }
-                          if (v === 'crafterQ') return { ...d, llm: 'crafterQ', llmModel: '' };
                           return { ...d, llm: v, llmModel: d.llmModel?.trim() ? d.llmModel : 'gpt-4o-mini' };
                         });
                       }}
@@ -869,10 +883,6 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         helperText="Backend model id (e.g. composer-2)."
                       />
                     </>
-                  ) : sp.vendor === 'crafterQ' ? (
-                    <Typography variant="caption" color="text.secondary">
-                      Hosted CrafterQ — routing uses the CrafterQ agent id; no local chat model field.
-                    </Typography>
                   ) : (
                     <>
                       <FormControl fullWidth size="small">

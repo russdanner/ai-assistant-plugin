@@ -1,6 +1,6 @@
 /**
  * Fails if the AI Assistant form-engine control pipeline regresses.
- * Run: cd sources && yarn verify:form-pipeline
+ * Run: cd sources && yarn package (or yarn verify:form-pipeline if defined).
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -46,7 +46,7 @@ needContains(mainJs, 'cqPropertyEntryName', 'property name/id matching');
 needContains(mainJs, 'cqFormFieldPropertiesFromRender', 'merged property sources');
 needContains(mainJs, 'addParsedXml(cqGetUiXmlFromStore())', 'Redux ui.xml merge');
 needContains(mainJs, 'addParsedXml(cqSyncFetchConfigurationXml(siteId))', 'API ui.xml merge');
-needContains(mainJs, 'CRAFTERQ_FALLBACK_AGENTS', 'fallback agents');
+needContains(mainJs, 'AIASSISTANT_FALLBACK_AGENTS', 'fallback agents');
 
 const thenIdx = main.indexOf('.importPlugin(site');
 if (thenIdx < 0) fail('main.js must call importPlugin(site,...');

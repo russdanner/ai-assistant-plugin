@@ -132,11 +132,20 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
   if (!label) return null;
   const llmRaw = String(entry.llm ?? '').trim();
   let llm: AgentLlm | undefined;
+  let legacyHostedLlm = false;
   if (llmRaw) {
     const low = llmRaw.toLowerCase();
     if (low === 'openai' || low === 'open-ai') llm = 'openAI';
-    else if (low === 'crafterq' || low === 'crafter-q') llm = 'crafterQ';
-    else llm = llmRaw;
+    else if (
+      low === 'aiassistant' ||
+      low === 'hostedchat' ||
+      low === 'hosted-chat' ||
+      low === 'crafterq' ||
+      low === 'crafter-q'
+    ) {
+      llm = 'openAI';
+      legacyHostedLlm = true;
+    } else llm = llmRaw;
   }
   const enableToolsRaw = entry.enableTools ?? entry.enable_tools;
   let enableTools: boolean | undefined;
@@ -150,7 +159,9 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
   const expertSkills = parseExpertSkills(entry.expertSkills ?? entry.expertSkill);
   const out: AgentConfig = { id, label, ...(icon ? { icon } : {}), ...(prompts ? { prompts } : {}) };
   if (llm) out.llm = llm;
-  if (typeof entry.llmModel === 'string' && entry.llmModel.trim()) out.llmModel = entry.llmModel.trim();
+  const lmTrim = typeof entry.llmModel === 'string' ? entry.llmModel.trim() : '';
+  if (lmTrim) out.llmModel = lmTrim;
+  else if (legacyHostedLlm && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (typeof entry.imageModel === 'string' && entry.imageModel.trim()) out.imageModel = entry.imageModel.trim();
   if (typeof entry.imageGenerator === 'string' && entry.imageGenerator.trim())
     out.imageGenerator = entry.imageGenerator.trim();
@@ -165,10 +176,6 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
     const n = parseInt(String(tbc).trim(), 10);
     if (Number.isFinite(n) && n >= 1) out.translateBatchConcurrency = Math.min(64, n);
   }
-  if (typeof entry.crafterQBearerTokenEnv === 'string' && entry.crafterQBearerTokenEnv.trim())
-    out.crafterQBearerTokenEnv = entry.crafterQBearerTokenEnv.trim();
-  if (typeof entry.crafterQBearerToken === 'string' && entry.crafterQBearerToken.trim())
-    out.crafterQBearerToken = entry.crafterQBearerToken.trim();
   const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(entry.enabledBuiltInTools ?? entry.enabled_built_in_tools);
   if (enabledBuiltIn?.length) out.enabledBuiltInTools = enabledBuiltIn;
   return out;
@@ -184,7 +191,17 @@ export function entryToAutonomousDefinition(entry: CentralAgentFileEntry): Auton
   const scopeRaw = String(entry.scope ?? 'project').trim().toLowerCase();
   const scope =
     scopeRaw === 'user' || scopeRaw === 'role' || scopeRaw === 'project' ? scopeRaw : ('project' as const);
-  const llm = String(entry.llm ?? 'openAI').trim();
+  let llm = String(entry.llm ?? 'openAI').trim();
+  const lz = llm.toLowerCase();
+  if (
+    lz === 'crafterq' ||
+    lz === 'crafter-q' ||
+    lz === 'aiassistant' ||
+    lz === 'hostedchat' ||
+    lz === 'hosted-chat'
+  ) {
+    llm = 'openAI';
+  }
   const llmModel = String(entry.llmModel ?? 'gpt-4o-mini').trim();
   const imageModel = entry.imageModel != null ? String(entry.imageModel).trim() : undefined;
   const imageGenerator =

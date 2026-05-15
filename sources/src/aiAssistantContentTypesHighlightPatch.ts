@@ -29,9 +29,9 @@ function datasourceRepoPath(ds: unknown): string {
 function isAiAssistantImgDatasource(ds: unknown): boolean {
   const typed = ds as { type?: string } | undefined;
   const t = (typed?.type ?? '').trim();
-  if (t === AIASSISTANT_IMG_DATASOURCE_TYPE || t === 'crafterq-img-from-url') return true;
+  if (t === AIASSISTANT_IMG_DATASOURCE_TYPE) return true;
   const n = t.replace(/-/g, '').toLowerCase();
-  return n === 'aiassistantimgfromurl' || n === 'crafterqimgfromurl';
+  return n === 'aiassistantimgfromurl';
 }
 
 type DS = NonNullable<ContentType['dataSources']>[number];

@@ -62,7 +62,7 @@ export function installRemoteImageDropImportBridge(): void {
 
     const site = activeSiteId();
     if (!site) {
-      console.error('[crafterq] Cannot import remote image on drop: no active site.');
+      console.error('[aiassistant] Cannot import remote image on drop: no active site.');
       getStudioStore()?.dispatch?.(
         showSystemNotification({
           message: 'Cannot place remote image: no active site selected.'
@@ -83,7 +83,7 @@ export function installRemoteImageDropImportBridge(): void {
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error('[crafterq] Remote image import on drop failed', err);
+        console.error('[aiassistant] Remote image import on drop failed', err);
         getStudioStore()?.dispatch?.(
           showSystemNotification({
             message: `Could not import image on drop: ${msg}`

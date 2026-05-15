@@ -7,7 +7,7 @@
     "start": "vite",
     "build": "tsc && vite build",
     "postinstall": "node postinstall.cjs",
-    "package": "rollup --config rollup.config.cjs && node ../scripts/verify-crafterq-form-pipeline.mjs",
+    "package": "rollup --config rollup.config.cjs && node ../scripts/verify-aiassistant-form-pipeline.mjs",
     "build-tinymce-plugin": "rollup --config rollup.config.cjs --environment tinymce",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",

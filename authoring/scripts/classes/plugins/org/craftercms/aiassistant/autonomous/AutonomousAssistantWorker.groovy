@@ -119,7 +119,7 @@ final class AutonomousAssistantWorker {
       String stateJson = JsonOutput.toJson(slimState)
       final int STATE_JSON_CAP = 56_000
       if (stateJson.length() > STATE_JSON_CAP) {
-        stateJson = stateJson.substring(0, STATE_JSON_CAP) + '\n...[crafterq: state JSON truncated for prompt size]'
+        stateJson = stateJson.substring(0, STATE_JSON_CAP) + '\n...[aiassistant: state JSON truncated for prompt size]'
       }
       String user =
         'Site: ' + (siteId ?: '') + '\nAgent id: ' + fullAgentId +
@@ -144,9 +144,7 @@ final class AutonomousAssistantWorker {
           null,
           app,
           [siteId: (siteId ?: '').toString(), crafterSite: (siteId ?: '').toString()],
-          null,
-          '',
-          8000
+          null
         )
         List<Map> exNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(definition?.get('expertSkills'))
         AiOrchestration orch = new AiOrchestration(null, null, app, [siteId: (siteId ?: '').toString()], null)

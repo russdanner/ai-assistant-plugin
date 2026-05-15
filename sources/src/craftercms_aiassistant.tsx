@@ -15,12 +15,8 @@ export interface CrafterCMSAiAssistantConfig {
   strings?: {
     /** Toolbar tooltip for the main “open assistant” button (`aiAssistantOpen`). */
     openAiAssistant?: string;
-    /** @deprecated Use `openAiAssistant`. */
-    crafterqDialog?: string;
     /** Toolbar tooltip for the shortcuts menu (`aiAssistantShortcuts`). */
     aiAssistantShortcuts?: string;
-    /** @deprecated Use `aiAssistantShortcuts`. */
-    crafterqShortcuts?: string;
   };
   prependMessages?: AiAssistantMessage[];
   shortcuts?: Array<{
@@ -30,8 +26,6 @@ export interface CrafterCMSAiAssistantConfig {
   }>;
   /** Opens the AI Assistant with the built message list (selection/context). */
   onOpenAiAssistant?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
-  /** @deprecated Use `onOpenAiAssistant`. */
-  oncrafterqDialog?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
   onShortcutClick?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
   emptyStateOptions?: unknown;
   AiAssistantPopoverProps?: Partial<AiAssistantPopoverProps>;
@@ -347,19 +341,12 @@ pluginManager.add('craftercms_aiassistant', function (editor: Editor) {
     ...configArg,
     strings: {
       ...mergedStrings,
-      openAiAssistant:
-        mergedStrings.openAiAssistant ??
-        mergedStrings.crafterqDialog ??
-        'Open AI Assistant',
-      aiAssistantShortcuts:
-        mergedStrings.aiAssistantShortcuts ??
-        mergedStrings.crafterqShortcuts ??
-        'AI Shortcuts'
+      openAiAssistant: mergedStrings.openAiAssistant ?? 'Open AI Assistant',
+      aiAssistantShortcuts: mergedStrings.aiAssistantShortcuts ?? 'AI Shortcuts'
     }
   };
 
-  const userOpen =
-    configArg?.onOpenAiAssistant ?? configArg?.oncrafterqDialog;
+  const userOpen = configArg?.onOpenAiAssistant;
   if (!userOpen || !configArg?.onShortcutClick) {
     const defaultHandler = createDefaultHandler(instanceConfig);
     instanceConfig.onOpenAiAssistant = defaultHandler;
@@ -385,7 +372,7 @@ pluginManager.add('craftercms_aiassistant', function (editor: Editor) {
       instanceConfig.onOpenAiAssistant!(editor, api, messages);
     }
   });
-  editor.ui.registry.addMenuButton('crafterqshortcuts', {
+  editor.ui.registry.addMenuButton('aiassistantShortcuts', {
     icon: 'ai-prompt',
     tooltip: instanceConfig.strings.aiAssistantShortcuts,
     fetch(callback) {

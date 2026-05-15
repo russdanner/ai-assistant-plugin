@@ -50,7 +50,7 @@ So the installed path for a site is:
 {siteRepo}/config/studio/static-assets/plugins/<pluginId-path>/<type>/<name>/<file>
 ```
 
-Example for plugin id `org.craftercms.aiassistant.studio`, type `crafterq`, name `components`, file `index.js`:
+Example for plugin id `org.craftercms.aiassistant.studio`, type `aiassistant`, name `components`, file `index.js`:
 
 ```text
 config/studio/static-assets/plugins/org/craftercms/aiassistant/studio/aiassistant/components/index.js
@@ -665,7 +665,7 @@ Call **`triggerStudioPreviewReload()`** after you know the **sandbox** changed i
 
 **Do not** rely on refresh for “guidance-only” tool steps that only return text for the LLM (e.g. `update_template` / `update_content` that fetch current files but do not save) — nothing changed on disk until **`WriteContent`** (or revert) completes.
 
-In this plugin’s chat, SSE tool progress events expose **`metadata.status: "tool-progress"`** and **`metadata.phase`**: `start` | `done` | `warn` | `error`. Injected **`text`** lines start with **🛠️** plus a category (**🔍** read, **✏️** write/revert/publish/update/GenerateImage, **📈** analyze, **🔄** other). **Expert** tools **QueryExpertGuidance**, **GetCrafterizingPlaybook**, and **ConsultCrafterQExpert** use **🛠️🤓** before the category emoji so authors can spot instruction/research/SME work. The React client sets a flag when **`phase === "done"`** for selected tool names (`WriteContent`, `revert_change`, `GenerateImage`), then calls **`triggerStudioPreviewReload()`** once after the stream finishes (and skips this path for the **form-engine** client-JSON-apply surface where the open item is intentionally not written server-side from tools).
+In this plugin’s chat, SSE tool progress events expose **`metadata.status: "tool-progress"`** and **`metadata.phase`**: `start` | `done` | `warn` | `error`. Injected **`text`** lines start with **🛠️** plus a category (**🔍** read, **✏️** write/revert/publish/update/GenerateImage, **📈** analyze, **🔄** other). **Expert** tools **QueryExpertGuidance** and **GetCrafterizingPlaybook** use **🛠️🤓** before the category emoji so authors can spot instruction/research work. The React client sets a flag when **`phase === "done"`** for selected tool names (`WriteContent`, `revert_change`, `GenerateImage`), then calls **`triggerStudioPreviewReload()`** once after the stream finishes (and skips this path for the **form-engine** client-JSON-apply surface where the open item is intentionally not written server-side from tools).
 
 ### `writeContentAndNotify` Vs Client Reload
 
@@ -736,4 +736,4 @@ Use this table when adding a new plugin or when debugging 404s: keep plugin id, 
 
 ---
 
-*This guide is based on the AI Assistant Studio plugin (`plugin-studio-crafterq`) and CrafterCMS 4.x. Paths and endpoint details may vary slightly by Studio version.*
+*This guide is based on the AI Assistant Studio plugin (`org.craftercms.aiassistant.studio`) and CrafterCMS 4.x. Paths and endpoint details may vary slightly by Studio version.*

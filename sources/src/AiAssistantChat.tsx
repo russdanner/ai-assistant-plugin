@@ -39,9 +39,17 @@ import {
   readCrafterPreviewTokenFromCookie,
   streamChat
 } from './aiAssistantApi';
+import { formatSessionLogForDebugCopy } from './aiAssistantSessionDebugLog';
 import type { ExpertSkillConfig, PromptConfig } from './agentConfig';
 import type { AuthoringFormContextSnapshot } from './aiAssistantFormAuthoringTypes';
 import MarkdownMessage, { normalizeOpenAiLiteralEscapes } from './MarkdownMessage';
+import GenerateImageBlurredPlaceholder from './GenerateImageBlurredPlaceholder';
+import AssistantChatGeneratedImages from './AssistantChatGeneratedImages';
+import {
+  combineGeneratedImageSources,
+  stripDisplayedGeneratedImages,
+  stripStudioAiInlineImageMarkdownFromText
+} from './assistantGeneratedImageChat';
 import { getSpeechRecognitionCtor } from './browserSpeechRecognition';
 
 /**
@@ -60,17 +68,6 @@ function pushStreamLog(logRef: React.MutableRefObject<string[]>, line: string) {
   if (arr.length > MAX_SESSION_STREAM_LOG_LINES) {
     arr.splice(0, arr.length - MAX_SESSION_STREAM_LOG_LINES);
   }
-}
-
-/** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
-function redactSessionLogLineForCopy(s: string): string {
-  return s
-    .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
-    .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
-}
-
-function safeCopySessionLog(lines: string[]): string {
-  return lines.map(redactSessionLogLineForCopy).join('\n');
 }
 
 /** Nearest ancestor that scrolls (e.g. ICE `ResizeableDrawer` drawerBody uses overflow-y: auto). */
@@ -585,7 +582,7 @@ function buildLiveContentMacroSubstitution(live: LiveAuthoringMacroSource | unde
   if (!path && !hasXml && !hasJson) return undefined;
   return (
     '[Studio form — **full XML/JSON omitted from prompt** for size. Use **GetContent** for saved repo bodies; the **Current Studio content form** appendix lists **field ids** and **linked paths** only. ' +
-    'Unsaved edits are not inlined — **GetContent** is git until the author Saves (or apply via `crafterqFormFieldUpdates` using ids from the appendix / form definition).]\n' +
+    'Unsaved edits are not inlined — **GetContent** is git until the author Saves (or apply via `aiassistantFormFieldUpdates` using ids from the appendix / form definition).]\n' +
     (path ? `Open item path: ${path}` : '')
   );
 }
@@ -655,7 +652,7 @@ const FORM_ENGINE_APPLY_INSTRUCTIONS = `
 **Client-side form apply:** When you change field content (including **translate** to another language), end with fenced JSON (field ids from the form definition / XML; string values only). **Do not** reply with generic CrafterCMS docs ("Translation Configuration", "open the content item", "add a language") instead of the translated text in JSON.
 
 \`\`\`json
-{ "crafterqFormFieldUpdates": { "title_t": "…", "body_html": "<p>…</p>" } }
+{ "aiassistantFormFieldUpdates": { "title_t": "…", "body_html": "<p>…</p>" } }
 \`\`\`
 List every field you changed; omit the block for pure Q&A. Repeat groups: ids like "sections_o|0|section_html".`;
 
@@ -716,10 +713,10 @@ function buildAuthoringFormAppendix(
 }
 
 /**
- * Parse assistant reply for `crafterqFormFieldUpdates` inside a ```json fenced block.
+ * Parse assistant reply for `aiassistantFormFieldUpdates` inside a ```json fenced block.
  */
-function tryExtractCrafterqFormFieldUpdates(assistantText: string): Record<string, string> | null {
-  const marker = 'crafterqFormFieldUpdates';
+function tryExtractAiassistantFormFieldUpdates(assistantText: string): Record<string, string> | null {
+  const marker = 'aiassistantFormFieldUpdates';
   if (!assistantText.includes(marker)) return null;
   const re = /```(?:json)?\s*([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
@@ -727,7 +724,7 @@ function tryExtractCrafterqFormFieldUpdates(assistantText: string): Record<strin
     try {
       const obj = JSON.parse(m[1].trim()) as unknown;
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
-      const raw = (obj as { crafterqFormFieldUpdates?: unknown }).crafterqFormFieldUpdates;
+      const raw = (obj as { aiassistantFormFieldUpdates?: unknown }).aiassistantFormFieldUpdates;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw)) {
@@ -884,12 +881,6 @@ const cqPipelineHeartbeatBarPulse = keyframes({
   '50%': { opacity: 0.88, filter: 'brightness(1.06)' }
 });
 
-/** Shifting gradient while {@code GenerateImage} is running (server tool-progress uses an ellipsis row until “finished”). */
-const cqGenerateImageAuraShift = keyframes({
-  '0%': { backgroundPosition: '0% 40%' },
-  '100%': { backgroundPosition: '100% 60%' }
-});
-
 /**
  * True once the server emitted a terminal {@code GenerateImage} tool-progress row (✅ finished, ❌, or ⚠️).
  * Scans all lines so a later debug/flatten block mentioning GenerateImage cannot keep the shimmer stuck on.
@@ -929,88 +920,90 @@ function isGenerateImageRunRowActive(toolProgressText: string | undefined): bool
 }
 
 /**
+ * True when every {@code studio-ai-inline-image://id} in markdown has a corresponding URL from server tool-progress metadata.
+ */
+function studioAiInlineImageRefsResolvedInMap(
+  tailMarkdown: string,
+  urls: Record<string, string> | undefined
+): boolean {
+  if (!urls || typeof urls !== 'object') return false;
+  const re = /studio-ai-inline-image:\/\/([^)\s<>]+)/gi;
+  const ids: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(tailMarkdown)) !== null) {
+    ids.push(m[1]);
+  }
+  if (!ids.length) return false;
+  return ids.every((id) => typeof urls[id] === 'string' && urls[id].length > 12);
+}
+
+/**
+ * Merge {@code studioAiInlineImageUrls} objects from SSE metadata (one map per terminal GenerateImage tool row).
+ */
+function mergeStudioAiInlineImageUrlMetadata(
+  prior: Record<string, string> | undefined,
+  incoming: unknown
+): Record<string, string> | undefined {
+  if (incoming == null || typeof incoming !== 'object' || Array.isArray(incoming)) return prior;
+  const next: Record<string, string> = { ...(prior || {}) };
+  let added = false;
+  for (const [k, v] of Object.entries(incoming as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0) {
+      next[k] = v;
+      added = true;
+    }
+  }
+  if (!added) return prior;
+  return next;
+}
+
+function hasStudioAiInlineImageUrlPayload(v: unknown): boolean {
+  return !!(v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v as Record<string, unknown>).length > 0);
+}
+
+function studioAiInlineUrlsPatch(
+  m: { studioAiInlineImageUrls?: Record<string, string> },
+  incoming: unknown
+): Partial<{ studioAiInlineImageUrls: Record<string, string> }> {
+  const merged = mergeStudioAiInlineImageUrlMetadata(m.studioAiInlineImageUrls, incoming);
+  if (merged === undefined) return {};
+  return { studioAiInlineImageUrls: merged };
+}
+
+/**
  * True when {@code markdown} already contains a complete GFM image link the renderer can show (replaces placeholder).
  */
 function hasCompleteMarkdownInlineImage(markdown: string | undefined): boolean {
   if (!markdown?.trim()) return false;
-  // Destination may be `<data:image/...>` (CommonMark) or bare `data:image/...`; bare `[^)]+` stops at first `)`.
   const re = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(markdown)) !== null) {
     const url = (m[1] || m[2] || '').trim();
     if (/^data:image\//i.test(url) && url.length > 120) return true;
     if (/^https?:\/\//i.test(url) && url.length > 12) return true;
-    // studio-ai-inline-image: refs are server-expanded placeholders — not a loadable image until expanded.
+    if (/^studio-ai-blob-ref:\/\//i.test(url)) return true;
   }
+  if (/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{120,}/i.test(markdown)) return true;
   return false;
 }
 
 /**
- * Blurred shifting gradient stand-in for the incoming chat image; similar footprint to the draggable chat image card.
+ * Keep the shimmer until the strip has sources or markdown already shows a loadable image.
  */
-function GenerateImageBlurredPlaceholder() {
-  const theme = useTheme();
-  const dark = theme.palette.mode === 'dark';
-  const a = dark ? '#5e35b1' : '#e1bee7';
-  const b = dark ? '#1565c0' : '#bbdefb';
-  const c = dark ? '#00695c' : '#b2dfdb';
-  const d = dark ? '#4527a0' : '#d1c4e9';
-  return (
-    <Box
-      role="status"
-      aria-label="Generating image preview"
-      sx={{
-        my: 1,
-        display: 'block',
-        maxWidth: '100%',
-        position: 'relative',
-        borderRadius: 1,
-        border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
-        overflow: 'hidden',
-        bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
-        aspectRatio: '3 / 2',
-        maxHeight: 320,
-        minHeight: 168
-      }}
-    >
-      <Box
-        aria-hidden
-        sx={{
-          position: 'absolute',
-          inset: -48,
-          background: `linear-gradient(118deg, ${a}, ${b}, ${c}, ${d}, ${a})`,
-          backgroundSize: '280% 280%',
-          filter: 'blur(36px)',
-          opacity: dark ? 0.92 : 0.88,
-          animation: `${cqGenerateImageAuraShift} 3.2s ease-in-out infinite`,
-          '@media (prefers-reduced-motion: reduce)': {
-            animation: 'none',
-            backgroundPosition: '50% 50%'
-          }
-        }}
-      />
-      <Box
-        sx={{
-          position: 'relative',
-          zIndex: 1,
-          minHeight: 168,
-          maxHeight: 320,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          px: 2,
-          py: 2,
-          background:
-            theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.28)',
-          backdropFilter: 'blur(2px)'
-        }}
-      >
-        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', lineHeight: 1.45, opacity: 0.9 }}>
-          Generating image…
-        </Typography>
-      </Box>
-    </Box>
-  );
+function shouldShowGenerateImagePlaceholder(
+  toolProgressText: string | undefined,
+  tailMarkdown: string,
+  studioAiInlineImageUrls?: Record<string, string>
+): boolean {
+  if (combineGeneratedImageSources(studioAiInlineImageUrls, tailMarkdown).length > 0) return false;
+  if (hasCompleteMarkdownInlineImage(tailMarkdown)) return false;
+  if (studioAiInlineImageRefsResolvedInMap(tailMarkdown, studioAiInlineImageUrls)) return false;
+  if (!toolProgressText?.includes('GenerateImage')) return false;
+  if (isGenerateImageRunRowActive(toolProgressText)) return true;
+  if (generateImageToolSettledInToolProgress(toolProgressText) && /studio-ai-inline-image:\/\//i.test(tailMarkdown)) {
+    return true;
+  }
+  return false;
 }
 
 /** Keeps the tool-progress list pinned to the latest line as SSE chunks append. */
@@ -1151,6 +1144,8 @@ type UiMessage = {
   summarizingResults?: boolean;
   /** In-place wait indicator while the OpenAI+tools worker is busy (SSE `pipeline-heartbeat`; not tool-log lines). */
   pipelineHeartbeat?: { elapsedSec: number; nextInSec: number; hint: string };
+  /** URLs for {@code studio-ai-inline-image://toolCallId} from server SSE (see {@code writeToolProgressSse} GenerateImage rows). */
+  studioAiInlineImageUrls?: Record<string, string>;
   isStreaming?: boolean;
 };
 
@@ -1179,7 +1174,7 @@ type StoredConversation = {
 function getConversationStorageKey(siteId: string, agentId: string): string {
   const site = (siteId || 'default').replace(/[^a-zA-Z0-9-_]/g, '_');
   const agent = (agentId || 'default').replace(/[^a-zA-Z0-9-_]/g, '_');
-  return `crafterq-conversation-${site}-${agent}`;
+  return `aiassistant-conversation-${site}-${agent}`;
 }
 
 function loadConversation(siteId: string, agentId: string): StoredConversation | null {
@@ -1346,13 +1341,6 @@ export interface AiAssistantChatProps {
   expertSkills?: ExpertSkillConfig[];
   /** 1–64; sent on stream POST for TranslateContentBatch default parallelism (ui.xml translateBatchConcurrency). */
   translateBatchConcurrency?: number;
-  /**
-   * CrafterQ JWT for server-proxied **api.crafterq.ai** calls (`Authorization: Bearer …`). From ui.xml **`<crafterQBearerToken>`**.
-   * Prefer **{@link crafterQBearerTokenEnv}** + host environment for secrets.
-   */
-  crafterQBearerToken?: string;
-  /** Host env var **name** for the CrafterQ JWT. ui.xml **`<crafterQBearerTokenEnv>`**; overrides {@link crafterQBearerToken} when set and non-empty on the server. */
-  crafterQBearerTokenEnv?: string;
 }
 
 export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
@@ -1372,11 +1360,9 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     enableTools,
     enabledBuiltInTools,
     expertSkills,
-    translateBatchConcurrency,
-    crafterQBearerToken,
-    crafterQBearerTokenEnv
+    translateBatchConcurrency
   } = props;
-  /** Empty when config omits **crafterQAgentId** — server must omit ConsultCrafterQExpert; do not substitute a default UUID. */
+  /** Widget **`agentId`** from agent configuration (UUID when applicable). */
   const agentId = agentIdProp?.trim() ?? '';
 
   const siteId = useActiveSiteId() ?? 'default';
@@ -1454,7 +1440,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
   } | null>(null);
   const iceRootRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenAssistantIdRef = useRef<string | null>(null);
-  /** Raw SSE JSON lines + client send markers — full transcript for support / debugging (see Copy log). */
+  /** Raw SSE JSON lines + structured client markers — formatted by formatSessionLogForDebugCopy when copying. */
   const sessionStreamLogRef = useRef<string[]>([]);
 
   // Restore per-agent conversation across reloads / reopens.
@@ -1724,6 +1710,19 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     setChatId(undefined);
     setMessages([]);
     sessionStreamLogRef.current = [];
+    try {
+      pushStreamLog(
+        sessionStreamLogRef,
+        JSON.stringify({
+          kind: 'client.sessionReset',
+          ts: new Date().toISOString(),
+          siteId,
+          agentId
+        })
+      );
+    } catch {
+      /* ignore log serialization errors */
+    }
     clearConversation(siteId, agentId);
   };
 
@@ -1817,6 +1816,11 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     const assistantId = `assistant-${Date.now()}`;
     const userBubbleText = expandedDisplay || expandedPrompt;
 
+    /** `crafterPreview` cookie when present — forwarded for server preview tools (GetPreviewHtml, etc.). */
+    const previewTokenForStream = readCrafterPreviewTokenFromCookie();
+    const previewContentTypeLabel = formEngine ? undefined : resolvePreviewContentTypeLabel(previewItem);
+    const studioPreviewPageUrl = formEngine ? undefined : pickStudioPreviewPageUrlForServer(previewItem);
+
     setMessages((prev) => [
       ...prev,
       { id: userId, role: 'user', text: userBubbleText },
@@ -1828,6 +1832,26 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         JSON.stringify({
           kind: 'client.userSend',
           ts: new Date().toISOString(),
+          context: {
+            siteId,
+            agentId,
+            llm: llm ?? null,
+            llmModel: llmModel ?? null,
+            imageModel: imageModel ?? null,
+            imageGenerator: imageGenerator != null ? String(imageGenerator).trim() || null : null,
+            authoringSurface: formEngine ? 'formEngine' : 'preview',
+            omitTools: omitToolsThisSend,
+            enableTools: enableTools !== false,
+            chatId: chatId ?? null,
+            contentPath: formEngine ? null : macroValuesRef.current.contentPath?.trim() || null,
+            contentTypeId: formEngine ? null : macroValuesRef.current.contentTypeId?.trim() || null,
+            studioPreviewPageUrl: studioPreviewPageUrl ?? null,
+            formEngineClientJsonApply: wantClientJsonApply,
+            formEngineItemPath:
+              formEngine && wantClientJsonApply && authoringSnap?.contentPath?.trim()
+                ? authoringSnap.contentPath.trim()
+                : null
+          },
           displayText: userBubbleText,
           wirePrompt: wirePrompt
         })
@@ -1844,10 +1868,6 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     let shouldRefreshPreview = false;
     /** Set when the client stream wait hits the hard cap (try/catch are separate scopes — must be outside `try`). */
     let streamHitTimeout = false;
-    /** Studio `crafterPreview` cookie — send whenever readable so server tools (e.g. GetPreviewHtml) work in XB/form chat too. */
-    const previewTokenForStream = readCrafterPreviewTokenFromCookie();
-    const previewContentTypeLabel = formEngine ? undefined : resolvePreviewContentTypeLabel(previewItem);
-    const studioPreviewPageUrl = formEngine ? undefined : pickStudioPreviewPageUrlForServer(previewItem);
 
     try {
       const streamPromise = streamChat({
@@ -1884,8 +1904,6 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         translateBatchConcurrency <= 64
           ? { translateBatchConcurrency: Math.floor(translateBatchConcurrency) }
           : {}),
-        ...(crafterQBearerTokenEnv?.trim() ? { crafterQBearerTokenEnv: crafterQBearerTokenEnv.trim() } : {}),
-        ...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {}),
         signal: ac.signal,
         onRawSseDataLine: (jsonLine) => {
           pushStreamLog(sessionStreamLogRef, `${new Date().toISOString()}\t${jsonLine}`);
@@ -1910,10 +1928,11 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
           const rawTextChunk = evt.text ?? '';
           const textChunk = isToolProgressChunk ? rawTextChunk : stripForbiddenLazyPlanLines(rawTextChunk);
           const summarizingResultsHint =
-            evt.metadata?.status === 'crafterq-chat-phase' &&
+            evt.metadata?.status === 'aiassistant-chat-phase' &&
             String(evt.metadata?.phase || '') === 'summarizing-results';
 
           const md = evt.metadata && typeof evt.metadata === 'object' ? (evt.metadata as Record<string, unknown>) : undefined;
+          const incomingStudioAiInlineImgUrls = md?.studioAiInlineImageUrls;
           const mdStatus = md && md.status != null ? String(md.status).trim() : '';
           if (mdStatus === 'pipeline-heartbeat') {
             const rawEl = md.elapsedSec;
@@ -1968,6 +1987,14 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
             );
           }
 
+          if (hasStudioAiInlineImageUrlPayload(incomingStudioAiInlineImgUrls)) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls) } : m
+              )
+            );
+          }
+
           if (
             !formEngine &&
             !streamErr &&
@@ -2001,7 +2028,8 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                       assistantPreToolsText: planPrefix || undefined,
                       reasoningStreamText: '',
                       text: '',
-                      toolProgressText: textChunk
+                      toolProgressText: textChunk,
+                      ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                     };
                   }
                   const prior = m.toolProgressText || '';
@@ -2012,7 +2040,11 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                       ? ''
                       : '\n'
                     : '\n\n';
-                  return { ...m, toolProgressText: prior + join + textChunk };
+                  return {
+                    ...m,
+                    toolProgressText: prior + join + textChunk,
+                    ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
+                  };
                 })
               );
             } else {
@@ -2026,7 +2058,8 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                     return {
                       ...m,
                       reasoningStreamText: (m.reasoningStreamText || '') + textChunk,
-                      ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                      ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                      ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                     };
                   }
                   if (noPlanAboveToolsYet && textChunk.trim()) {
@@ -2039,14 +2072,16 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                       return {
                         ...m,
                         assistantPreToolsText: (m.assistantPreToolsText || '') + textChunk,
-                        ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                        ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                        ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                       };
                     }
                   }
                   return {
                     ...m,
                     text: (m.text || '') + textChunk,
-                    ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                    ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                    ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                   };
                 })
               );
@@ -2104,7 +2139,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
               formUpdatesApplied = true;
               try {
                 const snap = getAuthoringFormContext();
-                const updates = tryExtractCrafterqFormFieldUpdates(assistantTextAccum);
+                const updates = tryExtractAiassistantFormFieldUpdates(assistantTextAccum);
                 if (updates && typeof snap.applyAssistantFieldUpdates === 'function') {
                   const result = snap.applyAssistantFieldUpdates(updates);
                   const parts: string[] = [];
@@ -2134,7 +2169,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         }
       });
 
-      // OpenAI + multi-step tools can exceed several minutes; cap aligns with server crafterq.chatFluxAwaitMs default.
+      // OpenAI + multi-step tools can exceed several minutes; cap aligns with the plugin orchestration stream await default.
       const CHAT_STREAM_TIMEOUT_MS = 600000;
       let streamTimeoutId: number | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -2150,6 +2185,19 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         if (streamTimeoutId !== undefined) window.clearTimeout(streamTimeoutId);
       }
 
+      try {
+        pushStreamLog(
+          sessionStreamLogRef,
+          JSON.stringify({
+            kind: 'client.streamOutcome',
+            ts: new Date().toISOString(),
+            outcome: 'stream_finished_ok'
+          })
+        );
+      } catch {
+        /* ignore log serialization errors */
+      }
+
       if (!formEngine && shouldRefreshPreview) {
         triggerStudioPreviewReload();
       }
@@ -2160,6 +2208,25 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         streamHitTimeout ||
         errText.includes('Timed out waiting for chat response');
       const abortWithoutExplicitStop = isFetchAbortError(e) && !userStopped && !timedOut;
+      let streamOutcome = 'request_error';
+      if (userStopped) streamOutcome = 'user_stop';
+      else if (timedOut) streamOutcome = 'timeout';
+      else if (e instanceof AiAssistantIncompleteStreamError) streamOutcome = 'incomplete_stream';
+      else if (abortWithoutExplicitStop) streamOutcome = 'aborted_or_network';
+      try {
+        pushStreamLog(
+          sessionStreamLogRef,
+          JSON.stringify({
+            kind: 'client.streamOutcome',
+            ts: new Date().toISOString(),
+            outcome: streamOutcome,
+            errorType: e instanceof Error ? e.name : typeof e,
+            message: errText.slice(0, 4000)
+          })
+        );
+      } catch {
+        /* ignore log serialization errors */
+      }
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id !== assistantId) return m;
@@ -2322,7 +2389,17 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                 <>
                   {m.assistantPreToolsText.trim() ? (
                     <Box sx={{ mb: 1 }}>
-                      <MarkdownMessage text={m.assistantPreToolsText} />
+                      <MarkdownMessage
+                        text={stripDisplayedGeneratedImages(
+                          stripStudioAiInlineImageMarkdownFromText(m.assistantPreToolsText, m.studioAiInlineImageUrls),
+                          combineGeneratedImageSources(m.studioAiInlineImageUrls, m.assistantPreToolsText)
+                        )}
+                        studioAiInlineImageUrls={
+                          combineGeneratedImageSources(m.studioAiInlineImageUrls, m.assistantPreToolsText).length
+                            ? undefined
+                            : m.studioAiInlineImageUrls
+                        }
+                      />
                     </Box>
                   ) : null}
                   <ToolProgressScrollArea text={m.toolProgressText} />
@@ -2342,13 +2419,25 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                     </Typography>
                   ) : null}
                   {(() => {
-                    const tail = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
-                    const showGenImgPlaceholder =
-                      isGenerateImageRunRowActive(m.toolProgressText) && !hasCompleteMarkdownInlineImage(tail);
+                    const tailRaw = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
+                    const imageStripSources = combineGeneratedImageSources(m.studioAiInlineImageUrls, tailRaw);
+                    const tailDisplay = stripDisplayedGeneratedImages(
+                      stripStudioAiInlineImageMarkdownFromText(tailRaw, m.studioAiInlineImageUrls),
+                      imageStripSources
+                    );
+                    const mdUrls = imageStripSources.length ? undefined : m.studioAiInlineImageUrls;
+                    const showGenImgPlaceholder = shouldShowGenerateImagePlaceholder(
+                      m.toolProgressText,
+                      tailRaw,
+                      m.studioAiInlineImageUrls
+                    );
                     return (
                       <>
-                        {showGenImgPlaceholder ? <GenerateImageBlurredPlaceholder /> : null}
-                        <MarkdownMessage text={tail} />
+                        {imageStripSources.length ? <AssistantChatGeneratedImages sources={imageStripSources} /> : null}
+                        {!imageStripSources.length && showGenImgPlaceholder ? (
+                          <GenerateImageBlurredPlaceholder />
+                        ) : null}
+                        <MarkdownMessage text={tailDisplay} studioAiInlineImageUrls={mdUrls} />
                       </>
                     );
                   })()}
@@ -2375,13 +2464,25 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                     </Typography>
                   ) : null}
                   {(() => {
-                    const tail = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
-                    const showGenImgPlaceholder =
-                      isGenerateImageRunRowActive(m.toolProgressText) && !hasCompleteMarkdownInlineImage(tail);
+                    const tailRaw = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
+                    const imageStripSources = combineGeneratedImageSources(m.studioAiInlineImageUrls, tailRaw);
+                    const tailDisplay = stripDisplayedGeneratedImages(
+                      stripStudioAiInlineImageMarkdownFromText(tailRaw, m.studioAiInlineImageUrls),
+                      imageStripSources
+                    );
+                    const mdUrls = imageStripSources.length ? undefined : m.studioAiInlineImageUrls;
+                    const showGenImgPlaceholder = shouldShowGenerateImagePlaceholder(
+                      m.toolProgressText,
+                      tailRaw,
+                      m.studioAiInlineImageUrls
+                    );
                     return (
                       <>
-                        {showGenImgPlaceholder ? <GenerateImageBlurredPlaceholder /> : null}
-                        <MarkdownMessage text={tail} />
+                        {imageStripSources.length ? <AssistantChatGeneratedImages sources={imageStripSources} /> : null}
+                        {!imageStripSources.length && showGenImgPlaceholder ? (
+                          <GenerateImageBlurredPlaceholder />
+                        ) : null}
+                        <MarkdownMessage text={tailDisplay} studioAiInlineImageUrls={mdUrls} />
                       </>
                     );
                   })()}
@@ -2599,14 +2700,14 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title="Copy full session log (raw SSE lines and prompts — includes content hidden from the chat view)">
+            <Tooltip title="Copy debug session log (parsed timeline + verbatim redacted SSE — for improving assistant behavior)">
               <span>
                 <IconButton
-                  aria-label="Copy full session stream log"
+                  aria-label="Copy assistant debug session log"
                   onClick={() =>
                     void copyToClipboard(
                       sessionStreamLogRef.current.length
-                        ? safeCopySessionLog(sessionStreamLogRef.current)
+                        ? formatSessionLogForDebugCopy(sessionStreamLogRef.current)
                         : '(Session log is empty — send a message first.)'
                     )
                   }

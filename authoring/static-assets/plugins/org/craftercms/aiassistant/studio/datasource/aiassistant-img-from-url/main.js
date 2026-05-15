@@ -7,7 +7,7 @@
  */
 /* global CStudioForms, YAHOO, CStudioAuthoring, CMgs, CStudioAuthoringContext, CrafterCMSNext */
 
-function crafterqXsrfHeaders() {
+function aiAssistantImgFromUrlXsrfHeaders() {
   var m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/);
   var token = m ? decodeURIComponent(m[1]) : '';
   var headers = { 'Content-Type': 'application/json' };
@@ -15,14 +15,14 @@ function crafterqXsrfHeaders() {
   return headers;
 }
 
-function crafterqUnwrapPluginScriptBody(j) {
+function aiAssistantImgFromUrlUnwrapPluginScriptBody(j) {
   if (j && typeof j === 'object' && j.result != null && typeof j.result === 'object' && !Array.isArray(j.result)) {
     return j.result;
   }
   return j;
 }
 
-function crafterqImportImageFromUrl(site, imageUrl, repoPath, fileName, objectId, objectGroupId) {
+function aiAssistantImportImageFromUrl(site, imageUrl, repoPath, fileName, objectId, objectGroupId) {
   var body = { imageUrl: imageUrl, repoPath: repoPath };
   if (fileName) body.fileName = fileName;
   if (objectId) body.objectId = objectId;
@@ -30,10 +30,10 @@ function crafterqImportImageFromUrl(site, imageUrl, repoPath, fileName, objectId
   return fetch(
     '/studio/api/2/plugin/script/plugins/org/craftercms/aiassistant/studio/aiassistant/authoring/import-image-from-url?siteId=' +
       encodeURIComponent(site),
-    { method: 'POST', credentials: 'same-origin', headers: crafterqXsrfHeaders(), body: JSON.stringify(body) }
+    { method: 'POST', credentials: 'same-origin', headers: aiAssistantImgFromUrlXsrfHeaders(), body: JSON.stringify(body) }
   ).then(function (r) {
     return r.json().then(function (j) {
-      var payload = crafterqUnwrapPluginScriptBody(j);
+      var payload = aiAssistantImgFromUrlUnwrapPluginScriptBody(j);
       if (!r.ok || payload.ok === false) throw new Error(payload.message || j.message || r.statusText || String(r.status));
       return payload;
     });
@@ -134,7 +134,7 @@ YAHOO.extend(CStudioForms.Datasources.CrafterqImgFromUrl, CStudioForms.CStudioFo
       return;
     }
 
-    crafterqImportImageFromUrl(site, url, path, null, null, null)
+    aiAssistantImportImageFromUrl(site, url, path, null, null, null)
       .then(function (data) {
         var relativeUrl = data.relativeUrl;
         var previewUrl = CStudioAuthoringContext.previewAppBaseUri + relativeUrl + '?' + new Date().getTime();

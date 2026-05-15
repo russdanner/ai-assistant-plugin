@@ -80,21 +80,21 @@ final class AutonomousAssistantSupervisor {
       int corePool = Math.min(maxPool, Math.max(2, n))
       int queueCap = 128
       try {
-        Integer mp = Integer.getInteger('crafterq.autonomous.worker.max')
+        Integer mp = Integer.getInteger('aiassistant.autonomous.worker.max')
         if (mp != null && mp >= 1) {
           maxPool = mp
         }
       } catch (Throwable ignoredMax) {
       }
       try {
-        Integer cp = Integer.getInteger('crafterq.autonomous.worker.core')
+        Integer cp = Integer.getInteger('aiassistant.autonomous.worker.core')
         if (cp != null && cp >= 1) {
           corePool = Math.min(cp, maxPool)
         }
       } catch (Throwable ignoredCore) {
       }
       try {
-        Integer qc = Integer.getInteger('crafterq.autonomous.worker.queue')
+        Integer qc = Integer.getInteger('aiassistant.autonomous.worker.queue')
         if (qc != null && qc >= 8) {
           queueCap = qc
         }
@@ -136,7 +136,7 @@ final class AutonomousAssistantSupervisor {
         saturated
       )
       log.info(
-        'Autonomous worker pool: core={} max={} queueCap={} (override crafterq.autonomous.worker.core/max/queue)',
+        'Autonomous worker pool: core={} max={} queueCap={} (override aiassistant.autonomous.worker.core/max/queue)',
         corePool,
         maxPool,
         queueCap

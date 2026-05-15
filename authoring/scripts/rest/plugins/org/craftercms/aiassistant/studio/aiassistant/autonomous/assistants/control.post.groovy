@@ -9,7 +9,7 @@ import plugins.org.craftercms.aiassistant.autonomous.AutonomousScopeGuard
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 
 def body = AiHttpProxy.parseJsonBody(request)
-if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
   return [ok: false, message: 'Invalid JSON']
 }

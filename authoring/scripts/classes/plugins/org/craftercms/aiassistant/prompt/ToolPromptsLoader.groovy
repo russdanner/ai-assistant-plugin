@@ -144,15 +144,6 @@ final class ToolPromptsLoader {
     if (key.startsWith('GENERAL_DESC_')) {
       return 'getDESC_' + key.substring('GENERAL_DESC_'.length())
     }
-    if ('CRAFTERQ_DESC_GET_AGENT_CHAT' == key) {
-      return 'getDESC_GET_CRAFTERQ_AGENT_CHAT'
-    }
-    if ('CRAFTERQ_DESC_LIST_AGENT_CHATS' == key) {
-      return 'getDESC_LIST_CRAFTERQ_AGENT_CHATS'
-    }
-    if (key.startsWith('CRAFTERQ_DESC_')) {
-      return 'getDESC_' + key.substring('CRAFTERQ_DESC_'.length())
-    }
     if (key.startsWith('GENERAL_LLM_')) {
       return 'getLlm_' + key.substring('GENERAL_LLM_'.length())
     }

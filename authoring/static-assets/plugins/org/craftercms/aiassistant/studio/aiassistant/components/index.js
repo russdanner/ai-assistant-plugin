@@ -1,8 +1,9 @@
 const { Fragment, jsx: jsx$1, jsxs } = craftercms.libs?.reactJsxRuntime;
 const require$$2 = craftercms.libs?.reactJsxRuntime && Object.prototype.hasOwnProperty.call(craftercms.libs?.reactJsxRuntime, 'default') ? craftercms.libs?.reactJsxRuntime['default'] : craftercms.libs?.reactJsxRuntime;
-const { useTheme, Box, CircularProgress, Typography, TableContainer, Paper, Table: Table$1, TableHead, TableBody, TableRow, TableCell, Stack: Stack$1, Tooltip, IconButton, Tabs, Tab, Button, Divider, TextField, Chip, FormControlLabel, Switch, Popover, paperClasses, GlobalStyles, Menu, MenuItem, ListItemIcon, ListItemText, Dialog, DialogContent, Alert, FormControl, InputLabel, Select, List, ListItem, Checkbox, ListItemButton, Badge, DialogTitle, DialogActions, Avatar, useMediaQuery, ListItemSecondaryAction, FormLabel, FormGroup, Autocomplete, Link, RadioGroup, Radio } = craftercms.libs.MaterialUI;
+const { useTheme, Box, Typography, CircularProgress, TableContainer, Paper, Table: Table$1, TableHead, TableBody, TableRow, TableCell, Stack: Stack$1, Tooltip, IconButton, Tabs, Tab, Button, Divider, TextField, Chip, FormControlLabel, Switch, Popover, paperClasses, GlobalStyles, Menu, MenuItem, ListItemIcon, ListItemText, Dialog, DialogContent, Alert, FormControl, InputLabel, Select, List, ListItem, Checkbox, ListItemButton, Badge, DialogTitle, DialogActions, Avatar, useMediaQuery, ListItemSecondaryAction, FormLabel, FormGroup, Autocomplete, Link, RadioGroup, Radio } = craftercms.libs.MaterialUI;
 const React = craftercms.libs.React;
 const { useRef, useState, useEffect, useCallback, useMemo, useLayoutEffect, useSyncExternalStore, forwardRef, useImperativeHandle, createElement } = craftercms.libs.React;
+const React__default = craftercms.libs.React && Object.prototype.hasOwnProperty.call(craftercms.libs.React, 'default') ? craftercms.libs.React['default'] : craftercms.libs.React;
 const MinimizedBar = craftercms.components.MinimizedBar && Object.prototype.hasOwnProperty.call(craftercms.components.MinimizedBar, 'default') ? craftercms.components.MinimizedBar['default'] : craftercms.components.MinimizedBar;
 const DialogHeader = craftercms.components.DialogHeader && Object.prototype.hasOwnProperty.call(craftercms.components.DialogHeader, 'default') ? craftercms.components.DialogHeader['default'] : craftercms.components.DialogHeader;
 const AlertDialog = craftercms.components.AlertDialog && Object.prototype.hasOwnProperty.call(craftercms.components.AlertDialog, 'default') ? craftercms.components.AlertDialog['default'] : craftercms.components.AlertDialog;
@@ -220,7 +221,6 @@ const initToolbarConfig = /*#__PURE__*/ createAction('INIT_TOOLBAR_CONFIG');
 // region ICE panel stack
 const pushIcePanelPage = /*#__PURE__*/ createAction('PUSH_ICE_PANEL_PAGE');
 
-const CRAFTERQ_CHAT_USER_HEADER = 'X-CrafterQ-Chat-User';
 /**
  * Thrown when the HTTP response body ends without an SSE frame carrying {@code metadata.completed} or
  * {@code metadata.error} — e.g. network drop, proxy reset, Studio thread died, or browser navigated away.
@@ -231,18 +231,8 @@ class AiAssistantIncompleteStreamError extends Error {
         this.name = 'AiAssistantIncompleteStreamError';
     }
 }
-const CRAFTERQ_CHAT_USER_STORAGE_KEY = 'crafterq.chatUser';
-function getStoredChatUser() {
-    try {
-        return window.localStorage.getItem(CRAFTERQ_CHAT_USER_STORAGE_KEY);
-    }
-    catch {
-        return null;
-    }
-}
 /**
- * Streams chat responses via SSE (text/event-stream) using fetch streaming.
- * This mirrors the widget behavior: POST /v1/chats?stream=true&agentId=...
+ * Streams assistant replies via SSE from the Studio plugin script endpoint (`…/ai/stream`).
  */
 /**
  * Reads the Studio Experience Builder {@code crafterPreview} cookie when present (document.cookie).
@@ -283,15 +273,12 @@ function buildStudioAuthHeaders() {
     return out;
 }
 async function streamChat(args) {
-    const { agentId, prompt, chatId, contentPath, contentTypeId, contentTypeLabel, studioPreviewPageUrl, authoringSurface, formEngineClientJsonApply, formEngineItemPath, llm, llmModel, imageModel, imageGenerator, openAiApiKey, siteId, previewToken, enableTools, omitTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, crafterQBearerToken, crafterQBearerTokenEnv, signal, onMessage, onRawSseDataLine } = args;
-    const token = getStoredChatUser();
+    const { agentId, prompt, chatId, contentPath, contentTypeId, contentTypeLabel, studioPreviewPageUrl, authoringSurface, formEngineClientJsonApply, formEngineItemPath, llm, llmModel, imageModel, imageGenerator, openAiApiKey, siteId, previewToken, enableTools, omitTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, signal, onMessage, onRawSseDataLine } = args;
     const headers = {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
         ...buildStudioAuthHeaders()
     };
-    if (token)
-        headers[CRAFTERQ_CHAT_USER_HEADER] = token;
     let pluginStreamUrl = '/studio/api/2/plugin/script/plugins/org/craftercms/aiassistant/studio/aiassistant/ai/stream';
     if (siteId) {
         pluginStreamUrl += (pluginStreamUrl.includes('?') ? '&' : '?') + 'siteId=' + encodeURIComponent(siteId);
@@ -350,12 +337,6 @@ async function streamChat(args) {
         translateBatchConcurrency <= 64) {
         requestBody.translateBatchConcurrency = Math.floor(translateBatchConcurrency);
     }
-    const bEnv = crafterQBearerTokenEnv != null ? String(crafterQBearerTokenEnv).trim() : '';
-    if (bEnv)
-        requestBody.crafterQBearerTokenEnv = bEnv;
-    const bTok = crafterQBearerToken != null ? String(crafterQBearerToken).trim() : '';
-    if (bTok)
-        requestBody.crafterQBearerToken = bTok;
     const streamFromResponse = async (res, failPrefix) => {
         if (!res.ok) {
             const text = await res.text().catch(() => '');
@@ -429,6 +410,205 @@ async function streamChat(args) {
         signal
     });
     await streamFromResponse(res, 'Plugin stream');
+}
+
+/**
+ * Formats the in-memory session stream capture for debugging (Copy session log).
+ * Part A = parsed timeline (intent / phases / errors); Part B = verbatim redacted lines.
+ */
+const TEXT_PREVIEW_CHARS = 320;
+/** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
+function redactSessionLogLineForCopy(s) {
+    return s
+        .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
+        .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
+}
+function previewText(s, max = TEXT_PREVIEW_CHARS) {
+    const t = (s || '').trim();
+    if (!t)
+        return '(empty)';
+    if (t.length <= max)
+        return t;
+    return `${t.slice(0, max)}… [+${t.length - max} chars — see VERBATIM]`;
+}
+function parseLogLine(line) {
+    /** Raw SSE rows are logged as `{ISO}\\t{json}` from the chat stream hook. */
+    const isoRow = /^(\d{4}-\d{2}-\d{2}T[^\t]+)\t([\s\S]+)$/.exec(line);
+    if (isoRow) {
+        const iso = isoRow[1];
+        const rest = isoRow[2].trim();
+        try {
+            const json = JSON.parse(rest);
+            return { kind: 'iso_sse', iso, json, rawLine: line };
+        }
+        catch {
+            return { kind: 'iso_sse', iso, json: null, rawLine: line };
+        }
+    }
+    try {
+        const json = JSON.parse(line);
+        return { kind: 'client_json', json, rawLine: line };
+    }
+    catch {
+        return { kind: 'unknown', rawLine: line };
+    }
+}
+function buildParsedTimeline(lines) {
+    const out = [];
+    let turn = 0;
+    let pendingAssistantChars = 0;
+    let streamIdsLoggedForTurn = false;
+    const flushDeltas = () => {
+        if (pendingAssistantChars > 0) {
+            out.push(`  • Assistant model text (aggregated deltas): +${pendingAssistantChars} chars — fragments in VERBATIM`);
+            pendingAssistantChars = 0;
+        }
+    };
+    for (const line of lines) {
+        const parsed = parseLogLine(line);
+        if (parsed.kind === 'unknown') {
+            flushDeltas();
+            out.push(`  • Non-JSON line: ${previewText(parsed.rawLine, 160)}`);
+            continue;
+        }
+        if (parsed.kind === 'client_json') {
+            const o = parsed.json;
+            const kind = typeof o.kind === 'string' ? o.kind : '';
+            if (kind === 'client.sessionReset') {
+                flushDeltas();
+                out.push('');
+                out.push(`── Session capture cleared @ ${typeof o.ts === 'string' ? o.ts : '?'} (site=${String(o.siteId ?? '')} agent=${String(o.agentId ?? '')})`);
+                continue;
+            }
+            if (kind === 'client.userSend') {
+                flushDeltas();
+                turn++;
+                streamIdsLoggedForTurn = false;
+                out.push('');
+                out.push(`── Turn ${turn} — CLIENT → SERVER @ ${typeof o.ts === 'string' ? o.ts : '?'}`);
+                const ctx = o.context && typeof o.context === 'object' ? o.context : null;
+                if (ctx) {
+                    const bits = [];
+                    const keys = [
+                        'siteId',
+                        'agentId',
+                        'llm',
+                        'llmModel',
+                        'imageModel',
+                        'imageGenerator',
+                        'authoringSurface',
+                        'omitTools',
+                        'enableTools',
+                        'chatId',
+                        'contentPath',
+                        'contentTypeId',
+                        'studioPreviewPageUrl'
+                    ];
+                    for (const k of keys) {
+                        const v = ctx[k];
+                        if (v != null && String(v).trim() !== '')
+                            bits.push(`${k}=${String(v)}`);
+                    }
+                    if (bits.length)
+                        out.push(`  Request context: ${bits.join(' | ')}`);
+                }
+                const disp = typeof o.displayText === 'string' ? o.displayText : '';
+                const wire = typeof o.wirePrompt === 'string' ? o.wirePrompt : '';
+                out.push(`  Bubble text (${disp.length} chars): ${previewText(disp)}`);
+                out.push(`  Wire prompt (${wire.length} chars): ${previewText(wire)}`);
+                continue;
+            }
+            if (kind === 'client.streamOutcome') {
+                flushDeltas();
+                const oc = typeof o.outcome === 'string' ? o.outcome : 'unknown';
+                const msg = typeof o.message === 'string' ? o.message : '';
+                const et = typeof o.errorType === 'string' ? o.errorType : '';
+                out.push(`  ◆ CLIENT OUTCOME @ ${typeof o.ts === 'string' ? o.ts : '?'}: ${oc}${et ? ` (${et})` : ''}${msg ? ` — ${previewText(msg, 480)}` : ''}`);
+                continue;
+            }
+            flushDeltas();
+            out.push(`  • Client event kind=${kind || '(missing)'}`);
+            continue;
+        }
+        // iso_sse
+        if (!parsed.json) {
+            flushDeltas();
+            out.push(`  • SSE @ ${parsed.iso} [payload not JSON]`);
+            continue;
+        }
+        const e = parsed.json;
+        const meta = e.metadata && typeof e.metadata === 'object' ? e.metadata : {};
+        const text = typeof e.text === 'string' ? e.text : '';
+        const terminal = meta.completed === true || meta.error === true;
+        const status = meta.status != null ? String(meta.status) : '';
+        const phase = meta.phase != null ? String(meta.phase) : '';
+        const phaseInteresting = status === 'aiassistant-chat-phase' &&
+            phase === 'summarizing-results';
+        const interesting = terminal ||
+            meta.planGateFailure === true ||
+            status === 'tool-progress' ||
+            status === 'tool-workflow-hint' ||
+            status === 'pipeline-heartbeat' ||
+            phaseInteresting;
+        if (!streamIdsLoggedForTurn && (meta.chatId || meta.messageId)) {
+            flushDeltas();
+            streamIdsLoggedForTurn = true;
+            out.push(`  • Stream ids (@ ${parsed.iso}): chatId=${meta.chatId ?? '—'} | messageId=${meta.messageId ?? '—'}`);
+        }
+        if (interesting) {
+            flushDeltas();
+            const bullets = [];
+            if (meta.completed === true)
+                bullets.push('Terminal: completed=true (normal end of SSE)');
+            if (meta.error === true)
+                bullets.push(`Terminal: error=true — ${previewText(String(meta.message ?? '(no message)'), 240)}`);
+            if (meta.planGateFailure === true)
+                bullets.push('planGateFailure=true — UI may replace assistant output');
+            if (status === 'pipeline-heartbeat') {
+                bullets.push(`pipeline-heartbeat: elapsedSec=${meta.elapsedSec ?? '?'} nextInSec=${meta.nextInSec ?? '?'} hint=${previewText(String(meta.hint ?? ''), 180)}`);
+            }
+            if (status === 'tool-progress' || status === 'tool-workflow-hint') {
+                bullets.push(`Tool strip: status=${status} phase=${phase || '—'} tool=${meta.tool ?? '—'}`);
+                const oneLine = text.replace(/\s+/g, ' ').trim();
+                if (oneLine)
+                    bullets.push(`  strip preview: ${previewText(oneLine, 220)}`);
+            }
+            if (phaseInteresting) {
+                bullets.push('Phase: summarizing-results — orchestration summarizing tool results into final assistant markdown');
+            }
+            out.push(`  • SSE @ ${parsed.iso}`);
+            for (const b of bullets)
+                out.push(`      → ${b}`);
+            continue;
+        }
+        if (text.length) {
+            pendingAssistantChars += text.length;
+        }
+    }
+    flushDeltas();
+    const body = out.join('\n').trim();
+    return body || '(Timeline empty — no recognizable events.)';
+}
+function formatSessionLogForDebugCopy(lines) {
+    const generatedAt = new Date().toISOString();
+    const timeline = buildParsedTimeline(lines);
+    const verbatim = lines.map(redactSessionLogLineForCopy).join('\n');
+    return [
+        '==============================================================================',
+        'AI ASSISTANT — SESSION DEBUG LOG (for maintainers)',
+        `Generated (copy time): ${generatedAt}`,
+        '',
+        'How to read:',
+        '  • TIMELINE — what happened in order (phases, tools, terminal frames, client outcomes).',
+        '  • VERBATIM — exact captured lines (JSON); secrets redacted; use for grep / repro.',
+        '',
+        '--- TIMELINE ---',
+        timeline,
+        '',
+        '--- VERBATIM (redacted, chronological) ---',
+        verbatim || '(empty)',
+        ''
+    ].join('\n');
 }
 
 function ok$1() {}
@@ -28178,6 +28358,8 @@ function StudioDraggableImage(props) {
     /** When set, {@code <img>} uses the object URL (CSP-safe) instead of the wire {@code src}. */
     const [blobDecoded, setBlobDecoded] = useState(false);
     const [blobLoading, setBlobLoading] = useState(false);
+    /** Ephemeral provider URLs: we only preview via one {@code fetch}→blob; no silent {@code <img src=https…>} fallback. */
+    const [remoteHttpFetchFailed, setRemoteHttpFetchFailed] = useState(false);
     useEffect(() => {
         return () => {
             removeGhostRef.current?.();
@@ -28186,6 +28368,7 @@ function StudioDraggableImage(props) {
     }, []);
     const trimmed = src?.trim() ?? '';
     const isRemote = trimmed ? isProbablyRemoteImageUrl(trimmed) : false;
+    const isAbsoluteHttp = trimmed.startsWith('http://') || trimmed.startsWith('https://');
     /**
      * Prefer an object URL for {@code <img src>}: Studio CSP often allows {@code blob:} while blocking {@code data:},
      * and revoking is tied to this effect's closure (avoids React 18 StrictMode revoking a URL state still points at).
@@ -28204,6 +28387,7 @@ function StudioDraggableImage(props) {
         setBlobPreviewUrl(null);
         setBlobDecoded(false);
         setBlobLoading(false);
+        setRemoteHttpFetchFailed(false);
         if (!trimmed) {
             return () => {
                 ac.abort();
@@ -28269,6 +28453,9 @@ function StudioDraggableImage(props) {
             setBlobPreviewUrl(null);
             setBlobLoading(false);
             setBlobDecoded(true);
+            if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+                setRemoteHttpFetchFailed(true);
+            }
         });
         return () => {
             ac.abort();
@@ -28307,6 +28494,18 @@ function StudioDraggableImage(props) {
     }, []);
     if (!trimmed)
         return null;
+    if (isAbsoluteHttp && remoteHttpFetchFailed) {
+        return (jsx$1(Box, { sx: {
+                my: 1,
+                display: 'inline-block',
+                maxWidth: '100%',
+                borderRadius: 1,
+                border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
+                bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
+                px: 1.25,
+                py: 1
+            }, children: jsx$1(Typography, { variant: "caption", color: "text.secondary", component: "p", sx: { m: 0 }, children: "Image preview unavailable." }) }));
+    }
     const canDrag = !isRemote || Boolean(effectiveSite);
     const caption = isRemote
         ? 'Drag onto an image field in preview (imports when you drop)'
@@ -28377,6 +28576,123 @@ function newBlobRefId() {
         return crypto.randomUUID();
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+/** End index (exclusive) of a {@code data:image/...;base64,...} run starting at {@code start}. */
+function dataImageBase64RunEnd(input, start) {
+    const head = input.slice(start);
+    const m = /^data:image\/[a-z0-9.+-]+;base64,/i.exec(head);
+    if (!m) {
+        return Math.min(input.length, start + 1);
+    }
+    let i = start + m[0].length;
+    while (i < input.length) {
+        const c = input[i];
+        if (/[A-Za-z0-9+/=]/.test(c)) {
+            i++;
+        }
+        else if (/\s/.test(c)) {
+            // PEM-style wrapping / JSON pretty-print — still part of the payload until non-base64 char.
+            i++;
+        }
+        else {
+            break;
+        }
+    }
+    return i;
+}
+/**
+ * Strip whitespace inside {@code data:image/*;base64,...} payloads so markdown parsers see one contiguous URL and
+ * {@link StudioDraggableImage} gets valid base64 for {@code atob}.
+ */
+function compactAllDataImageBase64Runs(text) {
+    if (!text || text.indexOf('data:image') < 0) {
+        return text;
+    }
+    const lower = text.toLowerCase();
+    const parts = [];
+    let i = 0;
+    while (i < text.length) {
+        const idx = lower.indexOf('data:image/', i);
+        if (idx < 0) {
+            parts.push(text.slice(i));
+            break;
+        }
+        parts.push(text.slice(i, idx));
+        const head = text.slice(idx);
+        const m = /^data:image\/[a-z0-9.+-]+;base64,/i.exec(head);
+        if (!m) {
+            parts.push(text[idx]);
+            i = idx + 1;
+            continue;
+        }
+        const dataStart = idx + m[0].length;
+        let j = dataStart;
+        while (j < text.length) {
+            const c = text[j];
+            if (/[A-Za-z0-9+/=]/.test(c)) {
+                j++;
+            }
+            else if (/\s/.test(c)) {
+                j++;
+            }
+            else {
+                break;
+            }
+        }
+        parts.push(text.slice(idx, dataStart) + text.slice(dataStart, j).replace(/\s+/g, ''));
+        i = j;
+    }
+    return parts.join('');
+}
+function isDataImageUrlInsideMarkdownImageDestination(input, startIdx) {
+    const lookback = input.slice(Math.max(0, startIdx - 12), startIdx);
+    return /\]\(\s*<?\s*$/i.test(lookback);
+}
+/**
+ * Models and the server sometimes emit a raw {@code data:image/...;base64,...} payload without
+ * {@code ![alt](url)}. GFM leaves that as paragraph / autolink text (a giant blob). Wrap as image markdown first.
+ */
+function wrapBareLongDataImageUrlsAsMarkdown(input, minUrlChars = 256) {
+    if (!input || input.indexOf('data:image') < 0) {
+        return input;
+    }
+    const lower = input.toLowerCase();
+    const parts = [];
+    let i = 0;
+    while (i < input.length) {
+        const idx = lower.indexOf('data:image/', i);
+        if (idx < 0) {
+            parts.push(input.slice(i));
+            break;
+        }
+        if (isDataImageUrlInsideMarkdownImageDestination(input, idx)) {
+            const end = dataImageBase64RunEnd(input, idx);
+            parts.push(input.slice(i, end));
+            i = end;
+            continue;
+        }
+        const end = dataImageBase64RunEnd(input, idx);
+        const url = input.slice(idx, end);
+        parts.push(input.slice(i, idx));
+        if (url.length >= minUrlChars) {
+            parts.push(`\n\n![](<${url}>)\n\n`);
+        }
+        else {
+            parts.push(url);
+        }
+        i = end;
+    }
+    return parts.join('');
+}
+/** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
+function preprocessAssistantMarkdownImages(text) {
+    const longDataImageBlobRefMap = new Map();
+    const normalized = normalizeOpenAiLiteralEscapes(text);
+    const compactData = compactAllDataImageBase64Runs(normalized);
+    const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
+    const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
+    const displayText = wrapDataImageMarkdownDestInAngleBrackets(shortened);
+    return { displayText, longDataImageBlobRefMap };
 }
 /**
  * Micromark / GFM can leave {@code ![alt](data:image/...;base64,...)} as plain text when the destination is huge.
@@ -28519,9 +28835,66 @@ function wrapDataImageMarkdownDestInAngleBrackets(input) {
 function assistantMarkdownUnresolvedStudioInlineImageRef(src) {
     return src.trim().toLowerCase().startsWith('studio-ai-inline-image:');
 }
-/** Resolves {@code studio-ai-blob-ref://}; avoids passing unresolved custom schemes to {@link StudioDraggableImage}. */
+function reactNodeToPlainText(node) {
+    if (node == null || typeof node === 'boolean')
+        return '';
+    if (typeof node === 'string' || typeof node === 'number')
+        return String(node);
+    if (Array.isArray(node))
+        return node.map(reactNodeToPlainText).join('');
+    if (React__default.isValidElement(node))
+        return reactNodeToPlainText(node.props.children);
+    return '';
+}
+/**
+ * Micromark can still leave image markdown or a raw {@code data:} URL as a single paragraph of text.
+ * Recover by rendering {@link StudioDraggableImage} instead of a wall of base64.
+ */
+function findFirstMarkdownAssistantImage(plain) {
+    const re = /!\[([^\]]*)\]\(\s*(?:<(data:image\/[a-z0-9.+-]+;base64,[\s\S]*?)>|(data:image\/[a-z0-9.+-]+;base64,[\s\S]*?)|(studio-ai-blob-ref:\/\/[^)\s]+)|(studio-ai-inline-image:\/\/[^)\s]+))\s*\)/gi;
+    const m = re.exec(plain);
+    if (!m) {
+        return null;
+    }
+    const alt = m[1] ?? '';
+    const rawUrl = (m[2] || m[3] || m[4] || m[5] || '').trim();
+    const url = rawUrl.startsWith('studio-ai-blob-ref://') ? rawUrl : rawUrl.replace(/\s+/g, '').trim();
+    if (!url) {
+        return null;
+    }
+    return { alt, url, start: m.index, end: m.index + m[0].length };
+}
+function AssistantMarkdownParagraph(props) {
+    const { children, longDataImageBlobRefMap, studioAiInlineImageUrls } = props;
+    const plain = reactNodeToPlainText(children).trim();
+    if (!plain) {
+        return (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children }));
+    }
+    const bareData = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i.exec(plain);
+    if (bareData && bareData[0].replace(/\s+/g, '').length > 256) {
+        return jsx$1(StudioDraggableImage, { src: bareData[0].replace(/\s+/g, ''), alt: "" });
+    }
+    const rawImg = /^!\[([^\]]*)\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)$/.exec(plain);
+    if (rawImg) {
+        const url = (rawImg[2] || rawImg[3] || '').trim();
+        if (url) {
+            return (jsx$1(AssistantMarkdownImg, { src: url, alt: rawImg[1], longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls }));
+        }
+    }
+    const recovered = findFirstMarkdownAssistantImage(plain);
+    if (recovered &&
+        (recovered.url.length > 120 ||
+            recovered.url.startsWith('studio-ai-blob-ref://') ||
+            assistantMarkdownUnresolvedStudioInlineImageRef(recovered.url))) {
+        const before = plain.slice(0, recovered.start).trim();
+        const after = plain.slice(recovered.end).trim();
+        return (jsxs(Box, { sx: { mb: 0.75 }, children: [before ? (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.5 }, children: before })) : null, jsx$1(AssistantMarkdownImg, { src: recovered.url, alt: recovered.alt, longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls }), after ? (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mt: 0.5 }, children: after })) : null] }));
+    }
+    return (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children }));
+}
+/** Resolves {@code studio-ai-blob-ref://} and {@code studio-ai-inline-image://toolCallId} (via optional SSE metadata map). */
 function AssistantMarkdownImg(props) {
-    const { src, alt, longDataImageBlobRefMap } = props;
+    const { src, alt, longDataImageBlobRefMap, studioAiInlineImageUrls } = props;
     const s = src?.trim() ?? '';
     if (s.startsWith('studio-ai-blob-ref://')) {
         const id = s.slice('studio-ai-blob-ref://'.length);
@@ -28531,8 +28904,17 @@ function AssistantMarkdownImg(props) {
         }
         return (jsxs(Typography, { component: "span", variant: "caption", color: "text.secondary", sx: { display: 'block', my: 0.5 }, children: [(alt || '').toString().trim() ? `${(alt || '').toString().trim()} — ` : '', "Image preview unavailable in this message view."] }));
     }
+    // Unresolved studio-ai-inline-image refs: resolve from tool-progress metadata when present (see writeToolProgressSse).
     if (assistantMarkdownUnresolvedStudioInlineImageRef(s)) {
-        return (jsxs(Typography, { component: "span", variant: "caption", color: "text.secondary", sx: { display: 'block', my: 0.5 }, children: [(alt || '').toString().trim() ? `${(alt || '').toString().trim()}: ` : '', "Image preview unavailable (inline image reference was not expanded by the server)."] }));
+        const marker = 'studio-ai-inline-image://';
+        const low = s.trim().toLowerCase();
+        const idx = low.indexOf(marker);
+        const id = idx >= 0 ? s.trim().slice(idx + marker.length).trim() : '';
+        const resolved = id && studioAiInlineImageUrls ? studioAiInlineImageUrls[id] : undefined;
+        if (resolved && resolved.length > 12) {
+            return jsx$1(StudioDraggableImage, { src: resolved, alt: alt });
+        }
+        return (jsxs(Typography, { component: "span", variant: "caption", color: "text.secondary", sx: { display: 'block', my: 0.5 }, children: [(alt || '').toString().trim() ? `${(alt || '').toString().trim()} — ` : '', "Image preview is still loading or was not received from Studio (try again or check Studio logs)."] }));
     }
     return jsx$1(StudioDraggableImage, { src: s, alt: alt });
 }
@@ -28570,25 +28952,22 @@ function fencedBlockSanitizeSchema() {
 function DraftMarkdownPreview(props) {
     const theme = useTheme();
     const sanitizeSchema = useMemo(() => fencedBlockSanitizeSchema(), []);
-    const { value } = props;
+    const { value, studioAiInlineImageUrls } = props;
     const { md, longDataImageBlobRefMap } = useMemo(() => {
-        const map = new Map();
-        const normalized = normalizeOpenAiLiteralEscapes(value);
-        const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
-        const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-        return { md: wrapped, longDataImageBlobRefMap: map };
+        const { displayText, longDataImageBlobRefMap: map } = preprocessAssistantMarkdownImages(value);
+        return { md: displayText, longDataImageBlobRefMap: map };
     }, [value]);
     const mdComponents = useMemo(() => ({
         h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 0.5, mb: 0.5 }, children: children })),
         h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
         h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 0.75, mb: 0.35 }, children: children })),
-        p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
+        p: ({ children }) => (jsx$1(AssistantMarkdownParagraph, { longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls, children: children })),
         ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
         ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
         li: ({ children }) => (jsx$1(Box, { component: "li", sx: { mb: 0.25, whiteSpace: 'normal' }, children: children })),
         strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
         a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap })),
+        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls })),
         code: ({ className, children }) => {
             const raw = String(children ?? '').replace(/\n$/, '');
             const isInline = !className;
@@ -28612,7 +28991,7 @@ function DraftMarkdownPreview(props) {
                     border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[300]}`
                 }, children: jsx$1("code", { children: raw }) }));
         }
-    }), [theme, longDataImageBlobRefMap]);
+    }), [theme, longDataImageBlobRefMap, studioAiInlineImageUrls]);
     return (jsx$1(Box, { sx: {
             maxHeight: 440,
             overflow: 'auto',
@@ -28639,12 +29018,45 @@ async function copyToClipboard$1(text) {
         document.body.removeChild(ta);
     }
 }
+/**
+ * Models sometimes fence assistant prose as {@code ```text} even when it contains markdown (e.g. {@code ![alt](studio-ai-inline-image://…)}).
+ * Without this, the chat shows a raw code block and images never resolve.
+ */
+function fencedCodeValueLooksLikeAssistantMarkdown(value) {
+    const v = value.trim();
+    if (!v)
+        return false;
+    if (v.includes('studio-ai-inline-image:'))
+        return true;
+    if (/!\[[^\]]*\]\([^)]+\)/.test(v))
+        return true;
+    if (/^#{1,6}\s/m.test(v))
+        return true;
+    return false;
+}
+/** Short prose-only fenced blocks (e.g. image-only wrap-up) skip the heavy “Draft preview” chrome — render markdown inline. */
+function compactProseMarkdownFence(value) {
+    const v = value.trim();
+    if (!v || v.length > 8000)
+        return false;
+    if (v.includes('```'))
+        return false;
+    if (/(\n|^)#{1,6}\s/.test(v))
+        return false;
+    if (v.includes('📋'))
+        return false;
+    if (/\n##\s*Plan\b/i.test(v) || /^##\s*Plan\b/i.test(v))
+        return false;
+    return true;
+}
 function CodeBlock(props) {
     const theme = useTheme();
-    const { language, value } = props;
+    const { language, value, studioAiInlineImageUrls } = props;
     const lang = (language || '').toLowerCase();
     const isHtml = lang === 'html' || lang === 'htm';
     const isMarkdownDraft = lang === 'markdown' || lang === 'md';
+    const isTextFencedAsMarkdown = (lang === 'text' || lang === 'txt') && fencedCodeValueLooksLikeAssistantMarkdown(value);
+    const renderMarkdownFencedBlock = isMarkdownDraft || isTextFencedAsMarkdown;
     const [htmlMode, setHtmlMode] = useState('preview');
     const [mdMode, setMdMode] = useState('preview');
     const header = (jsxs(Stack$1, { direction: "row", alignItems: "center", justifyContent: "space-between", sx: {
@@ -28687,7 +29099,7 @@ function CodeBlock(props) {
                                 fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                                 fontSize: 12.5,
                                 lineHeight: 1.5
-                            }, children: jsx$1("code", { children: value }) }))] })] })) : isMarkdownDraft ? (jsxs(Fragment, { children: [jsxs(Box, { sx: { px: 1.5, pt: 1.5, pb: 0.75 }, children: [jsx$1(Typography, { variant: "subtitle1", component: "div", sx: { fontWeight: 700, lineHeight: 1.35 }, children: "Draft preview" }), jsx$1(Typography, { variant: "caption", color: "text.secondary", component: "div", sx: { mt: 0.5, display: 'block', lineHeight: 1.4 }, children: "This tinted area is the assistant draft in chat only. Nothing is saved in the CMS until WriteContent succeeds on a repository path." })] }), jsxs(Box, { sx: {
+                            }, children: jsx$1("code", { children: value }) }))] })] })) : renderMarkdownFencedBlock && compactProseMarkdownFence(value) ? (jsx$1(Box, { sx: { px: 0.5, py: 0.25 }, children: jsx$1(DraftMarkdownPreview, { value: value, studioAiInlineImageUrls: studioAiInlineImageUrls }) })) : renderMarkdownFencedBlock ? (jsxs(Fragment, { children: [jsxs(Box, { sx: { px: 1.5, pt: 1.5, pb: 0.75 }, children: [jsx$1(Typography, { variant: "subtitle1", component: "div", sx: { fontWeight: 700, lineHeight: 1.35 }, children: "Draft preview" }), jsx$1(Typography, { variant: "caption", color: "text.secondary", component: "div", sx: { mt: 0.5, display: 'block', lineHeight: 1.4 }, children: "This tinted area is the assistant draft in chat only. Nothing is saved in the CMS until WriteContent succeeds on a repository path." })] }), jsxs(Box, { sx: {
                         mx: 1.5,
                         mb: 1.5,
                         pl: 1.25,
@@ -28703,7 +29115,7 @@ function CodeBlock(props) {
                                 minHeight: 34,
                                 px: 1,
                                 borderBottom: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`
-                            }, children: [jsx$1(Tab, { value: "source", label: "Source", sx: { minHeight: 34, py: 0.5 } }), jsx$1(Tab, { value: "preview", label: "Preview", sx: { minHeight: 34, py: 0.5 } })] }), mdMode === 'preview' ? (jsx$1(Box, { sx: { p: 1 }, children: jsx$1(DraftMarkdownPreview, { value: value }) })) : (jsx$1(Box, { component: "pre", sx: {
+                            }, children: [jsx$1(Tab, { value: "source", label: "Source", sx: { minHeight: 34, py: 0.5 } }), jsx$1(Tab, { value: "preview", label: "Preview", sx: { minHeight: 34, py: 0.5 } })] }), mdMode === 'preview' ? (jsx$1(Box, { sx: { p: 1 }, children: jsx$1(DraftMarkdownPreview, { value: value, studioAiInlineImageUrls: studioAiInlineImageUrls }) })) : (jsx$1(Box, { component: "pre", sx: {
                                 m: 0,
                                 p: 1.25,
                                 overflow: 'auto',
@@ -28721,14 +29133,8 @@ function CodeBlock(props) {
 }
 function MarkdownMessage(props) {
     const theme = useTheme();
-    const { text } = props;
-    const { displayText, longDataImageBlobRefMap } = useMemo(() => {
-        const map = new Map();
-        const normalized = normalizeOpenAiLiteralEscapes(text);
-        const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
-        const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-        return { displayText: wrapped, longDataImageBlobRefMap: map };
-    }, [text]);
+    const { text, studioAiInlineImageUrls } = props;
+    const { displayText, longDataImageBlobRefMap } = useMemo(() => preprocessAssistantMarkdownImages(text), [text]);
     const sanitizeSchema = useMemo(() => {
         const base = studioAiChatMarkdownSanitizeSchema();
         return {
@@ -28743,7 +29149,7 @@ function MarkdownMessage(props) {
         h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
         h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
         h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
-        p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
+        p: ({ children }) => (jsx$1(AssistantMarkdownParagraph, { longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls, children: children })),
         ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
         ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
         li: ({ children }) => (jsx$1(Box, { component: "li", sx: {
@@ -28761,7 +29167,7 @@ function MarkdownMessage(props) {
         strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
         em: ({ children }) => (jsx$1(Box, { component: "em", sx: { fontStyle: 'italic' }, children: children })),
         a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap })),
+        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap, studioAiInlineImageUrls: studioAiInlineImageUrls })),
         table: ({ children }) => (jsx$1(TableContainer, { component: Paper, elevation: 0, sx: {
                 my: 1.5,
                 overflow: 'auto',
@@ -28805,13 +29211,208 @@ function MarkdownMessage(props) {
             }
             const match = /language-(\w+)/.exec(className || '');
             const language = match?.[1];
-            return jsx$1(CodeBlock, { language: language, value: raw.replace(/\n$/, '') });
+            return jsx$1(CodeBlock, { language: language, value: raw.replace(/\n$/, ''), studioAiInlineImageUrls: studioAiInlineImageUrls });
         }
-    }), [theme, longDataImageBlobRefMap]);
+    }), [theme, longDataImageBlobRefMap, studioAiInlineImageUrls]);
     return (jsx$1(Box, { sx: {
             '& :first-of-type': { mt: 0 },
             '& :last-of-type': { mb: 0 }
         }, children: jsx$1(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [[rehypeSanitize, sanitizeSchema]], components: markdownComponents, children: displayText }) }));
+}
+
+/** Shifting gradient while {@code GenerateImage} is running (server tool-progress uses an ellipsis row until “finished”). */
+const cqGenerateImageAuraShift = keyframes({
+    '0%': { backgroundPosition: '0% 40%' },
+    '100%': { backgroundPosition: '100% 60%' }
+});
+/**
+ * Blurred shifting gradient stand-in for the incoming chat image; similar footprint to the draggable chat image card.
+ */
+function GenerateImageBlurredPlaceholder() {
+    const theme = useTheme();
+    const dark = theme.palette.mode === 'dark';
+    const a = dark ? '#5e35b1' : '#e1bee7';
+    const b = dark ? '#1565c0' : '#bbdefb';
+    const c = dark ? '#00695c' : '#b2dfdb';
+    const d = dark ? '#4527a0' : '#d1c4e9';
+    return (jsxs(Box, { role: "status", "aria-label": "Generating image preview", sx: {
+            my: 1,
+            display: 'block',
+            maxWidth: '100%',
+            position: 'relative',
+            borderRadius: 1,
+            border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
+            overflow: 'hidden',
+            bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
+            aspectRatio: '3 / 2',
+            maxHeight: 320,
+            minHeight: 168
+        }, children: [jsx$1(Box, { "aria-hidden": true, sx: {
+                    position: 'absolute',
+                    inset: -48,
+                    background: `linear-gradient(118deg, ${a}, ${b}, ${c}, ${d}, ${a})`,
+                    backgroundSize: '280% 280%',
+                    filter: 'blur(36px)',
+                    opacity: dark ? 0.92 : 0.88,
+                    animation: `${cqGenerateImageAuraShift} 3.2s ease-in-out infinite`,
+                    '@media (prefers-reduced-motion: reduce)': {
+                        animation: 'none',
+                        backgroundPosition: '50% 50%'
+                    }
+                } }), jsx$1(Box, { sx: {
+                    position: 'relative',
+                    zIndex: 1,
+                    minHeight: 168,
+                    maxHeight: 320,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    px: 2,
+                    py: 2,
+                    background: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.28)',
+                    backdropFilter: 'blur(2px)'
+                }, children: jsx$1(Typography, { variant: "caption", color: "text.secondary", sx: { textAlign: 'center', lineHeight: 1.45, opacity: 0.9 }, children: "Generating image\u2026" }) })] }));
+}
+
+/**
+ * Renders GenerateImage output as {@link StudioDraggableImage} tiles. Sources come from
+ * {@link combineGeneratedImageSources} (SSE metadata + same-turn text recovery for large {@code data:} URLs).
+ */
+function AssistantChatGeneratedImages(props) {
+    const uniq = useMemo(() => [...new Set(props.sources.filter((s) => typeof s === 'string' && s.trim().length > 12).map((s) => s.trim()))], [props.sources]);
+    if (!uniq.length)
+        return null;
+    return (jsx$1(Stack$1, { spacing: 1.25, sx: { my: 1, maxWidth: '100%' }, "data-aiassistant-generated-images": true, children: uniq.map((src, i) => (jsx$1(Box, { sx: { alignSelf: 'flex-start', maxWidth: '100%' }, children: jsx$1(StudioDraggableImage, { src: src, alt: "" }) }, `${i}-${src.slice(0, 64)}`))) }));
+}
+
+/**
+ * Sources for {@link AssistantChatGeneratedImages}:
+ * 1) SSE {@code studioAiInlineImageUrls} (short https or small data URLs the server can embed in JSON metadata).
+ * 2) Same-turn assistant text — large {@code data:image/...;base64,...} from {@code expandInlineImageRefs} is often **not**
+ *    duplicated in metadata (size cap); we extract it once for the strip and strip it from markdown so the renderer
+ *    is not fed megabyte lines.
+ * 3) Ephemeral {@code ![…](https://…)} provider links that never appear in metadata.
+ */
+const MIN_EXTRACT_IMAGE_CHARS = 200;
+const DATA_IMAGE_BASE64_IN_TEXT_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
+/** Provider temp links are almost always HTTPS markdown images. */
+const HTTPS_IMAGE_IN_MARKDOWN_RE = /!\[[^\]]*\]\(\s*<?\s*(https:\/\/[^)\s>]+)\s*>?\s*\)/gi;
+function resolvedGeneratedImageSources(urls) {
+    if (!urls || typeof urls !== 'object')
+        return [];
+    const seen = new Set();
+    const out = [];
+    const entries = Object.entries(urls).sort(([a], [b]) => a.localeCompare(b));
+    for (const [, v] of entries) {
+        if (typeof v !== 'string')
+            continue;
+        const t = v.trim();
+        if (t.length < 13)
+            continue;
+        if (t.startsWith('data:image/') || /^https?:\/\//i.test(t)) {
+            if (!seen.has(t)) {
+                seen.add(t);
+                out.push(t);
+            }
+        }
+    }
+    return out;
+}
+function extractDataImageUrlsFromText(text) {
+    if (!text || text.indexOf('data:image') < 0)
+        return [];
+    const seen = new Set();
+    const out = [];
+    DATA_IMAGE_BASE64_IN_TEXT_RE.lastIndex = 0;
+    let m;
+    while ((m = DATA_IMAGE_BASE64_IN_TEXT_RE.exec(text)) !== null) {
+        const compact = m[0].replace(/\s+/g, '');
+        if (compact.length < MIN_EXTRACT_IMAGE_CHARS)
+            continue;
+        if (!seen.has(compact)) {
+            seen.add(compact);
+            out.push(compact);
+        }
+    }
+    return out;
+}
+function extractHttpsMarkdownImageUrls(text) {
+    if (!text?.trim() || text.indexOf('![') < 0)
+        return [];
+    const seen = new Set();
+    const out = [];
+    HTTPS_IMAGE_IN_MARKDOWN_RE.lastIndex = 0;
+    let m;
+    while ((m = HTTPS_IMAGE_IN_MARKDOWN_RE.exec(text)) !== null) {
+        const u = (m[1] || '').trim();
+        if (u.length >= 16 && !seen.has(u)) {
+            seen.add(u);
+            out.push(u);
+        }
+    }
+    return out;
+}
+/** Metadata first, then recover large payloads / temp https from stitched assistant text (server omits huge data in SSE JSON). */
+function combineGeneratedImageSources(urls, tailMarkdown) {
+    const seen = new Set();
+    const out = [];
+    for (const u of resolvedGeneratedImageSources(urls)) {
+        seen.add(u);
+        out.push(u);
+    }
+    for (const u of extractDataImageUrlsFromText(tailMarkdown)) {
+        if (!seen.has(u)) {
+            seen.add(u);
+            out.push(u);
+        }
+    }
+    for (const u of extractHttpsMarkdownImageUrls(tailMarkdown)) {
+        if (!seen.has(u)) {
+            seen.add(u);
+            out.push(u);
+        }
+    }
+    return out;
+}
+function stripDataImageUrlsFromText(text) {
+    if (!text || text.indexOf('data:image') < 0)
+        return text;
+    const cleaned = text.replace(DATA_IMAGE_BASE64_IN_TEXT_RE, (run) => run.replace(/\s+/g, '').length >= MIN_EXTRACT_IMAGE_CHARS ? '' : run);
+    return cleaned.replace(/\n{3,}/g, '\n\n');
+}
+function stripHttpsMarkdownImageLinesForUrls(text, httpsUrls) {
+    let out = text;
+    for (const raw of httpsUrls) {
+        if (!/^https:\/\//i.test(raw))
+            continue;
+        const esc = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        out = out.replace(new RegExp(`!\\[[^\\]]*\\]\\(\\s*<?\\s*${esc}\\s*>?\\s*\\)`, 'gi'), '');
+    }
+    return out.replace(/\n{3,}/g, '\n\n');
+}
+/**
+ * Drop payloads rendered in {@link AssistantChatGeneratedImages} so markdown is not asked to parse megabyte lines
+ * or duplicate temp URLs.
+ */
+function stripDisplayedGeneratedImages(text, displayedSources) {
+    const https = displayedSources.filter((s) => /^https:\/\//i.test(s.trim()));
+    let out = stripDataImageUrlsFromText(text);
+    out = stripHttpsMarkdownImageLinesForUrls(out, https);
+    return out.replace(/\n{3,}/g, '\n\n');
+}
+/** Remove markdown lines that point at {@code studio-ai-inline-image://…} when metadata supplies the real URL separately. */
+function stripStudioAiInlineImageMarkdownFromText(text, urls) {
+    if (!text?.trim() || !urls)
+        return text;
+    let out = text;
+    for (const id of Object.keys(urls)) {
+        if (!id)
+            continue;
+        const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        out = out.replace(new RegExp(`!\\[[^\\]]*\\]\\(\\s*<studio-ai-inline-image://${esc}>\\s*\\)`, 'gi'), '');
+        out = out.replace(new RegExp(`!\\[[^\\]]*\\]\\(\\s*studio-ai-inline-image://${esc}\\s*\\)`, 'gi'), '');
+    }
+    return out.replace(/\n{3,}/g, '\n\n');
 }
 
 function getSpeechRecognitionCtor() {
@@ -28835,15 +29436,6 @@ function pushStreamLog(logRef, line) {
     if (arr.length > MAX_SESSION_STREAM_LOG_LINES) {
         arr.splice(0, arr.length - MAX_SESSION_STREAM_LOG_LINES);
     }
-}
-/** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
-function redactSessionLogLineForCopy(s) {
-    return s
-        .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
-        .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
-}
-function safeCopySessionLog(lines) {
-    return lines.map(redactSessionLogLineForCopy).join('\n');
 }
 /** Nearest ancestor that scrolls (e.g. ICE `ResizeableDrawer` drawerBody uses overflow-y: auto). */
 function getScrollParent$1(node) {
@@ -29336,7 +29928,7 @@ function buildLiveContentMacroSubstitution(live) {
     if (!path && !hasXml && !hasJson)
         return undefined;
     return ('[Studio form — **full XML/JSON omitted from prompt** for size. Use **GetContent** for saved repo bodies; the **Current Studio content form** appendix lists **field ids** and **linked paths** only. ' +
-        'Unsaved edits are not inlined — **GetContent** is git until the author Saves (or apply via `crafterqFormFieldUpdates` using ids from the appendix / form definition).]\n' +
+        'Unsaved edits are not inlined — **GetContent** is git until the author Saves (or apply via `aiassistantFormFieldUpdates` using ids from the appendix / form definition).]\n' +
         (path ? `Open item path: ${path}` : ''));
 }
 /** Appended to the API prompt only (not the visible user message) when embedded in the form-engine control. */
@@ -29407,7 +29999,7 @@ const FORM_ENGINE_APPLY_INSTRUCTIONS = `
 **Client-side form apply:** When you change field content (including **translate** to another language), end with fenced JSON (field ids from the form definition / XML; string values only). **Do not** reply with generic CrafterCMS docs ("Translation Configuration", "open the content item", "add a language") instead of the translated text in JSON.
 
 \`\`\`json
-{ "crafterqFormFieldUpdates": { "title_t": "…", "body_html": "<p>…</p>" } }
+{ "aiassistantFormFieldUpdates": { "title_t": "…", "body_html": "<p>…</p>" } }
 \`\`\`
 List every field you changed; omit the block for pure Q&A. Repeat groups: ids like "sections_o|0|section_html".`;
 function buildAuthoringFormAppendix(ctx, options) {
@@ -29458,10 +30050,10 @@ function buildAuthoringFormAppendix(ctx, options) {
     return '\n\n' + lines.join('\n');
 }
 /**
- * Parse assistant reply for `crafterqFormFieldUpdates` inside a ```json fenced block.
+ * Parse assistant reply for `aiassistantFormFieldUpdates` inside a ```json fenced block.
  */
-function tryExtractCrafterqFormFieldUpdates(assistantText) {
-    const marker = 'crafterqFormFieldUpdates';
+function tryExtractAiassistantFormFieldUpdates(assistantText) {
+    const marker = 'aiassistantFormFieldUpdates';
     if (!assistantText.includes(marker))
         return null;
     const re = /```(?:json)?\s*([\s\S]*?)```/gi;
@@ -29471,7 +30063,7 @@ function tryExtractCrafterqFormFieldUpdates(assistantText) {
             const obj = JSON.parse(m[1].trim());
             if (!obj || typeof obj !== 'object' || Array.isArray(obj))
                 continue;
-            const raw = obj.crafterqFormFieldUpdates;
+            const raw = obj.aiassistantFormFieldUpdates;
             if (!raw || typeof raw !== 'object' || Array.isArray(raw))
                 continue;
             const out = {};
@@ -29617,11 +30209,6 @@ const cqPipelineHeartbeatBarPulse = keyframes({
     '0%, 100%': { opacity: 1, filter: 'brightness(1)' },
     '50%': { opacity: 0.88, filter: 'brightness(1.06)' }
 });
-/** Shifting gradient while {@code GenerateImage} is running (server tool-progress uses an ellipsis row until “finished”). */
-const cqGenerateImageAuraShift = keyframes({
-    '0%': { backgroundPosition: '0% 40%' },
-    '100%': { backgroundPosition: '100% 60%' }
-});
 /**
  * True once the server emitted a terminal {@code GenerateImage} tool-progress row (✅ finished, ❌, or ⚠️).
  * Scans all lines so a later debug/flatten block mentioning GenerateImage cannot keep the shimmer stuck on.
@@ -29671,12 +30258,54 @@ function isGenerateImageRunRowActive(toolProgressText) {
     return false;
 }
 /**
+ * True when every {@code studio-ai-inline-image://id} in markdown has a corresponding URL from server tool-progress metadata.
+ */
+function studioAiInlineImageRefsResolvedInMap(tailMarkdown, urls) {
+    if (!urls || typeof urls !== 'object')
+        return false;
+    const re = /studio-ai-inline-image:\/\/([^)\s<>]+)/gi;
+    const ids = [];
+    let m;
+    while ((m = re.exec(tailMarkdown)) !== null) {
+        ids.push(m[1]);
+    }
+    if (!ids.length)
+        return false;
+    return ids.every((id) => typeof urls[id] === 'string' && urls[id].length > 12);
+}
+/**
+ * Merge {@code studioAiInlineImageUrls} objects from SSE metadata (one map per terminal GenerateImage tool row).
+ */
+function mergeStudioAiInlineImageUrlMetadata(prior, incoming) {
+    if (incoming == null || typeof incoming !== 'object' || Array.isArray(incoming))
+        return prior;
+    const next = { ...(prior || {}) };
+    let added = false;
+    for (const [k, v] of Object.entries(incoming)) {
+        if (typeof v === 'string' && v.length > 0) {
+            next[k] = v;
+            added = true;
+        }
+    }
+    if (!added)
+        return prior;
+    return next;
+}
+function hasStudioAiInlineImageUrlPayload(v) {
+    return !!(v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0);
+}
+function studioAiInlineUrlsPatch(m, incoming) {
+    const merged = mergeStudioAiInlineImageUrlMetadata(m.studioAiInlineImageUrls, incoming);
+    if (merged === undefined)
+        return {};
+    return { studioAiInlineImageUrls: merged };
+}
+/**
  * True when {@code markdown} already contains a complete GFM image link the renderer can show (replaces placeholder).
  */
 function hasCompleteMarkdownInlineImage(markdown) {
     if (!markdown?.trim())
         return false;
-    // Destination may be `<data:image/...>` (CommonMark) or bare `data:image/...`; bare `[^)]+` stops at first `)`.
     const re = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)/g;
     let m;
     while ((m = re.exec(markdown)) !== null) {
@@ -29685,57 +30314,31 @@ function hasCompleteMarkdownInlineImage(markdown) {
             return true;
         if (/^https?:\/\//i.test(url) && url.length > 12)
             return true;
-        // studio-ai-inline-image: refs are server-expanded placeholders — not a loadable image until expanded.
+        if (/^studio-ai-blob-ref:\/\//i.test(url))
+            return true;
     }
+    if (/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{120,}/i.test(markdown))
+        return true;
     return false;
 }
 /**
- * Blurred shifting gradient stand-in for the incoming chat image; similar footprint to the draggable chat image card.
+ * Keep the shimmer until the strip has sources or markdown already shows a loadable image.
  */
-function GenerateImageBlurredPlaceholder() {
-    const theme = useTheme();
-    const dark = theme.palette.mode === 'dark';
-    const a = dark ? '#5e35b1' : '#e1bee7';
-    const b = dark ? '#1565c0' : '#bbdefb';
-    const c = dark ? '#00695c' : '#b2dfdb';
-    const d = dark ? '#4527a0' : '#d1c4e9';
-    return (jsxs(Box, { role: "status", "aria-label": "Generating image preview", sx: {
-            my: 1,
-            display: 'block',
-            maxWidth: '100%',
-            position: 'relative',
-            borderRadius: 1,
-            border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
-            overflow: 'hidden',
-            bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
-            aspectRatio: '3 / 2',
-            maxHeight: 320,
-            minHeight: 168
-        }, children: [jsx$1(Box, { "aria-hidden": true, sx: {
-                    position: 'absolute',
-                    inset: -48,
-                    background: `linear-gradient(118deg, ${a}, ${b}, ${c}, ${d}, ${a})`,
-                    backgroundSize: '280% 280%',
-                    filter: 'blur(36px)',
-                    opacity: dark ? 0.92 : 0.88,
-                    animation: `${cqGenerateImageAuraShift} 3.2s ease-in-out infinite`,
-                    '@media (prefers-reduced-motion: reduce)': {
-                        animation: 'none',
-                        backgroundPosition: '50% 50%'
-                    }
-                } }), jsx$1(Box, { sx: {
-                    position: 'relative',
-                    zIndex: 1,
-                    minHeight: 168,
-                    maxHeight: 320,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    px: 2,
-                    py: 2,
-                    background: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.28)',
-                    backdropFilter: 'blur(2px)'
-                }, children: jsx$1(Typography, { variant: "caption", color: "text.secondary", sx: { textAlign: 'center', lineHeight: 1.45, opacity: 0.9 }, children: "Generating image\u2026" }) })] }));
+function shouldShowGenerateImagePlaceholder(toolProgressText, tailMarkdown, studioAiInlineImageUrls) {
+    if (combineGeneratedImageSources(studioAiInlineImageUrls, tailMarkdown).length > 0)
+        return false;
+    if (hasCompleteMarkdownInlineImage(tailMarkdown))
+        return false;
+    if (studioAiInlineImageRefsResolvedInMap(tailMarkdown, studioAiInlineImageUrls))
+        return false;
+    if (!toolProgressText?.includes('GenerateImage'))
+        return false;
+    if (isGenerateImageRunRowActive(toolProgressText))
+        return true;
+    if (generateImageToolSettledInToolProgress(toolProgressText) && /studio-ai-inline-image:\/\//i.test(tailMarkdown)) {
+        return true;
+    }
+    return false;
 }
 /** Keeps the tool-progress list pinned to the latest line as SSE chunks append. */
 function ToolProgressScrollArea(props) {
@@ -29823,7 +30426,7 @@ function foldAssistantReasoningIntoMainText(m) {
 function getConversationStorageKey(siteId, agentId) {
     const site = (siteId || 'default').replace(/[^a-zA-Z0-9-_]/g, '_');
     const agent = (agentId || 'default').replace(/[^a-zA-Z0-9-_]/g, '_');
-    return `crafterq-conversation-${site}-${agent}`;
+    return `aiassistant-conversation-${site}-${agent}`;
 }
 function loadConversation(siteId, agentId) {
     if (typeof localStorage === 'undefined')
@@ -29945,8 +30548,8 @@ function buildPriorTurnsContextBlock(prior) {
 }
 function AiAssistantChat(props) {
     const theme = useTheme();
-    const { agentId: agentIdProp, llm, llmModel, imageModel, imageGenerator, openAiApiKey, initialMessages, configPrompts, embedTarget = 'default', getAuthoringFormContext, formEngineClientJsonApply, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, crafterQBearerToken, crafterQBearerTokenEnv } = props;
-    /** Empty when config omits **crafterQAgentId** — server must omit ConsultCrafterQExpert; do not substitute a default UUID. */
+    const { agentId: agentIdProp, llm, llmModel, imageModel, imageGenerator, openAiApiKey, initialMessages, configPrompts, embedTarget = 'default', getAuthoringFormContext, formEngineClientJsonApply, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
+    /** Widget **`agentId`** from agent configuration (UUID when applicable). */
     const agentId = agentIdProp?.trim() ?? '';
     const siteId = useActiveSiteId() ?? 'default';
     const previewItem = useCurrentPreviewItem();
@@ -30006,7 +30609,7 @@ function AiAssistantChat(props) {
     const pendingPersistRef = useRef(null);
     const iceRootRef = useRef(null);
     const lastSpokenAssistantIdRef = useRef(null);
-    /** Raw SSE JSON lines + client send markers — full transcript for support / debugging (see Copy log). */
+    /** Raw SSE JSON lines + structured client markers — formatted by formatSessionLogForDebugCopy when copying. */
     const sessionStreamLogRef = useRef([]);
     // Restore per-agent conversation across reloads / reopens.
     useEffect(() => {
@@ -30270,6 +30873,17 @@ function AiAssistantChat(props) {
         setChatId(undefined);
         setMessages([]);
         sessionStreamLogRef.current = [];
+        try {
+            pushStreamLog(sessionStreamLogRef, JSON.stringify({
+                kind: 'client.sessionReset',
+                ts: new Date().toISOString(),
+                siteId,
+                agentId
+            }));
+        }
+        catch {
+            /* ignore log serialization errors */
+        }
         clearConversation(siteId, agentId);
     };
     const startSend = async (prompt, displayInChat, sendOptions) => {
@@ -30340,6 +30954,10 @@ function AiAssistantChat(props) {
         const userId = `user-${Date.now()}`;
         const assistantId = `assistant-${Date.now()}`;
         const userBubbleText = expandedDisplay || expandedPrompt;
+        /** `crafterPreview` cookie when present — forwarded for server preview tools (GetPreviewHtml, etc.). */
+        const previewTokenForStream = readCrafterPreviewTokenFromCookie();
+        const previewContentTypeLabel = formEngine ? undefined : resolvePreviewContentTypeLabel(previewItem);
+        const studioPreviewPageUrl = formEngine ? undefined : pickStudioPreviewPageUrlForServer(previewItem);
         setMessages((prev) => [
             ...prev,
             { id: userId, role: 'user', text: userBubbleText },
@@ -30349,6 +30967,25 @@ function AiAssistantChat(props) {
             pushStreamLog(sessionStreamLogRef, JSON.stringify({
                 kind: 'client.userSend',
                 ts: new Date().toISOString(),
+                context: {
+                    siteId,
+                    agentId,
+                    llm: llm ?? null,
+                    llmModel: llmModel ?? null,
+                    imageModel: imageModel ?? null,
+                    imageGenerator: imageGenerator != null ? String(imageGenerator).trim() || null : null,
+                    authoringSurface: formEngine ? 'formEngine' : 'preview',
+                    omitTools: omitToolsThisSend,
+                    enableTools: enableTools !== false,
+                    chatId: chatId ?? null,
+                    contentPath: formEngine ? null : macroValuesRef.current.contentPath?.trim() || null,
+                    contentTypeId: formEngine ? null : macroValuesRef.current.contentTypeId?.trim() || null,
+                    studioPreviewPageUrl: studioPreviewPageUrl ?? null,
+                    formEngineClientJsonApply: wantClientJsonApply,
+                    formEngineItemPath: formEngine && wantClientJsonApply && authoringSnap?.contentPath?.trim()
+                        ? authoringSnap.contentPath.trim()
+                        : null
+                },
                 displayText: userBubbleText,
                 wirePrompt: wirePrompt
             }));
@@ -30364,10 +31001,6 @@ function AiAssistantChat(props) {
         let shouldRefreshPreview = false;
         /** Set when the client stream wait hits the hard cap (try/catch are separate scopes — must be outside `try`). */
         let streamHitTimeout = false;
-        /** Studio `crafterPreview` cookie — send whenever readable so server tools (e.g. GetPreviewHtml) work in XB/form chat too. */
-        const previewTokenForStream = readCrafterPreviewTokenFromCookie();
-        const previewContentTypeLabel = formEngine ? undefined : resolvePreviewContentTypeLabel(previewItem);
-        const studioPreviewPageUrl = formEngine ? undefined : pickStudioPreviewPageUrlForServer(previewItem);
         try {
             const streamPromise = streamChat({
                 agentId,
@@ -30402,8 +31035,6 @@ function AiAssistantChat(props) {
                     translateBatchConcurrency <= 64
                     ? { translateBatchConcurrency: Math.floor(translateBatchConcurrency) }
                     : {}),
-                ...(crafterQBearerTokenEnv?.trim() ? { crafterQBearerTokenEnv: crafterQBearerTokenEnv.trim() } : {}),
-                ...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {}),
                 signal: ac.signal,
                 onRawSseDataLine: (jsonLine) => {
                     pushStreamLog(sessionStreamLogRef, `${new Date().toISOString()}\t${jsonLine}`);
@@ -30426,9 +31057,10 @@ function AiAssistantChat(props) {
                     const isToolProgressChunk = toolStatus === 'tool-progress' || toolStatus === 'tool-workflow-hint';
                     const rawTextChunk = evt.text ?? '';
                     const textChunk = isToolProgressChunk ? rawTextChunk : stripForbiddenLazyPlanLines(rawTextChunk);
-                    const summarizingResultsHint = evt.metadata?.status === 'crafterq-chat-phase' &&
+                    const summarizingResultsHint = evt.metadata?.status === 'aiassistant-chat-phase' &&
                         String(evt.metadata?.phase || '') === 'summarizing-results';
                     const md = evt.metadata && typeof evt.metadata === 'object' ? evt.metadata : undefined;
+                    const incomingStudioAiInlineImgUrls = md?.studioAiInlineImageUrls;
                     const mdStatus = md && md.status != null ? String(md.status).trim() : '';
                     if (mdStatus === 'pipeline-heartbeat') {
                         const rawEl = md.elapsedSec;
@@ -30468,6 +31100,9 @@ function AiAssistantChat(props) {
                     if (summarizingResultsHint) {
                         setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, summarizingResults: true } : m)));
                     }
+                    if (hasStudioAiInlineImageUrlPayload(incomingStudioAiInlineImgUrls)) {
+                        setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls) } : m));
+                    }
                     if (!formEngine &&
                         !streamErr &&
                         toolStatus === 'tool-progress' &&
@@ -30497,7 +31132,8 @@ function AiAssistantChat(props) {
                                         assistantPreToolsText: planPrefix || undefined,
                                         reasoningStreamText: '',
                                         text: '',
-                                        toolProgressText: textChunk
+                                        toolProgressText: textChunk,
+                                        ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                                     };
                                 }
                                 const prior = m.toolProgressText || '';
@@ -30508,7 +31144,11 @@ function AiAssistantChat(props) {
                                         ? ''
                                         : '\n'
                                     : '\n\n';
-                                return { ...m, toolProgressText: prior + join + textChunk };
+                                return {
+                                    ...m,
+                                    toolProgressText: prior + join + textChunk,
+                                    ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
+                                };
                             }));
                         }
                         else {
@@ -30522,7 +31162,8 @@ function AiAssistantChat(props) {
                                     return {
                                         ...m,
                                         reasoningStreamText: (m.reasoningStreamText || '') + textChunk,
-                                        ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                                        ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                                        ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                                     };
                                 }
                                 if (noPlanAboveToolsYet && textChunk.trim()) {
@@ -30533,14 +31174,16 @@ function AiAssistantChat(props) {
                                         return {
                                             ...m,
                                             assistantPreToolsText: (m.assistantPreToolsText || '') + textChunk,
-                                            ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                                            ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                                            ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                                         };
                                     }
                                 }
                                 return {
                                     ...m,
                                     text: (m.text || '') + textChunk,
-                                    ...(textChunk.trim() !== '' ? { summarizingResults: false } : {})
+                                    ...(textChunk.trim() !== '' ? { summarizingResults: false } : {}),
+                                    ...studioAiInlineUrlsPatch(m, incomingStudioAiInlineImgUrls)
                                 };
                             }));
                         }
@@ -30589,7 +31232,7 @@ function AiAssistantChat(props) {
                             formUpdatesApplied = true;
                             try {
                                 const snap = getAuthoringFormContext();
-                                const updates = tryExtractCrafterqFormFieldUpdates(assistantTextAccum);
+                                const updates = tryExtractAiassistantFormFieldUpdates(assistantTextAccum);
                                 if (updates && typeof snap.applyAssistantFieldUpdates === 'function') {
                                     const result = snap.applyAssistantFieldUpdates(updates);
                                     const parts = [];
@@ -30619,7 +31262,7 @@ function AiAssistantChat(props) {
                     }
                 }
             });
-            // OpenAI + multi-step tools can exceed several minutes; cap aligns with server crafterq.chatFluxAwaitMs default.
+            // OpenAI + multi-step tools can exceed several minutes; cap aligns with the plugin orchestration stream await default.
             const CHAT_STREAM_TIMEOUT_MS = 600000;
             let streamTimeoutId;
             const timeoutPromise = new Promise((_, reject) => {
@@ -30636,6 +31279,16 @@ function AiAssistantChat(props) {
                 if (streamTimeoutId !== undefined)
                     window.clearTimeout(streamTimeoutId);
             }
+            try {
+                pushStreamLog(sessionStreamLogRef, JSON.stringify({
+                    kind: 'client.streamOutcome',
+                    ts: new Date().toISOString(),
+                    outcome: 'stream_finished_ok'
+                }));
+            }
+            catch {
+                /* ignore log serialization errors */
+            }
             if (!formEngine && shouldRefreshPreview) {
                 triggerStudioPreviewReload();
             }
@@ -30646,6 +31299,27 @@ function AiAssistantChat(props) {
             const timedOut = streamHitTimeout ||
                 errText.includes('Timed out waiting for chat response');
             const abortWithoutExplicitStop = isFetchAbortError(e) && !userStopped && !timedOut;
+            let streamOutcome = 'request_error';
+            if (userStopped)
+                streamOutcome = 'user_stop';
+            else if (timedOut)
+                streamOutcome = 'timeout';
+            else if (e instanceof AiAssistantIncompleteStreamError)
+                streamOutcome = 'incomplete_stream';
+            else if (abortWithoutExplicitStop)
+                streamOutcome = 'aborted_or_network';
+            try {
+                pushStreamLog(sessionStreamLogRef, JSON.stringify({
+                    kind: 'client.streamOutcome',
+                    ts: new Date().toISOString(),
+                    outcome: streamOutcome,
+                    errorType: e instanceof Error ? e.name : typeof e,
+                    message: errText.slice(0, 4000)
+                }));
+            }
+            catch {
+                /* ignore log serialization errors */
+            }
             setMessages((prev) => prev.map((m) => {
                 if (m.id !== assistantId)
                     return m;
@@ -30751,16 +31425,21 @@ function AiAssistantChat(props) {
                                     opacity: 0.9,
                                     '&:hover': { opacity: 1, bgcolor: 'action.hover' }
                                 })
-                        }, children: jsx$1(CloseRounded, { fontSize: "inherit", sx: { fontSize: 18 } }) }) }), jsx$1(Box, { sx: { minWidth: 0 }, children: m.role === 'assistant' || m.role === 'system' ? (jsxs(Box, { children: [m.reasoningStreamText?.trim() && m.isStreaming ? (jsx$1(AssistantReasoningLive, { text: m.reasoningStreamText || '' })) : null, m.pipelineHeartbeat ? (jsx$1(PipelineHeartbeatBar, { elapsedSec: m.pipelineHeartbeat.elapsedSec, nextInSec: m.pipelineHeartbeat.nextInSec, hint: m.pipelineHeartbeat.hint })) : null, m.toolProgressText?.trim() && m.assistantPreToolsText !== undefined ? (jsxs(Fragment, { children: [m.assistantPreToolsText.trim() ? (jsx$1(Box, { sx: { mb: 1 }, children: jsx$1(MarkdownMessage, { text: m.assistantPreToolsText }) })) : null, jsx$1(ToolProgressScrollArea, { text: m.toolProgressText }), m.summarizingResults ? (jsx$1(Typography, { variant: "caption", component: "p", sx: {
+                        }, children: jsx$1(CloseRounded, { fontSize: "inherit", sx: { fontSize: 18 } }) }) }), jsx$1(Box, { sx: { minWidth: 0 }, children: m.role === 'assistant' || m.role === 'system' ? (jsxs(Box, { children: [m.reasoningStreamText?.trim() && m.isStreaming ? (jsx$1(AssistantReasoningLive, { text: m.reasoningStreamText || '' })) : null, m.pipelineHeartbeat ? (jsx$1(PipelineHeartbeatBar, { elapsedSec: m.pipelineHeartbeat.elapsedSec, nextInSec: m.pipelineHeartbeat.nextInSec, hint: m.pipelineHeartbeat.hint })) : null, m.toolProgressText?.trim() && m.assistantPreToolsText !== undefined ? (jsxs(Fragment, { children: [m.assistantPreToolsText.trim() ? (jsx$1(Box, { sx: { mb: 1 }, children: jsx$1(MarkdownMessage, { text: stripDisplayedGeneratedImages(stripStudioAiInlineImageMarkdownFromText(m.assistantPreToolsText, m.studioAiInlineImageUrls), combineGeneratedImageSources(m.studioAiInlineImageUrls, m.assistantPreToolsText)), studioAiInlineImageUrls: combineGeneratedImageSources(m.studioAiInlineImageUrls, m.assistantPreToolsText).length
+                                                ? undefined
+                                                : m.studioAiInlineImageUrls }) })) : null, jsx$1(ToolProgressScrollArea, { text: m.toolProgressText }), m.summarizingResults ? (jsx$1(Typography, { variant: "caption", component: "p", sx: {
                                             mt: 0.75,
                                             mb: 0,
                                             color: 'text.secondary',
                                             opacity: 0.85,
                                             fontStyle: 'italic'
                                         }, children: "Summarizing results\u2026" })) : null, (() => {
-                                        const tail = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
-                                        const showGenImgPlaceholder = isGenerateImageRunRowActive(m.toolProgressText) && !hasCompleteMarkdownInlineImage(tail);
-                                        return (jsxs(Fragment, { children: [showGenImgPlaceholder ? jsx$1(GenerateImageBlurredPlaceholder, {}) : null, jsx$1(MarkdownMessage, { text: tail })] }));
+                                        const tailRaw = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
+                                        const imageStripSources = combineGeneratedImageSources(m.studioAiInlineImageUrls, tailRaw);
+                                        const tailDisplay = stripDisplayedGeneratedImages(stripStudioAiInlineImageMarkdownFromText(tailRaw, m.studioAiInlineImageUrls), imageStripSources);
+                                        const mdUrls = imageStripSources.length ? undefined : m.studioAiInlineImageUrls;
+                                        const showGenImgPlaceholder = shouldShowGenerateImagePlaceholder(m.toolProgressText, tailRaw, m.studioAiInlineImageUrls);
+                                        return (jsxs(Fragment, { children: [imageStripSources.length ? jsx$1(AssistantChatGeneratedImages, { sources: imageStripSources }) : null, !imageStripSources.length && showGenImgPlaceholder ? (jsx$1(GenerateImageBlurredPlaceholder, {})) : null, jsx$1(MarkdownMessage, { text: tailDisplay, studioAiInlineImageUrls: mdUrls })] }));
                                     })(), jsx$1(AssistantPipelineTimingLine, { wallMs: m.toolPipelineWallMs })] })) : (jsxs(Fragment, { children: [m.toolProgressText?.trim() ? (jsx$1(ToolProgressScrollArea, { text: m.toolProgressText })) : null, m.summarizingResults ? (jsx$1(Typography, { variant: "caption", component: "p", sx: {
                                             mt: 0.75,
                                             mb: 0,
@@ -30768,9 +31447,12 @@ function AiAssistantChat(props) {
                                             opacity: 0.85,
                                             fontStyle: 'italic'
                                         }, children: "Summarizing results\u2026" })) : null, (() => {
-                                        const tail = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
-                                        const showGenImgPlaceholder = isGenerateImageRunRowActive(m.toolProgressText) && !hasCompleteMarkdownInlineImage(tail);
-                                        return (jsxs(Fragment, { children: [showGenImgPlaceholder ? jsx$1(GenerateImageBlurredPlaceholder, {}) : null, jsx$1(MarkdownMessage, { text: tail })] }));
+                                        const tailRaw = dedupeAssistantPostToolsMarkdown(m.assistantPreToolsText, m.text);
+                                        const imageStripSources = combineGeneratedImageSources(m.studioAiInlineImageUrls, tailRaw);
+                                        const tailDisplay = stripDisplayedGeneratedImages(stripStudioAiInlineImageMarkdownFromText(tailRaw, m.studioAiInlineImageUrls), imageStripSources);
+                                        const mdUrls = imageStripSources.length ? undefined : m.studioAiInlineImageUrls;
+                                        const showGenImgPlaceholder = shouldShowGenerateImagePlaceholder(m.toolProgressText, tailRaw, m.studioAiInlineImageUrls);
+                                        return (jsxs(Fragment, { children: [imageStripSources.length ? jsx$1(AssistantChatGeneratedImages, { sources: imageStripSources }) : null, !imageStripSources.length && showGenImgPlaceholder ? (jsx$1(GenerateImageBlurredPlaceholder, {})) : null, jsx$1(MarkdownMessage, { text: tailDisplay, studioAiInlineImageUrls: mdUrls })] }));
                                     })(), jsx$1(AssistantPipelineTimingLine, { wallMs: m.toolPipelineWallMs })] }))] })) : (jsxs(Fragment, { children: [jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap' }, children: m.text }), jsxs(Box, { sx: {
                                     display: 'flex',
                                     justifyContent: 'flex-end',
@@ -30842,8 +31524,8 @@ function AiAssistantChat(props) {
             ...(isIcePanel
                 ? { position: 'sticky', bottom: 0, zIndex: 4, alignSelf: 'stretch' }
                 : { flexShrink: 0 })
-        }, children: jsxs(Box, { sx: { px: { xs: 1, sm: 2 }, pt: 1.5, minWidth: 0 }, children: [jsxs(Stack$1, { direction: "row", spacing: 1, alignItems: "flex-end", sx: { width: '100%', minWidth: 0 }, children: [jsxs(Stack$1, { direction: "row", spacing: 0.5, alignItems: "flex-end", sx: { flexShrink: 0 }, children: [jsx$1(Tooltip, { title: "Start a new chat", children: jsx$1("span", { children: jsx$1(IconButton, { "aria-label": "New chat", onClick: handleNewChat, disabled: sending, color: "default", children: jsx$1(AddCommentRounded, {}) }) }) }), jsx$1(Tooltip, { title: "Copy full session log (raw SSE lines and prompts \u2014 includes content hidden from the chat view)", children: jsx$1("span", { children: jsx$1(IconButton, { "aria-label": "Copy full session stream log", onClick: () => void copyToClipboard(sessionStreamLogRef.current.length
-                                                ? safeCopySessionLog(sessionStreamLogRef.current)
+        }, children: jsxs(Box, { sx: { px: { xs: 1, sm: 2 }, pt: 1.5, minWidth: 0 }, children: [jsxs(Stack$1, { direction: "row", spacing: 1, alignItems: "flex-end", sx: { width: '100%', minWidth: 0 }, children: [jsxs(Stack$1, { direction: "row", spacing: 0.5, alignItems: "flex-end", sx: { flexShrink: 0 }, children: [jsx$1(Tooltip, { title: "Start a new chat", children: jsx$1("span", { children: jsx$1(IconButton, { "aria-label": "New chat", onClick: handleNewChat, disabled: sending, color: "default", children: jsx$1(AddCommentRounded, {}) }) }) }), jsx$1(Tooltip, { title: "Copy debug session log (parsed timeline + verbatim redacted SSE \u2014 for improving assistant behavior)", children: jsx$1("span", { children: jsx$1(IconButton, { "aria-label": "Copy assistant debug session log", onClick: () => void copyToClipboard(sessionStreamLogRef.current.length
+                                                ? formatSessionLogForDebugCopy(sessionStreamLogRef.current)
                                                 : '(Session log is empty — send a message first.)'), disabled: sending, color: "default", children: jsx$1(AssignmentRounded, {}) }) }) })] }), jsx$1(Box, { sx: { flex: '1 1 0%', minWidth: 0, minHeight: 0 }, children: jsx$1(TextField, { fullWidth: true, multiline: true, minRows: 1, maxRows: promptFocused || voiceListening ? 8 : 1, size: "small", placeholder: voiceListening ? 'Listening… speak your prompt' : promptPlaceholder, value: draft, onChange: (e) => setDraft(e.target.value), onFocus: () => setPromptFocused(true), onBlur: () => setPromptFocused(false), onKeyDown: (e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
@@ -30947,7 +31629,7 @@ function AiAssistantChat(props) {
 
 function AiAssistantPopover(props) {
     const theme = useTheme();
-    const { open, onClose, isMinimized = false, onMinimize, onMaximize, appBarTitle, agentLabel, width = 492, height = 595, hideBackdrop, enableCustomModel = true, agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, crafterQBearerToken, crafterQBearerTokenEnv, anchorPosition: anchorPositionProp, ...popoverProps } = props;
+    const { open, onClose, isMinimized = false, onMinimize, onMaximize, appBarTitle, agentLabel, width = 492, height = 595, hideBackdrop, enableCustomModel = true, agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, anchorPosition: anchorPositionProp, ...popoverProps } = props;
     const title = agentLabel ?? appBarTitle ?? 'Studio AI Assistant';
     const anchorPosition = anchorPositionProp ?? { top: 100, left: 100 };
     const [openAlertDialog, setOpenAlertDialog] = useState(false);
@@ -30969,7 +31651,7 @@ function AiAssistantPopover(props) {
                             subtitleWrapper: {
                                 width: '100%'
                             }
-                        }, onMinimizeButtonClick: () => onMinimize?.(), onCloseButtonClick: (e) => onClose(e, null) }), jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel, imageModel: imageModel, imageGenerator: imageGenerator, openAiApiKey: openAiApiKey, enableTools: enableTools, enabledBuiltInTools: enabledBuiltInTools, expertSkills: expertSkills, configPrompts: prompts, ...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {}), ...(crafterQBearerTokenEnv?.trim() ? { crafterQBearerTokenEnv: crafterQBearerTokenEnv.trim() } : {}), ...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {}) })] }), jsx$1(MinimizedBar, { open: isMinimized, onMaximize: onMaximize, title: title }), jsx$1(AlertDialog, { disableBackdropClick: true, disableEscapeKeyDown: true, open: openAlertDialog, title: "Close this chat?", body: "The current conversation will be lost.", buttons: jsxs(Fragment, { children: [jsx$1(PrimaryButton, { onClick: (e) => {
+                        }, onMinimizeButtonClick: () => onMinimize?.(), onCloseButtonClick: (e) => onClose(e, null) }), jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel, imageModel: imageModel, imageGenerator: imageGenerator, openAiApiKey: openAiApiKey, enableTools: enableTools, enabledBuiltInTools: enabledBuiltInTools, expertSkills: expertSkills, configPrompts: prompts, ...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {}) })] }), jsx$1(MinimizedBar, { open: isMinimized, onMaximize: onMaximize, title: title }), jsx$1(AlertDialog, { disableBackdropClick: true, disableEscapeKeyDown: true, open: openAlertDialog, title: "Close this chat?", body: "The current conversation will be lost.", buttons: jsxs(Fragment, { children: [jsx$1(PrimaryButton, { onClick: (e) => {
                                 setOpenAlertDialog(false);
                                 onClose(e, null);
                             }, autoFocus: true, fullWidth: true, size: "large", children: "Close" }), jsx$1(SecondaryButton, { onClick: () => {
@@ -31040,8 +31722,8 @@ function AiAssistantIceChatShell(props) {
  * Used when opening the AI Assistant via dispatch(showWidgetDialog(...)).
  */
 function AiAssistantDialogContent(props) {
-    const { agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, crafterQBearerToken, crafterQBearerTokenEnv } = props;
-    return (jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel, imageModel: imageModel, imageGenerator: imageGenerator, openAiApiKey: openAiApiKey, enableTools: enableTools, enabledBuiltInTools: enabledBuiltInTools, expertSkills: expertSkills, configPrompts: prompts, ...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {}), ...(crafterQBearerTokenEnv?.trim() ? { crafterQBearerTokenEnv: crafterQBearerTokenEnv.trim() } : {}), ...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {}) }));
+    const { agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
+    return (jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel, imageModel: imageModel, imageGenerator: imageGenerator, openAiApiKey: openAiApiKey, enableTools: enableTools, enabledBuiltInTools: enabledBuiltInTools, expertSkills: expertSkills, configPrompts: prompts, ...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {}) }));
 }
 
 const logoWidgetId = 'craftercms.components.aiassistant.OpenAILogo';
@@ -31522,12 +32204,6 @@ function mergeAgentsWithSiteUiXmlOverlay(fromWidget, fromUiXml) {
             ...(ui.translateBatchConcurrency != null && Number.isFinite(ui.translateBatchConcurrency)
                 ? { translateBatchConcurrency: ui.translateBatchConcurrency }
                 : {}),
-            ...(typeof ui.crafterQBearerTokenEnv === 'string' && ui.crafterQBearerTokenEnv.trim()
-                ? { crafterQBearerTokenEnv: ui.crafterQBearerTokenEnv.trim() }
-                : {}),
-            ...(typeof ui.crafterQBearerToken === 'string' && ui.crafterQBearerToken.trim()
-                ? { crafterQBearerToken: ui.crafterQBearerToken.trim() }
-                : {}),
             ...(Array.isArray(ui.enabledBuiltInTools) &&
                 ui.enabledBuiltInTools.length > 0 &&
                 (!agent.enabledBuiltInTools || agent.enabledBuiltInTools.length === 0)
@@ -31583,7 +32259,8 @@ const DEFAULT_AGENT_ID = '';
 const DEFAULT_AGENT = {
     id: CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID,
     label: 'Studio AI Assistant',
-    llm: 'crafterQ',
+    llm: 'openAI',
+    llmModel: 'gpt-4o-mini',
     prompts: []
 };
 /** Fallback list so Helper click / agent menus always have at least one entry (see {@link getAgentsFromConfiguration}). */
@@ -31719,12 +32396,19 @@ function normalizeAgent(a) {
     const prompts = normalizePrompts(o.prompts);
     const llmStr = extractString(o.llm)?.trim();
     let llm;
+    let legacyHostedLlm = false;
     if (llmStr) {
         const low = llmStr.toLowerCase();
         if (low === 'openai' || low === 'open-ai')
             llm = 'openAI';
-        else if (low === 'crafterq' || low === 'crafter-q')
-            llm = 'crafterQ';
+        else if (low === 'aiassistant' ||
+            low === 'hostedchat' ||
+            low === 'hosted-chat' ||
+            low === 'crafterq' ||
+            low === 'crafter-q') {
+            llm = 'openAI';
+            legacyHostedLlm = true;
+        }
         else
             llm = llmStr;
     }
@@ -31741,6 +32425,8 @@ function normalizeAgent(a) {
         out.llm = llm;
     if (llmModel)
         out.llmModel = llmModel;
+    else if (legacyHostedLlm && out.llm === 'openAI')
+        out.llmModel = 'gpt-4o-mini';
     if (imageModel)
         out.imageModel = imageModel;
     if (imageGenerator)
@@ -31759,16 +32445,6 @@ function normalizeAgent(a) {
     const translateBatchConcurrency = extractPositiveInt(o, 1, 64, 'translateBatchConcurrency', 'translate_batch_concurrency', 'TranslateBatchConcurrency');
     if (translateBatchConcurrency != null)
         out.translateBatchConcurrency = translateBatchConcurrency;
-    const crafterQBearerToken = extractString(o.crafterQBearerToken) ??
-        extractString(o['crafterQ-bearer-token']) ??
-        extractString(o.crafter_q_bearer_token);
-    const crafterQBearerTokenEnv = extractString(o.crafterQBearerTokenEnv) ??
-        extractString(o['crafterQ-bearer-token-env']) ??
-        extractString(o.crafter_q_bearer_token_env);
-    if (crafterQBearerTokenEnv?.trim())
-        out.crafterQBearerTokenEnv = crafterQBearerTokenEnv.trim();
-    if (crafterQBearerToken?.trim())
-        out.crafterQBearerToken = crafterQBearerToken.trim();
     const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(o.enabledBuiltInTools ?? o.enabled_built_in_tools);
     if (enabledBuiltIn?.length)
         out.enabledBuiltInTools = enabledBuiltIn;
@@ -32094,12 +32770,19 @@ function entryToChatAgent(entry) {
         return null;
     const llmRaw = String(entry.llm ?? '').trim();
     let llm;
+    let legacyHostedLlm = false;
     if (llmRaw) {
         const low = llmRaw.toLowerCase();
         if (low === 'openai' || low === 'open-ai')
             llm = 'openAI';
-        else if (low === 'crafterq' || low === 'crafter-q')
-            llm = 'crafterQ';
+        else if (low === 'aiassistant' ||
+            low === 'hostedchat' ||
+            low === 'hosted-chat' ||
+            low === 'crafterq' ||
+            low === 'crafter-q') {
+            llm = 'openAI';
+            legacyHostedLlm = true;
+        }
         else
             llm = llmRaw;
     }
@@ -32118,8 +32801,11 @@ function entryToChatAgent(entry) {
     const out = { id, label, ...(icon ? { icon } : {}), ...(prompts ? { prompts } : {}) };
     if (llm)
         out.llm = llm;
-    if (typeof entry.llmModel === 'string' && entry.llmModel.trim())
-        out.llmModel = entry.llmModel.trim();
+    const lmTrim = typeof entry.llmModel === 'string' ? entry.llmModel.trim() : '';
+    if (lmTrim)
+        out.llmModel = lmTrim;
+    else if (legacyHostedLlm && out.llm === 'openAI')
+        out.llmModel = 'gpt-4o-mini';
     if (typeof entry.imageModel === 'string' && entry.imageModel.trim())
         out.imageModel = entry.imageModel.trim();
     if (typeof entry.imageGenerator === 'string' && entry.imageGenerator.trim())
@@ -32141,10 +32827,6 @@ function entryToChatAgent(entry) {
         if (Number.isFinite(n) && n >= 1)
             out.translateBatchConcurrency = Math.min(64, n);
     }
-    if (typeof entry.crafterQBearerTokenEnv === 'string' && entry.crafterQBearerTokenEnv.trim())
-        out.crafterQBearerTokenEnv = entry.crafterQBearerTokenEnv.trim();
-    if (typeof entry.crafterQBearerToken === 'string' && entry.crafterQBearerToken.trim())
-        out.crafterQBearerToken = entry.crafterQBearerToken.trim();
     const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(entry.enabledBuiltInTools ?? entry.enabled_built_in_tools);
     if (enabledBuiltIn?.length)
         out.enabledBuiltInTools = enabledBuiltIn;
@@ -32161,7 +32843,15 @@ function entryToAutonomousDefinition(entry) {
     const prompt = String(entry.prompt ?? '').trim();
     const scopeRaw = String(entry.scope ?? 'project').trim().toLowerCase();
     const scope = scopeRaw === 'user' || scopeRaw === 'role' || scopeRaw === 'project' ? scopeRaw : 'project';
-    const llm = String(entry.llm ?? 'openAI').trim();
+    let llm = String(entry.llm ?? 'openAI').trim();
+    const lz = llm.toLowerCase();
+    if (lz === 'crafterq' ||
+        lz === 'crafter-q' ||
+        lz === 'aiassistant' ||
+        lz === 'hostedchat' ||
+        lz === 'hosted-chat') {
+        llm = 'openAI';
+    }
     const llmModel = String(entry.llmModel ?? 'gpt-4o-mini').trim();
     const imageModel = entry.imageModel != null ? String(entry.imageModel).trim() : undefined;
     const imageGenerator = entry.imageGenerator != null && String(entry.imageGenerator).trim()
@@ -32352,10 +33042,17 @@ function parseAgentElement(agentEl) {
     }
     const llmRaw = (childTextDirect(agentEl, 'llm') ?? '').toLowerCase();
     let llm;
+    let legacyHostedUi = false;
     if (llmRaw === 'openai' || llmRaw === 'open-ai')
         llm = 'openAI';
-    else if (llmRaw === 'aiassistant' || llmRaw === 'crafter-q')
-        llm = 'crafterQ';
+    else if (llmRaw === 'aiassistant' ||
+        llmRaw === 'hostedchat' ||
+        llmRaw === 'hosted-chat' ||
+        llmRaw === 'crafterq' ||
+        llmRaw === 'crafter-q') {
+        llm = 'openAI';
+        legacyHostedUi = true;
+    }
     const llmModel = childTextDirect(agentEl, 'llmModel');
     const imageModel = childTextDirect(agentEl, 'imageModel');
     const imageGenerator = childTextDirect(agentEl, 'imageGenerator');
@@ -32367,6 +33064,8 @@ function parseAgentElement(agentEl) {
         out.llm = llm;
     if (llmModel)
         out.llmModel = llmModel;
+    else if (legacyHostedUi && out.llm === 'openAI')
+        out.llmModel = 'gpt-4o-mini';
     if (imageModel)
         out.imageModel = imageModel;
     if (imageGenerator)
@@ -32412,16 +33111,6 @@ function parseAgentElement(agentEl) {
             out.translateBatchConcurrency = Math.min(64, tbcN);
         }
     }
-    const bearerEnv = childTextDirect(agentEl, 'crafterQBearerTokenEnv') ??
-        childTextDirect(agentEl, 'crafter-q-bearer-token-env') ??
-        childTextDirect(agentEl, 'crafter_q_bearer_token_env');
-    const bearerLit = childTextDirect(agentEl, 'crafterQBearerToken') ??
-        childTextDirect(agentEl, 'crafter-q-bearer-token') ??
-        childTextDirect(agentEl, 'crafter_q_bearer_token');
-    if (bearerEnv?.trim())
-        out.crafterQBearerTokenEnv = bearerEnv.trim();
-    if (bearerLit?.trim())
-        out.crafterQBearerToken = bearerLit.trim();
     return out;
 }
 /** Walk parents — avoid closest('agents') on XML DOMParser documents (can skip all agents). */
@@ -33205,9 +33894,7 @@ function AiAssistantHelper(props) {
             ? iceChatCfg.expertSkills
             : undefined;
         const iceTranslateBatch = extractPositiveInt(iceRaw, 1, 64, 'translateBatchConcurrency', 'translate_batch_concurrency');
-        const iceBearerEnv = iceRaw.crafterQBearerTokenEnv?.trim();
-        const iceBearerTok = iceRaw.crafterQBearerToken?.trim();
-        return (jsx$1(AiAssistantIceChatShell, { children: jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel || undefined, imageModel: imageModel, imageGenerator: imageGenerator || undefined, openAiApiKey: openAiApiKey, enableTools: iceEnableTools, enabledBuiltInTools: iceEnabledBuiltIn, expertSkills: iceExpertSkills, configPrompts: configPrompts, embedTarget: "icePanel", ...(iceTranslateBatch != null ? { translateBatchConcurrency: iceTranslateBatch } : {}), ...(iceBearerEnv ? { crafterQBearerTokenEnv: iceBearerEnv } : {}), ...(iceBearerTok ? { crafterQBearerToken: iceBearerTok } : {}) }) }));
+        return (jsx$1(AiAssistantIceChatShell, { children: jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel || undefined, imageModel: imageModel, imageGenerator: imageGenerator || undefined, openAiApiKey: openAiApiKey, enableTools: iceEnableTools, enabledBuiltInTools: iceEnabledBuiltIn, expertSkills: iceExpertSkills, configPrompts: configPrompts, embedTarget: "icePanel", ...(iceTranslateBatch != null ? { translateBatchConcurrency: iceTranslateBatch } : {}) }) }));
     }
     return (jsxs(Fragment, { children: [ui === 'IconButton' ? (showAiInTopNav ? (jsx$1(Tooltip, { title: primaryAgent?.label ?? 'Studio AI Assistant', children: jsx$1(IconButton, { onClick: handleToolbarClick, "aria-haspopup": toolbarList.length > 1 ? 'menu' : undefined, "aria-expanded": toolbarList.length > 1 ? menuOpen : undefined, children: getAgentIcon(primaryAgent?.icon) }) })) : null) : (jsx$1(ToolsPanelListItemButton, { icon: { id: logoWidgetId }, title: primaryAgent?.label ?? 'Studio AI Assistant', onClick: handleToolbarClick })), menuAnchor && (jsx$1(Menu, { open: true, anchorEl: menuAnchor, onClose: handleMenuClose, anchorOrigin: { vertical: 'bottom', horizontal: 'right' }, transformOrigin: { vertical: 'top', horizontal: 'right' }, disableAutoFocusItem: true, TransitionProps: { timeout: 0 }, children: toolbarList.map((agent) => (jsxs(MenuItem, { onClick: () => {
                         openAgent(agent);
@@ -33259,10 +33946,6 @@ function AiAssistantHelper(props) {
                                         overflow: 'hidden'
                                     }, children: jsx$1(Box, { sx: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }, children: jsx$1(AiAssistantChat, { agentId: d.agent.id, llm: d.agent.llm, llmModel: d.agent.llmModel, imageModel: d.agent.imageModel, imageGenerator: d.agent.imageGenerator, openAiApiKey: d.agent.openAiApiKey, enableTools: d.agent.enableTools, enabledBuiltInTools: d.agent.enabledBuiltInTools, expertSkills: d.agent.expertSkills, configPrompts: d.agent.prompts, ...(d.agent.translateBatchConcurrency != null
                                                 ? { translateBatchConcurrency: d.agent.translateBatchConcurrency }
-                                                : {}), ...(d.agent.crafterQBearerTokenEnv?.trim()
-                                                ? { crafterQBearerTokenEnv: d.agent.crafterQBearerTokenEnv.trim() }
-                                                : {}), ...(d.agent.crafterQBearerToken?.trim()
-                                                ? { crafterQBearerToken: d.agent.crafterQBearerToken.trim() }
                                                 : {}) }) }) })] }, d.id))), openDialogs
                             .filter((d) => d.minimized)
                             .map((d, i) => (jsxs(Paper, { elevation: 4, sx: {
@@ -33654,7 +34337,7 @@ function withSite$2(url, siteId) {
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}siteId=${encodeURIComponent(siteId)}`;
 }
-/** Studio plugin controller wraps the Groovy script return map under `result` (see `crafterqImportApi.ts`). */
+/** Studio plugin controller wraps the Groovy script return map under `result` (see `aiAssistantImportApi.ts`). */
 function unwrapPluginScriptBody$2(body) {
     if (!body || typeof body !== 'object')
         return body;
@@ -34671,10 +35354,6 @@ function AiAssistantFormControlPanel(props) {
                                     borderColor: 'divider'
                                 }, children: jsx$1(AiAssistantChat, { agentId: agent.id?.trim() || '', llm: agent.llm, llmModel: agent.llmModel, imageModel: agent.imageModel, imageGenerator: agent.imageGenerator, openAiApiKey: agent.openAiApiKey, enableTools: agent.enableTools, enabledBuiltInTools: agent.enabledBuiltInTools, expertSkills: agent.expertSkills, configPrompts: agent.prompts, embedTarget: "default", getAuthoringFormContext: getAuthoringFormContext, formEngineClientJsonApply: true, ...(agent.translateBatchConcurrency != null
                                         ? { translateBatchConcurrency: agent.translateBatchConcurrency }
-                                        : {}), ...(agent.crafterQBearerTokenEnv?.trim()
-                                        ? { crafterQBearerTokenEnv: agent.crafterQBearerTokenEnv.trim() }
-                                        : {}), ...(agent.crafterQBearerToken?.trim()
-                                        ? { crafterQBearerToken: agent.crafterQBearerToken.trim() }
                                         : {}) }) })) : null] }, key));
                 }) })] }));
 }
@@ -34997,9 +35676,6 @@ const STUDIO_AI_BUILTIN_TOOL_IDS = [
     'update_content_type',
     'analyze_template',
     'publish_content',
-    'ConsultCrafterQExpert',
-    'ListCrafterQAgentChats',
-    'GetCrafterQAgentChat',
     'GetCrafterizingPlaybook',
     'revert_change',
     'GenerateImage',
@@ -35014,7 +35690,6 @@ const STUDIO_AI_LLM_VENDOR_IDS = [
     'llama',
     'gemini',
     'claude',
-    'crafterQ',
     'script'
 ];
 /** Default chat models for **tools-loop** vendors (UI hints; includes common OpenAI **vendor** defaults; server may accept others). */
@@ -35046,6 +35721,13 @@ function parseLlmVendorAndScript(llm) {
     const low = s.toLowerCase();
     if (low === 'script' || low.startsWith('script:')) {
         return { vendor: 'script', scriptId: low.startsWith('script:') ? s.slice('script:'.length).trim() : '' };
+    }
+    if (low === 'aiassistant' ||
+        low === 'hostedchat' ||
+        low === 'hosted-chat' ||
+        low === 'crafterq' ||
+        low === 'crafter-q') {
+        return { vendor: 'openAI', scriptId: '' };
     }
     return { vendor: s || 'openAI', scriptId: '' };
 }
@@ -35137,9 +35819,13 @@ function normalizeCatalogForSave(f) {
                 llmModel: String(e.llmModel ?? 'gpt-4o-mini').trim() || 'gpt-4o-mini'
             };
             const outRec = out;
+            const lzAuto = String(out.llm ?? '').trim().toLowerCase();
+            if (lzAuto === 'crafterq' || lzAuto === 'crafter-q')
+                outRec.llm = 'openAI';
             delete outRec.prompts;
             const llmS = String(out.llm ?? '').toLowerCase();
-            if (!llmS.includes('crafterq') && !String(out.imageModel ?? '').trim()) {
+            const scriptish = llmS === 'script' || llmS.startsWith('script:');
+            if (!scriptish && !String(out.imageModel ?? '').trim()) {
                 out.imageModel = STUDIO_AI_DEFAULT_IMAGE_MODEL;
             }
             if (out.enableTools === false) {
@@ -35157,6 +35843,9 @@ function normalizeCatalogForSave(f) {
             ...(id != null && String(id).trim() !== '' ? { crafterQAgentId: String(id).trim() } : {})
         };
         const recChat = outChat;
+        const lzChat = String(outChat.llm ?? '').trim().toLowerCase();
+        if (lzChat === 'crafterq' || lzChat === 'crafter-q')
+            recChat.llm = 'openAI';
         delete recChat.prompt;
         delete recChat.schedule;
         delete recChat.scope;
@@ -35174,7 +35863,8 @@ function normalizeCatalogForSave(f) {
             delete recChat.enabled_built_in_tools;
         }
         const llmChat = String(outChat.llm ?? '').toLowerCase();
-        if (!llmChat.includes('crafterq') && !String(outChat.imageModel ?? '').trim()) {
+        const chatScriptish = llmChat === 'script' || llmChat.startsWith('script:');
+        if (!chatScriptish && !String(outChat.imageModel ?? '').trim()) {
             outChat.imageModel = STUDIO_AI_DEFAULT_IMAGE_MODEL;
         }
         const opensPopup = recChat.openAsPopup === true ||
@@ -35450,7 +36140,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef(function AiAssistantCen
                                     ? curImgScriptId
                                     : CQ_SCRIPT_IMAGE_SELECT_CUSTOM;
                                 const presets = llmModelPresetRows(sp.vendor);
-                                const modelSelectValue = sp.vendor === 'script' || sp.vendor === 'crafterQ'
+                                const modelSelectValue = sp.vendor === 'script'
                                     ? '__na__'
                                     : presets.includes(String(draft.llmModel ?? '').trim())
                                         ? String(draft.llmModel ?? '').trim()
@@ -35464,8 +36154,6 @@ const AiAssistantCentralAgentsConfiguration = forwardRef(function AiAssistantCen
                                                                 const first = scriptsRowsRef.current.llm[0]?.id?.trim();
                                                                 return { ...d, llm: first ? `script:${first}` : 'script', llmModel: 'composer-2' };
                                                             }
-                                                            if (v === 'crafterQ')
-                                                                return { ...d, llm: 'crafterQ', llmModel: '' };
                                                             return { ...d, llm: v, llmModel: d.llmModel?.trim() ? d.llmModel : 'gpt-4o-mini' };
                                                         });
                                                     }, children: STUDIO_AI_LLM_VENDOR_IDS.map((id) => (jsx$1(MenuItem, { value: id, children: id }, id))) })] }), sp.vendor === 'script' ? (jsxs(Fragment, { children: [jsxs(Stack$1, { direction: "row", spacing: 1, alignItems: "flex-start", children: [jsxs(FormControl, { fullWidth: true, size: "small", sx: { flex: 1 }, children: [jsx$1(InputLabel, { id: "cq-central-script-llm-pick", children: "Script LLM" }), jsxs(Select, { labelId: "cq-central-script-llm-pick", label: "Script LLM", value: llmScriptSelectVal, onChange: (ev) => {
@@ -35480,7 +36168,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef(function AiAssistantCen
                                                                     }, children: [llmScriptRows.map((row) => (jsxs(MenuItem, { value: row.id, children: [row.id, !row.hasSource ? ' — add runtime.groovy' : ''] }, row.id))), jsx$1(MenuItem, { value: CQ_SCRIPT_LLM_SELECT_CUSTOM, children: "Custom id\u2026" })] })] }), jsx$1(Tooltip, { title: "Refresh list", children: jsx$1(IconButton, { size: "small", sx: { mt: 0.5 }, "aria-label": "Refresh script LLM list", onClick: () => void loadScriptsSandboxIndex(), children: jsx$1(RefreshRounded, { fontSize: "small" }) }) })] }), llmScriptSelectVal === CQ_SCRIPT_LLM_SELECT_CUSTOM ? (jsx$1(TextField, { label: "Custom script LLM id", value: sp.scriptId, onChange: (ev) => {
                                                         const id = ev.target.value.trim();
                                                         setDraft((d) => (d ? { ...d, llm: id ? `script:${id}` : 'script' } : d));
-                                                    }, fullWidth: true, size: "small", helperText: "1\u201364 characters: letters, numbers, dash, underscore." })) : null, jsx$1(TextField, { label: "Provider model id (llmModel)", value: String(draft.llmModel ?? '').trim(), onChange: (ev) => setDraft((d) => (d ? { ...d, llmModel: ev.target.value } : d)), fullWidth: true, size: "small", helperText: "Backend model id (e.g. composer-2)." })] })) : sp.vendor === 'crafterQ' ? (jsx$1(Typography, { variant: "caption", color: "text.secondary", children: "Hosted CrafterQ \u2014 routing uses the CrafterQ agent id; no local chat model field." })) : (jsxs(Fragment, { children: [jsxs(FormControl, { fullWidth: true, size: "small", children: [jsx$1(InputLabel, { id: "cq-central-llm-m", children: "LLM model" }), jsxs(Select, { labelId: "cq-central-llm-m", label: "LLM model", value: modelSelectValue, onChange: (ev) => {
+                                                    }, fullWidth: true, size: "small", helperText: "1\u201364 characters: letters, numbers, dash, underscore." })) : null, jsx$1(TextField, { label: "Provider model id (llmModel)", value: String(draft.llmModel ?? '').trim(), onChange: (ev) => setDraft((d) => (d ? { ...d, llmModel: ev.target.value } : d)), fullWidth: true, size: "small", helperText: "Backend model id (e.g. composer-2)." })] })) : (jsxs(Fragment, { children: [jsxs(FormControl, { fullWidth: true, size: "small", children: [jsx$1(InputLabel, { id: "cq-central-llm-m", children: "LLM model" }), jsxs(Select, { labelId: "cq-central-llm-m", label: "LLM model", value: modelSelectValue, onChange: (ev) => {
                                                                 const v = String(ev.target.value);
                                                                 setDraft((d) => (d ? { ...d, llmModel: v === '__custom__' ? d.llmModel : v } : d));
                                                             }, children: [presets.map((m) => (jsx$1(MenuItem, { value: m, children: m }, m))), jsx$1(MenuItem, { value: "__custom__", children: "Custom model id\u2026" })] })] }), modelSelectValue === '__custom__' ? (jsx$1(TextField, { label: "Custom LLM model id", value: String(draft.llmModel ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, llmModel: ev.target.value } : d)), fullWidth: true, size: "small" })) : null] })), jsxs(FormControl, { fullWidth: true, size: "small", children: [jsx$1(InputLabel, { id: "cq-central-img-gen", children: "Image generator" }), jsxs(Select, { labelId: "cq-central-img-gen", label: "Image generator", value: imgK, onChange: (ev) => {
@@ -71403,10 +72091,10 @@ function datasourceRepoPath(ds) {
 function isAiAssistantImgDatasource(ds) {
     const typed = ds;
     const t = (typed?.type ?? '').trim();
-    if (t === AIASSISTANT_IMG_DATASOURCE_TYPE || t === 'crafterq-img-from-url')
+    if (t === AIASSISTANT_IMG_DATASOURCE_TYPE)
         return true;
     const n = t.replace(/-/g, '').toLowerCase();
-    return n === 'aiassistantimgfromurl' || n === 'crafterqimgfromurl';
+    return n === 'aiassistantimgfromurl';
 }
 function buildDsById(dataSources) {
     const m = new Map();
@@ -71561,7 +72249,7 @@ function installRemoteImageDropImportBridge() {
         }
         const site = activeSiteId();
         if (!site) {
-            console.error('[crafterq] Cannot import remote image on drop: no active site.');
+            console.error('[aiassistant] Cannot import remote image on drop: no active site.');
             getStudioStore()?.dispatch?.(showSystemNotification({
                 message: 'Cannot place remote image: no active site selected.'
             }));
@@ -71579,7 +72267,7 @@ function installRemoteImageDropImportBridge() {
         })
             .catch((err) => {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error('[crafterq] Remote image import on drop failed', err);
+            console.error('[aiassistant] Remote image import on drop failed', err);
             getStudioStore()?.dispatch?.(showSystemNotification({
                 message: `Could not import image on drop: ${msg}`
             }));

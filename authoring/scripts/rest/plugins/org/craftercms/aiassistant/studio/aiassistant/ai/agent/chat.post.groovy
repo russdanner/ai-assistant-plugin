@@ -3,7 +3,6 @@ import org.slf4j.LoggerFactory
 import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 import plugins.org.craftercms.aiassistant.http.CrafterQBearerUiXmlMerge
-import plugins.org.craftercms.aiassistant.llm.StudioAiLlmKind
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 import plugins.org.craftercms.aiassistant.prompt.ToolPromptsSiteContext
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -11,8 +10,7 @@ import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
 /**
  * Minimal proxy for assistant chat (non-streaming).
  *
- * Routes through {@link AiOrchestration}: remote hosted chat when {@code llm} resolves to {@link StudioAiLlmKind#CRAFTERRQ_REMOTE_API},
- * or Spring AI (tools-loop chat, Claude, site script LLM, etc.) when configured.
+ * Routes through {@link AiOrchestration}: Spring AI tools-loop chat, Claude, or site script LLM per configured {@code llm}.
  *
  * Body:
  * {
@@ -31,8 +29,6 @@ import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
  *   "omitTools": "optional — true omits tools for this request only (focused copy/generation); overrides enableTools; same for XB/ICE, dialog, form-engine",
  *   "previewToken": "optional — Studio crafterPreview cookie value for GetPreviewHtml",
  *   "expertSkills": "optional array of { name, url, description } — per-agent markdown RAG for QueryExpertGuidance",
- *   "crafterQBearerTokenEnv": "optional — Studio host env var name for CrafterQ JWT (Authorization: Bearer on api.crafterq.ai)",
- *   "crafterQBearerToken": "optional — literal CrafterQ JWT (discouraged in Git; prefer crafterQBearerTokenEnv)",
  *   "llmModel": "optional — model id for the selected LLM",
  *   "imageModel": "optional — default image model for GenerateImage on the built-in images wire",
  *   "imageGenerator": "optional — GenerateImage backend (blank = default when key+imageModel exist; none; script:{id}); see llm-configuration.md"
@@ -41,9 +37,9 @@ import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
 
 def log = LoggerFactory.getLogger('plugins.org.craftercms.aiassistant.chat')
 def body = AiHttpProxy.parseJsonBody(request)
-if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [message: 'Invalid JSON request body', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
+  return [message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
 def agentId = body.agentId != null ? body.agentId.toString().trim() : ''
 def prompt = body.prompt?.toString()
@@ -63,18 +59,18 @@ def chatId = body.chatId?.toString()
 def openAiApiKey = body.openAiApiKey?.toString()
 if (siteIdBody) {
   try {
-    request.setAttribute('crafterq.siteId', siteIdBody)
+    request.setAttribute('aiassistant.siteId', siteIdBody)
   } catch (Throwable ignored) {}
 }
 def previewTokenBody = body?.previewToken?.toString()?.trim()
 if (previewTokenBody) {
   try {
-    request.setAttribute('crafterq.previewToken', previewTokenBody)
+    request.setAttribute('aiassistant.previewToken', previewTokenBody)
   } catch (Throwable ignored) {}
 }
 def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
 try {
-  request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
+  request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
 } catch (Throwable ignored) {}
 def siteForBearer = siteIdBody ?: params?.siteId?.toString()?.trim()
 if (body instanceof Map && siteForBearer && agentId) {
@@ -85,9 +81,6 @@ if (body instanceof Map && siteForBearer && agentId) {
   }
 }
 def llm = body.llm?.toString()
-if (body instanceof Map) {
-  AiHttpProxy.installCrafterQBearerFromChatBody(request, (Map) body, llm ?: '')
-}
 def openAiModel = body.llmModel?.toString()
 def imageModelRaw = body.imageModel?.toString()
 def imageModel = null
@@ -103,19 +96,16 @@ if (imageModelRaw?.trim()) {
 
 def imageGenerator = body?.imageGenerator?.toString()?.trim() ?: null
 
-String llmNorm
 try {
-  llmNorm = AiOrchestration.normalizeLlmProvider(llm)
+  AiOrchestration.normalizeLlmProvider(llm)
 } catch (IllegalArgumentException iae) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
   return [ok: false, message: (iae.message ?: 'Invalid llm').toString()]
 }
 
-if ((!agentId && StudioAiLlmKind.isCrafterQRemoteApi(llmNorm)) || !prompt) {
+if (!prompt) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [message: (!agentId && StudioAiLlmKind.isCrafterQRemoteApi(llmNorm))
-    ? 'Missing required fields: agentId (required for the default remote hosted chat adapter), prompt'
-    : 'Missing required fields: prompt']
+  return [message: 'Missing required fields: prompt']
 }
 
 try {

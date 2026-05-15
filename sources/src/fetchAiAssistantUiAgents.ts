@@ -32,8 +32,18 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
   }
   const llmRaw = (childTextDirect(agentEl, 'llm') ?? '').toLowerCase();
   let llm: AgentLlm | undefined;
+  let legacyHostedUi = false;
   if (llmRaw === 'openai' || llmRaw === 'open-ai') llm = 'openAI';
-  else if (llmRaw === 'aiassistant' || llmRaw === 'crafter-q') llm = 'crafterQ';
+  else if (
+    llmRaw === 'aiassistant' ||
+    llmRaw === 'hostedchat' ||
+    llmRaw === 'hosted-chat' ||
+    llmRaw === 'crafterq' ||
+    llmRaw === 'crafter-q'
+  ) {
+    llm = 'openAI';
+    legacyHostedUi = true;
+  }
   const llmModel = childTextDirect(agentEl, 'llmModel');
   const imageModel = childTextDirect(agentEl, 'imageModel');
   const imageGenerator = childTextDirect(agentEl, 'imageGenerator');
@@ -44,6 +54,7 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
   const out: AgentConfig = { id: id.trim(), label: label.trim(), icon, prompts: [] };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
+  else if (legacyHostedUi && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();
@@ -85,16 +96,6 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
       out.translateBatchConcurrency = Math.min(64, tbcN);
     }
   }
-  const bearerEnv =
-    childTextDirect(agentEl, 'crafterQBearerTokenEnv') ??
-    childTextDirect(agentEl, 'crafter-q-bearer-token-env') ??
-    childTextDirect(agentEl, 'crafter_q_bearer_token_env');
-  const bearerLit =
-    childTextDirect(agentEl, 'crafterQBearerToken') ??
-    childTextDirect(agentEl, 'crafter-q-bearer-token') ??
-    childTextDirect(agentEl, 'crafter_q_bearer_token');
-  if (bearerEnv?.trim()) out.crafterQBearerTokenEnv = bearerEnv.trim();
-  if (bearerLit?.trim()) out.crafterQBearerToken = bearerLit.trim();
   return out;
 }
 

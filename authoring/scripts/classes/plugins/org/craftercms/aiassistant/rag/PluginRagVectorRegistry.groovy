@@ -25,7 +25,7 @@ import org.springframework.ai.embedding.EmbeddingModel
  * Lazy-loaded RAG index over bundled CrafterQ instruction corpus: load persisted embeddings from the site's Studio
  * configuration repo via {@link StudioToolOperations}, or rebuild (embed + write) when missing/stale.
  * <p>
- * JVM {@code crafterq.pluginRag.mode}: {@code off} (default), {@code supplement} (full instructions + retrieved appendix),
+ * JVM {@code aiassistant.pluginRag.mode}: {@code off} (default), {@code supplement} (full instructions + retrieved appendix),
  * {@code replace} (compact kernel + retrieved appendix). Opt-in only.</p>
  */
 class PluginRagVectorRegistry {
@@ -52,7 +52,7 @@ class PluginRagVectorRegistry {
   }
 
   static String pluginRagMode() {
-    (System.getProperty('crafterq.pluginRag.mode') ?: 'off').toString().trim().toLowerCase(Locale.US)
+    (System.getProperty('aiassistant.pluginRag.mode') ?: 'off').toString().trim().toLowerCase(Locale.US)
   }
 
   static boolean pluginRagModeActive() {
@@ -72,7 +72,7 @@ class PluginRagVectorRegistry {
 
   private static int resolveKernelMaxChars() {
     try {
-      def p = System.getProperty('crafterq.pluginRag.kernelMaxChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.pluginRag.kernelMaxChars')?.toString()?.trim()
       if (p) {
         int n = Integer.parseInt(p)
         return Math.min(16_000, Math.max(1024, n))
@@ -222,7 +222,7 @@ class PluginRagVectorRegistry {
 
   private static int resolveTopK() {
     try {
-      def p = System.getProperty('crafterq.pluginRag.topK')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.pluginRag.topK')?.toString()?.trim()
       if (p) {
         return Math.min(24, Math.max(1, Integer.parseInt(p)))
       }
@@ -232,7 +232,7 @@ class PluginRagVectorRegistry {
 
   private static int resolveMaxAppendChars() {
     try {
-      def p = System.getProperty('crafterq.pluginRag.maxAppendChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.pluginRag.maxAppendChars')?.toString()?.trim()
       if (p) {
         return Math.min(80_000, Math.max(2000, Integer.parseInt(p)))
       }
@@ -408,7 +408,7 @@ class PluginRagVectorRegistry {
     EmbeddingModel embeddingModel = ExpertSkillVectorRegistry.buildEmbeddingModel(apiKey)
     int maxChunkChars = 1800
     try {
-      def pcc = System.getProperty('crafterq.pluginRag.maxChunkChars')?.toString()?.trim()
+      def pcc = System.getProperty('aiassistant.pluginRag.maxChunkChars')?.toString()?.trim()
       if (pcc) {
         maxChunkChars = Math.min(8000, Math.max(512, Integer.parseInt(pcc)))
       }
@@ -416,7 +416,7 @@ class PluginRagVectorRegistry {
     List<String> texts = ExpertSkillVectorRegistry.chunkMarkdown(corpus, maxChunkChars)
     int maxChunks = 400
     try {
-      def pc = System.getProperty('crafterq.pluginRag.maxChunks')?.toString()?.trim()
+      def pc = System.getProperty('aiassistant.pluginRag.maxChunks')?.toString()?.trim()
       if (pc) {
         maxChunks = Math.min(2000, Math.max(8, Integer.parseInt(pc)))
       }
@@ -428,7 +428,7 @@ class PluginRagVectorRegistry {
     List<RagChunk> out = new ArrayList<>()
     int batchSize = 64
     try {
-      def pb = System.getProperty('crafterq.pluginRag.embedBatchSize')?.toString()?.trim()
+      def pb = System.getProperty('aiassistant.pluginRag.embedBatchSize')?.toString()?.trim()
       if (pb) {
         batchSize = Math.min(128, Math.max(8, Integer.parseInt(pb)))
       }
@@ -546,7 +546,7 @@ class PluginRagVectorRegistry {
       }
     } catch (Throwable ignored) {}
     try {
-      def p = System.getProperty('crafterq.pluginRag.pluginBuildId')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.pluginRag.pluginBuildId')?.toString()?.trim()
       if (p) {
         return p
       }

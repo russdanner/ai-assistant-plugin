@@ -38,18 +38,7 @@
           <prompt>List components used on the current page</prompt>
         </prompts>
       </agent>
-      <!-- Optional second agent: hosted chat only (no GetContent/WriteContent on this adapter). Same UUID field is agentId for /v1/chats. -->
-      <!--
-      <agent>
-        <crafterQAgentId>019c7237-478b-7f98-9a5c-87144c3fb010</crafterQAgentId>
-        <label>Hosted chat only</label>
-        <llm>crafterQ</llm>
-        <icon id="@mui/icons-material/ChatRounded"/>
-        <prompts>
-          <prompt>What can you help me with?</prompt>
-        </prompts>
-      </agent>
-      -->
+      <!-- Add more agents by copying the block above with a new crafterQAgentId + label + llm rows. -->
     </agents>
   </configuration>
 </widget>

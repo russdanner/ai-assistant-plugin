@@ -2,8 +2,8 @@
  * Agent configuration as defined in ui.xml <configuration><agents><agent>...</agent></agents></configuration>
  */
 /**
- * Studio stream `llm` value. Common: `crafterQ` (hosted), `openAI`, `claude`, `xAI`, `deepSeek`, `llama`, `gemini`,
- * or `script:<id>` (see server `StudioAiLlmKind`).
+ * Studio stream `llm` value. Common: `openAI`, `claude`, `xAI`, `deepSeek`, `llama`, `gemini`,
+ * or `script:<id>` (see server `StudioAiLlmKind`). Hosted CrafterQ chat is not supported — configure a real provider.
  */
 export type AgentLlm = string;
 
@@ -30,7 +30,7 @@ export interface AgentConfig {
    * (edit mode on). Default is panel. XML / JSON: `<openAsPopup>true</openAsPopup>` or `"openAsPopup": true`.
    */
   openAsPopup?: boolean;
-  /** From `<llm>crafterQ</llm>` or `<llm>openAI</llm>` in widget configuration. Omitted unless set in ui.xml; stream/chat then omit POST `llm` unless the server merges it from `/ui.xml` — missing `llm` after merge is **400**. Prefer setting explicitly. */
+  /** From `<llm>openAI</llm>`, `<llm>claude</llm>`, `<llm>script:…</llm>`, etc. in widget configuration. Omitted unless set in ui.xml; stream/chat then omit POST `llm` unless the server merges it from `/ui.xml` — missing `llm` after merge is **400**. Prefer setting explicitly. */
   llm?: AgentLlm;
   /**
    * When false (ui.xml `<enableTools>false</enableTools>`), the plugin sends `enableTools: false` so OpenAI
@@ -63,16 +63,6 @@ export interface AgentConfig {
    * ui.xml: **`<translateBatchConcurrency>25</translateBatchConcurrency>`** (or `translate_batch_concurrency`). Omitted → server default **25**.
    */
   translateBatchConcurrency?: number;
-  /**
-   * Optional CrafterQ SaaS JWT for **api.crafterq.ai** (`Authorization: Bearer …`) on server-proxied CrafterQ calls.
-   * ui.xml **`<crafterQBearerToken>`** — **not recommended** in Git (use {@link crafterQBearerTokenEnv} + host env instead).
-   */
-  crafterQBearerToken?: string;
-  /**
-   * Host **environment variable name** whose value is the CrafterQ JWT (read with `System.getenv` on Studio at request time).
-   * ui.xml **`<crafterQBearerTokenEnv>`** (e.g. `CRAFTQ_ADMIN_JWT`). Takes precedence over {@link crafterQBearerToken} when set and the env value is non-empty.
-   */
-  crafterQBearerTokenEnv?: string;
 }
 
 /**
@@ -175,12 +165,6 @@ export function mergeAgentsWithSiteUiXmlOverlay(fromWidget: AgentConfig[], fromU
       ...(ui.translateBatchConcurrency != null && Number.isFinite(ui.translateBatchConcurrency)
         ? { translateBatchConcurrency: ui.translateBatchConcurrency }
         : {}),
-      ...(typeof ui.crafterQBearerTokenEnv === 'string' && ui.crafterQBearerTokenEnv.trim()
-        ? { crafterQBearerTokenEnv: ui.crafterQBearerTokenEnv.trim() }
-        : {}),
-      ...(typeof ui.crafterQBearerToken === 'string' && ui.crafterQBearerToken.trim()
-        ? { crafterQBearerToken: ui.crafterQBearerToken.trim() }
-        : {}),
       ...(Array.isArray(ui.enabledBuiltInTools) &&
       ui.enabledBuiltInTools.length > 0 &&
       (!agent.enabledBuiltInTools || agent.enabledBuiltInTools.length === 0)
@@ -241,7 +225,8 @@ const DEFAULT_AGENT_ID = '';
 const DEFAULT_AGENT: AgentConfig = {
   id: CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID,
   label: 'Studio AI Assistant',
-  llm: 'crafterQ',
+  llm: 'openAI',
+  llmModel: 'gpt-4o-mini',
   prompts: []
 };
 
@@ -253,7 +238,12 @@ export const DEFAULT_AGENTS: AgentConfig[] = [DEFAULT_AGENT];
  * Keep IDs in sync with `sources/control/ai-assistant/main.js` (`CRAFTERQ_AGENT_CATALOG`).
  */
 export const DEFAULT_FORM_CONTROL_AGENTS: AgentConfig[] = [
-  { id: '019c7237-478b-7f98-9a5c-87144c3fb010', label: 'Content assistant', llm: 'crafterQ' }
+  {
+    id: '019c7237-478b-7f98-9a5c-87144c3fb010',
+    label: 'Content assistant',
+    llm: 'openAI',
+    llmModel: 'gpt-4o-mini'
+  }
 ];
 
 /**
@@ -378,11 +368,20 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   const prompts = normalizePrompts(o.prompts);
   const llmStr = extractString(o.llm)?.trim();
   let llm: AgentLlm | undefined;
+  let legacyHostedLlm = false;
   if (llmStr) {
     const low = llmStr.toLowerCase();
     if (low === 'openai' || low === 'open-ai') llm = 'openAI';
-    else if (low === 'crafterq' || low === 'crafter-q') llm = 'crafterQ';
-    else llm = llmStr;
+    else if (
+      low === 'aiassistant' ||
+      low === 'hostedchat' ||
+      low === 'hosted-chat' ||
+      low === 'crafterq' ||
+      low === 'crafter-q'
+    ) {
+      llm = 'openAI';
+      legacyHostedLlm = true;
+    } else llm = llmStr;
   }
   const llmModel = extractString(o.llmModel);
   const imageModel = extractString(o.imageModel);
@@ -397,6 +396,7 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   const out: AgentConfig = { id: id.trim(), label, icon, prompts };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
+  else if (legacyHostedLlm && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();
@@ -415,16 +415,6 @@ function normalizeAgent(a: unknown): AgentConfig | null {
     'TranslateBatchConcurrency'
   );
   if (translateBatchConcurrency != null) out.translateBatchConcurrency = translateBatchConcurrency;
-  const crafterQBearerToken =
-    extractString(o.crafterQBearerToken) ??
-    extractString(o['crafterQ-bearer-token']) ??
-    extractString(o.crafter_q_bearer_token);
-  const crafterQBearerTokenEnv =
-    extractString(o.crafterQBearerTokenEnv) ??
-    extractString(o['crafterQ-bearer-token-env']) ??
-    extractString(o.crafter_q_bearer_token_env);
-  if (crafterQBearerTokenEnv?.trim()) out.crafterQBearerTokenEnv = crafterQBearerTokenEnv.trim();
-  if (crafterQBearerToken?.trim()) out.crafterQBearerToken = crafterQBearerToken.trim();
   const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(o.enabledBuiltInTools ?? o.enabled_built_in_tools);
   if (enabledBuiltIn?.length) out.enabledBuiltInTools = enabledBuiltIn;
   return out;

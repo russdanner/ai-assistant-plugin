@@ -5,7 +5,7 @@ alwaysApply: true
 
 # AI Assistant form control (Studio Form Engine) — required behavior
 
-**Before merging form-control / plugin entry changes:** from `sources/` run `yarn package` (runs Rollup **and** `scripts/verify-crafterq-form-pipeline.mjs`). If verify fails, the accordion or Studio registration will break in production.
+**Before merging form-control / plugin entry changes:** from `sources/` run `yarn package` (runs Rollup **and** `scripts/verify-aiassistant-form-pipeline.mjs`). If verify fails, the accordion or Studio registration will break in production.
 
 **CSS/layout-only changes:** Prefer `AiAssistantFormControl.tsx` (`GlobalStyles`, `sx`, etc.). Do **not** delete, bypass, or replace the agent pipeline in `main.js` when doing styling.
 

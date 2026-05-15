@@ -16,8 +16,14 @@ var CRAFTERQ_HELPER_WIDGET_ID = 'craftercms.components.aiassistant.Helper';
 /** Matches <plugin id="…"> in ui.xml for this Studio plugin */
 var CRAFTERQ_PLUGIN_ID = 'org.craftercms.aiassistant.studio';
 
-var CRAFTERQ_FALLBACK_AGENTS = [
-  { id: '019c7237-478b-7f98-9a5c-87144c3fb010', label: 'Content assistant', llm: 'crafterQ', prompts: [] }
+var AIASSISTANT_FALLBACK_AGENTS = [
+  {
+    id: '019c7237-478b-7f98-9a5c-87144c3fb010',
+    label: 'Content assistant',
+    llm: 'openAI',
+    llmModel: 'gpt-4o-mini',
+    prompts: []
+  }
 ];
 
 /** Must match agentStableKey() in sources/src/agentConfig.ts (composite when id+label both set). */
@@ -146,9 +152,20 @@ function cqChatAgentFromCentralJsonEntry(e) {
   var llmRaw = String(e.llm != null ? e.llm : '')
     .trim()
     .toLowerCase();
+  var legacyHosted = false;
   if (llmRaw === 'openai' || llmRaw === 'open-ai') out.llm = 'openAI';
-  else if (llmRaw === 'crafterq' || llmRaw === 'crafter-q') out.llm = 'crafterQ';
+  else if (
+    llmRaw === 'aiassistant' ||
+    llmRaw === 'hostedchat' ||
+    llmRaw === 'hosted-chat' ||
+    llmRaw === 'crafterq' ||
+    llmRaw === 'crafter-q'
+  ) {
+    out.llm = 'openAI';
+    legacyHosted = true;
+  }
   if (e.llmModel != null && String(e.llmModel).trim()) out.llmModel = String(e.llmModel).trim();
+  else if (legacyHosted && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (e.imageModel != null && String(e.imageModel).trim()) out.imageModel = String(e.imageModel).trim();
   if (e.imageGenerator != null && String(e.imageGenerator).trim()) out.imageGenerator = String(e.imageGenerator).trim();
   if (e.openAiApiKey != null && String(e.openAiApiKey).trim()) out.openAiApiKey = String(e.openAiApiKey).trim();
@@ -224,8 +241,18 @@ function cqParseAgentElement(agentEl) {
   }
   var llmRaw = String(cqChildTextDirect(agentEl, 'llm') || '').toLowerCase();
   var llm;
+  var legacyHostedUi = false;
   if (llmRaw === 'openai' || llmRaw === 'open-ai') llm = 'openAI';
-  else if (llmRaw === 'crafterq' || llmRaw === 'crafter-q') llm = 'crafterQ';
+  else if (
+    llmRaw === 'aiassistant' ||
+    llmRaw === 'hostedchat' ||
+    llmRaw === 'hosted-chat' ||
+    llmRaw === 'crafterq' ||
+    llmRaw === 'crafter-q'
+  ) {
+    llm = 'openAI';
+    legacyHostedUi = true;
+  }
   var llmModel = cqChildTextDirect(agentEl, 'llmModel');
   var imageModel = cqChildTextDirect(agentEl, 'imageModel');
   var imageGenerator = cqChildTextDirect(agentEl, 'imageGenerator');
@@ -236,6 +263,7 @@ function cqParseAgentElement(agentEl) {
   var out = { id: String(id).trim(), label: String(label).trim(), icon: icon, prompts: [] };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
+  else if (legacyHostedUi && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey && String(openAiApiKey).trim()) out.openAiApiKey = String(openAiApiKey).trim();
@@ -280,16 +308,6 @@ function cqParseAgentElement(agentEl) {
       out.translateBatchConcurrency = Math.min(64, tbcN);
     }
   }
-  var bearerEnv =
-    cqChildTextDirect(agentEl, 'crafterQBearerTokenEnv') ||
-    cqChildTextDirect(agentEl, 'crafter-q-bearer-token-env') ||
-    cqChildTextDirect(agentEl, 'crafter_q_bearer_token_env');
-  var bearerLit =
-    cqChildTextDirect(agentEl, 'crafterQBearerToken') ||
-    cqChildTextDirect(agentEl, 'crafter-q-bearer-token') ||
-    cqChildTextDirect(agentEl, 'crafter_q_bearer_token');
-  if (bearerEnv && String(bearerEnv).trim()) out.crafterQBearerTokenEnv = String(bearerEnv).trim();
-  if (bearerLit && String(bearerLit).trim()) out.crafterQBearerToken = String(bearerLit).trim();
   return out;
 }
 
@@ -455,7 +473,7 @@ function cqLoadAgentsForSite(siteId, options) {
   var merged = Object.keys(byKey).map(function (k) {
     return byKey[k];
   });
-  var out = merged.length ? merged : CRAFTERQ_FALLBACK_AGENTS.slice();
+  var out = merged.length ? merged : AIASSISTANT_FALLBACK_AGENTS.slice();
   cqAgentsListCache = { siteId: cacheKey, mergedAt: now, agents: out };
   return out.slice();
 }
@@ -609,13 +627,13 @@ function cqIsStudioFormWidthShell(el) {
 }
 
 function cqIncrementFormContainerWiden(el) {
-  el.__crafterqWidenRefcount = (el.__crafterqWidenRefcount || 0) + 1;
+  el.__aiAssistantWidenRefcount = (el.__aiAssistantWidenRefcount || 0) + 1;
 }
 
 function cqDecrementFormContainerWiden(el) {
-  var n = (el.__crafterqWidenRefcount || 0) - 1;
-  el.__crafterqWidenRefcount = n < 0 ? 0 : n;
-  if (el.__crafterqWidenRefcount === 0) {
+  var n = (el.__aiAssistantWidenRefcount || 0) - 1;
+  el.__aiAssistantWidenRefcount = n < 0 ? 0 : n;
+  if (el.__aiAssistantWidenRefcount === 0) {
     try {
       el.style.removeProperty('width');
       el.style.removeProperty('max-width');
@@ -929,7 +947,7 @@ function cqApplyFormActionBarOffset(control) {
   if (!control) return;
   if (typeof document === 'undefined') return;
   try {
-    var panel = document.querySelector('[data-crafterq-form-panel="true"]');
+    var panel = document.querySelector('[data-aiassistant-form-panel="true"]');
     if (!panel) return;
     var panelRect = panel.getBoundingClientRect();
     if (!panelRect || !panelRect.width) return;
@@ -1218,8 +1236,8 @@ YAHOO.extend(CStudioForms.Controls.CrafterqAssistant, CStudioForms.CStudioFormFi
       return;
     }
     var mount = document.createElement('div');
-    mount.className = 'cstudio-plugin-crafterq-form-assistant';
-    mount.setAttribute('data-crafterq-form-mount', 'true');
+    mount.className = 'cstudio-plugin-aiassistant-form-assistant';
+    mount.setAttribute('data-aiassistant-form-mount', 'true');
     containerEl.appendChild(mount);
     cqWidenOutermostFormContainer(containerEl, self);
 

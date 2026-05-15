@@ -18,9 +18,9 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  * </pre>
  */
 def body = AiHttpProxy.parseJsonBody(request)
-if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
-  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
+  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
 String siteId = (params?.siteId ?: body.siteId ?: request.getParameter('siteId'))?.toString()?.trim()
 if (!siteId) {

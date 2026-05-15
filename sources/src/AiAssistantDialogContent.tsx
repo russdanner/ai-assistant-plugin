@@ -87,8 +87,6 @@ export interface AiAssistantDialogContentProps {
   enabledBuiltInTools?: string[];
   expertSkills?: ExpertSkillConfig[];
   translateBatchConcurrency?: number;
-  crafterQBearerToken?: string;
-  crafterQBearerTokenEnv?: string;
 }
 
 /**
@@ -107,9 +105,7 @@ function AiAssistantDialogContent(props: Readonly<AiAssistantDialogContentProps>
     enableTools,
     enabledBuiltInTools,
     expertSkills,
-    translateBatchConcurrency,
-    crafterQBearerToken,
-    crafterQBearerTokenEnv
+    translateBatchConcurrency
   } = props;
   return (
     <AiAssistantChat
@@ -124,8 +120,6 @@ function AiAssistantDialogContent(props: Readonly<AiAssistantDialogContentProps>
       expertSkills={expertSkills}
       configPrompts={prompts}
       {...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {})}
-      {...(crafterQBearerTokenEnv?.trim() ? { crafterQBearerTokenEnv: crafterQBearerTokenEnv.trim() } : {})}
-      {...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {})}
     />
   );
 }

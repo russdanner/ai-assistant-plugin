@@ -7,10 +7,9 @@ import java.util.regex.Pattern
 /**
  * Normalized LLM <strong>transport</strong> identifiers for the Studio AI Assistant plugin (this codebase).
  * <p>
- * <strong>{@link #CRAFTERRQ_REMOTE_API}</strong> ({@code llm=crafterQ}) is the <strong>remote hosted chat</strong> adapter
- * (HTTP to {@code api.crafterq.ai}); it is not the name of the plugin. Missing, blank, or unrecognized {@code llm}
- * values are rejected by {@link #normalize(String)} with {@link IllegalArgumentException} (HTTP 400 on stream/chat).
- * The <strong>ConsultCrafterQExpert</strong> CMS tool calls that same hosted stack for SME/RAG consults.
+ * Missing, blank, or unrecognized {@code llm} values are rejected by {@link #normalize(String)} with
+ * {@link IllegalArgumentException} (HTTP 400 on stream/chat). Authors must configure a provider ({@link #OPENAI_NATIVE},
+ * Claude, script LLM, etc.) — there is no remote hosted default.
  * The built-in <strong>{@link #OPENAI_NATIVE}</strong> row is the <strong>OpenAI vendor</strong>; <strong>xAI</strong>,
  * <strong>deepSeek</strong>, <strong>llama</strong>, and <strong>gemini</strong> are <strong>other vendors</strong> that share the same
  * <strong>tools-loop</strong> {@code /v1/chat/completions} <strong>RestClient</strong> path in {@code AiOrchestration}.
@@ -57,9 +56,6 @@ final class StudioAiLlmKind {
   /** Spring AI Anthropic (Claude); tools via Spring {@code ChatClient}, not the OpenAI RestClient loop. */
   static final String CLAUDE_NATIVE = 'claude'
 
-  /** Remote hosted chat at {@code api.crafterq.ai} — no Studio CMS tools through this adapter (see {@code ConsultCrafterQExpert} for SME tool calls). */
-  static final String CRAFTERRQ_REMOTE_API = 'crafterQ'
-
   /**
    * Normalized id for site Groovy LLM under {@code /scripts/aiassistant/llm/{id}/}. Agent {@code <llm>} uses
    * {@code script:yourId} → normalized {@code scriptLlm:yourId}.
@@ -70,10 +66,6 @@ final class StudioAiLlmKind {
 
   static boolean isOpenAiNative(String normalizedKind) {
     return OPENAI_NATIVE == (normalizedKind ?: '').toString()
-  }
-
-  static boolean isCrafterQRemoteApi(String normalizedKind) {
-    return CRAFTERRQ_REMOTE_API == (normalizedKind ?: '').toString()
   }
 
   static boolean isScriptHostedLlm(String normalizedKind) {
@@ -214,19 +206,21 @@ final class StudioAiLlmKind {
 
   /**
    * Maps agent / POST {@code llm} strings to a normalized kind. Empty or blank throws {@link IllegalArgumentException}.
-   * Unrecognized values and invalid {@code script:…} ids throw. Explicit {@code crafterq} / {@code crafter-q} maps to
-   * {@link #CRAFTERRQ_REMOTE_API}. Use {@code script:yourId} for site Groovy ({@link #SCRIPT_LLM_PREFIX}).
+   * Unrecognized values and invalid {@code script:…} ids throw.
+   * Legacy hosted-chat spellings ({@code aiassistant}, {@code hostedchat}, {@code crafterq}, …) are rejected — configure OpenAI, Claude, or {@code script:…}.
    */
   static String normalize(String raw) {
     String trimmed = (raw ?: '').toString().trim()
     if (!trimmed) {
       throw new IllegalArgumentException(
-        'Missing or blank llm: set <llm> on the agent in /config/studio/ui.xml (or ensure the stream/chat POST body includes llm, e.g. openAI, claude, crafterQ, script:myid).'
+        'Missing or blank llm: set <llm> on the agent in /config/studio/ui.xml (or include llm on the stream/chat POST body), e.g. openAI, claude, deepSeek, gemini, xAI, llama, script:myid.'
       )
     }
     String s = trimmed.toLowerCase(Locale.US)
-    if (s == 'crafterq' || s == 'crafter-q' || s == 'aiassistant') {
-      return CRAFTERRQ_REMOTE_API
+    if (s == 'aiassistant' || s == 'hostedchat' || s == 'hosted-chat' || s == 'crafterq' || s == 'crafter-q') {
+      throw new IllegalArgumentException(
+        "llm='${trimmed}' is no longer supported (hosted remote chat was removed). Configure an LLM provider such as openAI, claude, xAI, deepSeek, llama, gemini, or script:<id>."
+      )
     }
     if (s.startsWith('script:')) {
       String id = s.substring('script:'.length()).trim()
@@ -256,7 +250,7 @@ final class StudioAiLlmKind {
       return CLAUDE_NATIVE
     }
     throw new IllegalArgumentException(
-      "Unrecognized llm='${trimmed}'. Supported: openAI, xAI, deepSeek, llama, gemini, genesis, claude, crafterQ, script:<id>."
+      "Unrecognized llm='${trimmed}'. Supported: openAI, xAI, deepSeek, llama, gemini, genesis, claude, script:<id>."
     )
   }
 }

@@ -14,9 +14,9 @@ import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantSupervis
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 
 def body = AiHttpProxy.parseJsonBody(request)
-if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [ok: false, message: 'Invalid JSON', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
+  return [ok: false, message: 'Invalid JSON', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
 String siteId = (body?.siteId ?: params?.siteId)?.toString()?.trim()
 if (!siteId) {

@@ -29,7 +29,7 @@ final class ContentSubgraphAggregator {
   private ContentSubgraphAggregator() {}
 
   /** Root element name (not a Crafter content-type element). */
-  static final String SUBGRAPH_ROOT = 'crafterq-content-subgraph'
+  static final String SUBGRAPH_ROOT = 'aiassistant-content-subgraph'
 
   static final String DOCUMENT_EL = 'document'
 
@@ -156,7 +156,7 @@ final class ContentSubgraphAggregator {
   }
 
   /**
-   * When the inner model returns only the item root (no {@code crafterq-content-subgraph} / {@code document} wrapper).
+   * When the inner model returns only the item root (no {@code aiassistant-content-subgraph} / {@code document} wrapper).
    * Public for {@code TranslateContentItem} raw inner completion path.
    */
   static String extractLikelySingleItemRootXml(String raw) {
@@ -636,7 +636,7 @@ final class ContentSubgraphAggregator {
           path   : path,
           ok     : false,
           message:
-            'Skipped: Studio form client-apply item — put field edits in crafterqFormFieldUpdates or use WriteContent for other paths.',
+            'Skipped: Studio form client-apply item — put field edits in aiassistantFormFieldUpdates or use WriteContent for other paths.',
         ])
         continue
       }

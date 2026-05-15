@@ -30,7 +30,7 @@
 | JVM / `-D` tuning (timeouts, HTTP caps, key fallbacks) | [studio-aiassistant-jvm-parameters.md](using-and-extending/studio-aiassistant-jvm-parameters.md) |
 | Debug logging (loggers, Spring AI HTTP trace JVM flag) | [internals/README.md](internals/README.md#debug-logging) · JVM reference: [studio-aiassistant-jvm-parameters.md](using-and-extending/studio-aiassistant-jvm-parameters.md) |
 | MCP client (`mcpEnabled` + `mcpServers` in `tools.json`, Streamable HTTP) | [chat-and-tools-runtime.md](internals/chat-and-tools-runtime.md#mcp-client-tools-streamable-http) |
-| REST/stream body, tools, CrafterQ auth | [chat-and-tools-runtime.md](internals/chat-and-tools-runtime.md) |
+| REST/stream body, tools, MCP | [chat-and-tools-runtime.md](internals/chat-and-tools-runtime.md) |
 | Engineering contracts (`ui.xml` / stream / form / REST) | [internals/spec.md](internals/spec.md) |
 | Review-style invariants (perf, memory, SSE, Groovy pitfalls) | [internals/maintainer-review-checklist.md](internals/maintainer-review-checklist.md) |
 

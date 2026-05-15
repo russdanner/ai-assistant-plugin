@@ -27,9 +27,6 @@ export const STUDIO_AI_BUILTIN_TOOL_IDS: readonly string[] = [
   'update_content_type',
   'analyze_template',
   'publish_content',
-  'ConsultCrafterQExpert',
-  'ListCrafterQAgentChats',
-  'GetCrafterQAgentChat',
   'GetCrafterizingPlaybook',
   'revert_change',
   'GenerateImage',
@@ -45,7 +42,6 @@ export const STUDIO_AI_LLM_VENDOR_IDS: readonly string[] = [
   'llama',
   'gemini',
   'claude',
-  'crafterQ',
   'script'
 ] as const;
 

@@ -40,7 +40,7 @@ Editable reference for converting static HTML templates into a CrafterCMS projec
 - **Never infer** `contentTypeId` from filename (e.g. `index.xml` ≠ `/page/index`). Read `<content-type>` from the item XML or use **GetContentTypeFormDefinition** with **`contentPath`**.
 - **RTE** fields: type `rte` in forms; wrap HTML in **CDATA** in content items for indexing.
 - **Display templates**: kebab-case paths matching real FTL file names.
-- **Tools in this plugin**: Use **GetContent**, **WriteContent**, **update_content**, **update_template**, **GetContentTypeFormDefinition**, **ListPagesAndComponents** as appropriate; on **OpenAI** agents, **ConsultCrafterQExpert** calls CrafterQ for copy/SEO/tone ideas (no repo I/O). Preparatory tools do not save until **WriteContent**.
+- **Tools in this plugin**: Use **GetContent**, **WriteContent**, **update_content**, **update_template**, **GetContentTypeFormDefinition**, **ListPagesAndComponents** as appropriate. Preparatory tools do not save until **WriteContent**.
 
 ## Nested components
 

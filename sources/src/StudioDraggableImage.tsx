@@ -186,6 +186,8 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
   /** When set, {@code <img>} uses the object URL (CSP-safe) instead of the wire {@code src}. */
   const [blobDecoded, setBlobDecoded] = useState(false);
   const [blobLoading, setBlobLoading] = useState(false);
+  /** Ephemeral provider URLs: we only preview via one {@code fetch}→blob; no silent {@code <img src=https…>} fallback. */
+  const [remoteHttpFetchFailed, setRemoteHttpFetchFailed] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -196,6 +198,8 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
 
   const trimmed = src?.trim() ?? '';
   const isRemote = trimmed ? isProbablyRemoteImageUrl(trimmed) : false;
+  const isAbsoluteHttp =
+    trimmed.startsWith('http://') || trimmed.startsWith('https://');
 
   /**
    * Prefer an object URL for {@code <img src>}: Studio CSP often allows {@code blob:} while blocking {@code data:},
@@ -216,6 +220,7 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
     setBlobPreviewUrl(null);
     setBlobDecoded(false);
     setBlobLoading(false);
+    setRemoteHttpFetchFailed(false);
 
     if (!trimmed) {
       return () => {
@@ -282,6 +287,9 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
         setBlobPreviewUrl(null);
         setBlobLoading(false);
         setBlobDecoded(true);
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          setRemoteHttpFetchFailed(true);
+        }
       });
 
     return () => {
@@ -330,6 +338,27 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
   }, []);
 
   if (!trimmed) return null;
+
+  if (isAbsoluteHttp && remoteHttpFetchFailed) {
+    return (
+      <Box
+        sx={{
+          my: 1,
+          display: 'inline-block',
+          maxWidth: '100%',
+          borderRadius: 1,
+          border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
+          bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
+          px: 1.25,
+          py: 1
+        }}
+      >
+        <Typography variant="caption" color="text.secondary" component="p" sx={{ m: 0 }}>
+          Image preview unavailable.
+        </Typography>
+      </Box>
+    );
+  }
 
   const canDrag = !isRemote || Boolean(effectiveSite);
   const caption = isRemote

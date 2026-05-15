@@ -15,7 +15,7 @@ class CrafterizingPlaybookLoader {
   static final String PLAYBOOK_FILE_NAME = 'CrafterizingPlaybook.md'
 
   /** Optional env/system property: absolute path to override playbook file (hotfix without redeploying classes dir). */
-  static final String SYSPROP_PATH = 'crafterq.crafterizingPlaybook.path'
+  static final String SYSPROP_PATH = 'aiassistant.crafterizingPlaybook.path'
 
   private static final String PACKAGE_RESOURCE_PREFIX = 'plugins/org/craftercms/aiassistant/playbook/'
 
@@ -31,7 +31,7 @@ class CrafterizingPlaybookLoader {
           log.debug('Crafterizing playbook loaded from system property path: {}', override)
           return f.getText('UTF-8')
         }
-        log.warn('crafterq.crafterizingPlaybook.path set but not a file: {}', override)
+        log.warn('aiassistant.crafterizingPlaybook.path set but not a file: {}', override)
       } catch (Throwable t) {
         log.warn('Failed reading crafterizing playbook from {}: {}', override, t.message)
       }
@@ -118,7 +118,7 @@ class CrafterizingPlaybookLoader {
 The editable file `CrafterizingPlaybook.md` was not found next to the AI Assistant plugin classes.
 
 - Ensure `authoring/scripts/classes/plugins/org/craftercms/aiassistant/CrafterizingPlaybook.md` is deployed (e.g. copied to `config/studio/scripts/classes/plugins/org/craftercms/aiassistant/`).
-- Or set JVM system property `crafterq.crafterizingPlaybook.path` to an absolute path of a markdown file.
+- Or set JVM system property `aiassistant.crafterizingPlaybook.path` to an absolute path of a markdown file.
 
 See plugin docs for full crafterization phases: content types under `/config/studio/content-types/`, pages under `/site/website/`, components under `/site/components/`, templates under `/templates/web/`, populate `sections_o`, use CDATA for `*_html`, and use studio tools (GetContent, WriteContent, GetContentTypeFormDefinition) for edits.
 '''

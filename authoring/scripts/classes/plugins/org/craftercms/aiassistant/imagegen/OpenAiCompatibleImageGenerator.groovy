@@ -45,6 +45,11 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
     sb.append('"model":').append(JsonOutput.toJson(model)).append(',')
     sb.append('"prompt":').append(JsonOutput.toJson(prompt)).append(',')
     sb.append('"n":1')
+    // Default API response is usually a temporary https URL; b64_json is predictable for chat expansion.
+    // gpt-image / chatgpt-image families use output_format instead; some providers reject response_format.
+    if (!gptFamily) {
+      sb.append(',"response_format":').append(JsonOutput.toJson('b64_json'))
+    }
     if (size) {
       sb.append(',"size":').append(JsonOutput.toJson(size))
     }

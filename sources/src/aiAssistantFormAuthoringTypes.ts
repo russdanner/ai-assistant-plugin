@@ -22,7 +22,7 @@ export type AuthoringFormContextSnapshot = {
   /** `form.path` — item being edited; used for CONTENT: macro vs live model + appendix. */
   contentPath?: string;
   /**
-   * Apply flat `fieldId → string` map from assistant JSON (`crafterqFormFieldUpdates`); updates model + controls + validation.
+   * Apply flat `fieldId → string` map from assistant JSON (`aiassistantFormFieldUpdates`); updates model + controls + validation.
    */
   applyAssistantFieldUpdates?: (updates: Record<string, string>) => AssistantFieldApplyResult;
 };

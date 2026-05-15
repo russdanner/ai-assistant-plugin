@@ -5,8 +5,6 @@ import {
   getRequestForgeryTokenHeaderName
 } from '@craftercms/studio-ui/utils/auth';
 
-export const CRAFTERQ_CHAT_USER_HEADER = 'X-CrafterQ-Chat-User';
-
 /**
  * Thrown when the HTTP response body ends without an SSE frame carrying {@code metadata.completed} or
  * {@code metadata.error} — e.g. network drop, proxy reset, Studio thread died, or browser navigated away.
@@ -18,17 +16,6 @@ export class AiAssistantIncompleteStreamError extends Error {
     );
     this.name = 'AiAssistantIncompleteStreamError';
   }
-}
-const CRAFTERQ_CHAT_USER_STORAGE_KEY = 'crafterq.chatUser';
-
-export interface AiAssistantChatListResponse {
-  chats: Array<{
-    id: string;
-    title?: string;
-    updatedAt?: string;
-    createdAt?: string;
-    [key: string]: unknown;
-  }>;
 }
 
 export interface AiAssistantChatMessage {
@@ -47,60 +34,6 @@ export interface AiAssistantChatMessage {
   toolCalls?: unknown[];
   media?: unknown[];
   [key: string]: unknown;
-}
-
-export interface AiAssistantChatMessagesResponse {
-  messages: AiAssistantChatMessage[];
-}
-
-function getStoredChatUser(): string | null {
-  try {
-    return window.localStorage.getItem(CRAFTERQ_CHAT_USER_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function setStoredChatUser(value: string | null) {
-  try {
-    if (!value) return;
-    const trimmed = value.trim();
-    if (trimmed) window.localStorage.setItem(CRAFTERQ_CHAT_USER_STORAGE_KEY, trimmed);
-  } catch {
-    // ignore
-  }
-}
-
-export async function listChats(agentId: string): Promise<AiAssistantChatListResponse['chats']> {
-  const url = new URL('https://api.crafterq.ai/v1/chats');
-  url.searchParams.set('agentId', agentId);
-  const token = getStoredChatUser();
-  const res = await fetch(url.toString(), {
-    mode: 'cors',
-    credentials: 'include',
-    headers: token ? { [CRAFTERQ_CHAT_USER_HEADER]: token } : undefined
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`CrafterQ listChats failed (${res.status}): ${text || res.statusText}`);
-  }
-  const json = (await res.json()) as AiAssistantChatListResponse;
-  return json.chats ?? [];
-}
-
-export async function getChatMessages(chatId: string): Promise<AiAssistantChatMessage[]> {
-  const token = getStoredChatUser();
-  const res = await fetch(`https://api.crafterq.ai/v1/chats/${chatId}`, {
-    mode: 'cors',
-    credentials: 'include',
-    headers: token ? { [CRAFTERQ_CHAT_USER_HEADER]: token } : undefined
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`CrafterQ getChat failed (${res.status}): ${text || res.statusText}`);
-  }
-  const json = (await res.json()) as AiAssistantChatMessagesResponse;
-  return json.messages ?? [];
 }
 
 export interface StreamChatArgs {
@@ -127,7 +60,7 @@ export interface StreamChatArgs {
    */
   authoringSurface?: 'preview' | 'formEngine';
   /**
-   * Only with `authoringSurface: 'formEngine'`. When true, server appends instructions for `crafterqFormFieldUpdates` JSON
+   * Only with `authoringSurface: 'formEngine'`. When true, server appends instructions for `aiassistantFormFieldUpdates` JSON
    * so the browser can apply edits. **Never set for XB/ICE** — omit so preview uses tools + `contentPath` only.
    */
   formEngineClientJsonApply?: boolean;
@@ -137,7 +70,7 @@ export interface StreamChatArgs {
    * omit to fall back to blocking all repo writes for that session (safe when path is unknown).
    */
   formEngineItemPath?: string;
-  /** `crafterQ` | `openAI` — must match server / widget configuration */
+  /** Provider id for this agent — e.g. `openAI`, `claude`, `gemini`, `script:{id}` (must match server `StudioAiLlmKind`). */
   llm?: string;
   /** Provider model id when llm is openAI; optional (server default gpt-4o-mini). Request body key **`llmModel`**. */
   llmModel?: string;
@@ -178,10 +111,6 @@ export interface StreamChatArgs {
    * (from agent ui.xml **translateBatchConcurrency**). Server default 25 when omitted.
    */
   translateBatchConcurrency?: number;
-  /** CrafterQ JWT for `Authorization: Bearer` on server-proxied api.crafterq.ai calls (ui.xml **crafterQBearerToken**). */
-  crafterQBearerToken?: string;
-  /** Studio host env var **name** for the CrafterQ JWT (ui.xml **crafterQBearerTokenEnv**); overrides literal when set and non-empty. */
-  crafterQBearerTokenEnv?: string;
   signal?: AbortSignal;
   onMessage: (event: AiAssistantChatMessage) => void;
   /**
@@ -191,8 +120,7 @@ export interface StreamChatArgs {
 }
 
 /**
- * Streams chat responses via SSE (text/event-stream) using fetch streaming.
- * This mirrors the widget behavior: POST /v1/chats?stream=true&agentId=...
+ * Streams assistant replies via SSE from the Studio plugin script endpoint (`…/ai/stream`).
  */
 /**
  * Reads the Studio Experience Builder {@code crafterPreview} cookie when present (document.cookie).
@@ -252,19 +180,15 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     enabledBuiltInTools,
     expertSkills,
     translateBatchConcurrency,
-    crafterQBearerToken,
-    crafterQBearerTokenEnv,
     signal,
     onMessage,
     onRawSseDataLine
   } = args;
-  const token = getStoredChatUser();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
     ...buildStudioAuthHeaders()
   };
-  if (token) headers[CRAFTERQ_CHAT_USER_HEADER] = token;
 
   let pluginStreamUrl = '/studio/api/2/plugin/script/plugins/org/craftercms/aiassistant/studio/aiassistant/ai/stream';
   if (siteId) {
@@ -321,11 +245,6 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
   ) {
     requestBody.translateBatchConcurrency = Math.floor(translateBatchConcurrency);
   }
-  const bEnv = crafterQBearerTokenEnv != null ? String(crafterQBearerTokenEnv).trim() : '';
-  if (bEnv) requestBody.crafterQBearerTokenEnv = bEnv;
-  const bTok = crafterQBearerToken != null ? String(crafterQBearerToken).trim() : '';
-  if (bTok) requestBody.crafterQBearerToken = bTok;
-
   const streamFromResponse = async (res: Response, failPrefix: string): Promise<void> => {
     if (!res.ok) {
       const text = await res.text().catch(() => '');

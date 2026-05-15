@@ -11,7 +11,7 @@
 | [helper-widget.md](helper-widget.md) | Helper **`ui.xml`** snippet and “component not found” checklist |
 | [autonomous-assistants-widget.md](autonomous-assistants-widget.md) | Optional autonomous widget — placement and links to spec |
 | [tinymce-integration.md](tinymce-integration.md) | **Optional RTE** — TinyMCE **`tinymceOptions`**, toolbar ids, **`craftercms_aiassistant`** config |
-| [llm-configuration.md](llm-configuration.md) | **`<llm>`** — **tools-loop chat / Claude / `script:` first**; env + `ui.xml`; optional hosted-only adapter; **`script:{id}`** |
+| [llm-configuration.md](llm-configuration.md) | **`<llm>`** — supported providers (**`openAI`**, **`claude`**, **`script:`**, …), env + `ui.xml`, merge rules |
 | [image-generation.md](image-generation.md) | **Pluggable `GenerateImage`** — wire vs **`script:{id}`**, **`imageGenerator`** / **`imageModel`**, site overrides |
 | [studio-aiassistant-jvm-parameters.md](studio-aiassistant-jvm-parameters.md) | **JVM-only** `-D` / `System.getProperty` tuning (timeouts, fetch/MCP caps, key fallbacks) |
 | [scripted-tools-and-imagegen.md](scripted-tools-and-imagegen.md) | **Integrators** — **`InvokeSiteUserTool`** + **`imagegen/{id}/generate.groovy`**: bindings, contracts, examples, checklists |

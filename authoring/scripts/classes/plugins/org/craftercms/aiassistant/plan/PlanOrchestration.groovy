@@ -34,7 +34,7 @@ In the **same** assistant message as your **## Plan** and **`tool_calls`**, appe
 Rules:
 - `steps` lists **execution order**. Each `tools` array contains **function names** exactly as registered in this chat (same spelling as tool `name` in the schema).
 - List **every** tool you invoke in this turn **once each**, in the order you intend the server to run them.
-- The **`tools` names must match your actual `tool_calls`** for this message (same tools, same order). **Do not** name **ListCrafterQAgentChats** in JSON while emitting **ListContentTranslationScope** (or any other name) in **`tool_calls`** — authors see a broken plan.
+- The **`tools` names must match your actual `tool_calls`** for this message (same tools, same order). **Do not** name one tool in JSON while emitting a **different** name in **`tool_calls`** — authors see a broken plan.
 - Keep `summary` short (for logs). Authors do not need to read this block; do not narrate it outside the comment.'''
   }
 
