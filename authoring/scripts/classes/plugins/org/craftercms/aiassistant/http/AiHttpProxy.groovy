@@ -611,17 +611,24 @@ class AiHttpProxy {
         def parsed = new JsonSlurper().parseText(text)
         return (parsed instanceof Map) ? (Map) parsed : [value: parsed]
       } catch (Throwable t) {
-        logger.warn('parseJsonBody: invalid JSON ({} chars): {}', total, t.message)
+        logger.warn(
+          'parseJsonBody: invalid JSON ({} chars); exceptionType={}',
+          total,
+          t?.class?.name ?: 'unknown'
+        )
         return [
           __crafterqInvalidJson      : true,
-          __crafterqInvalidJsonDetail: (t.message ?: t.toString())
+          __crafterqInvalidJsonDetail: 'Request body is not valid JSON.'
         ]
       }
     } catch (Throwable t) {
-      logger.warn('parseJsonBody: I/O or unexpected read failure: {}', t.message)
+      logger.warn(
+        'parseJsonBody: I/O or unexpected read failure; exceptionType={}',
+        t?.class?.name ?: 'unknown'
+      )
       return [
         __crafterqInvalidJson      : true,
-        __crafterqInvalidJsonDetail: (t.message ?: t.toString())
+        __crafterqInvalidJsonDetail: 'Could not read request body as JSON.'
       ]
     }
   }

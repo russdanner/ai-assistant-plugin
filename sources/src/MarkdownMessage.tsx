@@ -186,6 +186,42 @@ export function wrapDataImageMarkdownDestInAngleBrackets(input: string): string 
   return parts.join('');
 }
 
+function assistantMarkdownUnresolvedStudioInlineImageRef(src: string): boolean {
+  return src.trim().toLowerCase().startsWith('studio-ai-inline-image:');
+}
+
+/** Resolves {@code studio-ai-blob-ref://}; avoids passing unresolved custom schemes to {@link StudioDraggableImage}. */
+function AssistantMarkdownImg(props: Readonly<{
+  src?: string | null;
+  alt?: string | null;
+  longDataImageBlobRefMap: Map<string, string>;
+}>) {
+  const { src, alt, longDataImageBlobRefMap } = props;
+  const s = src?.trim() ?? '';
+  if (s.startsWith('studio-ai-blob-ref://')) {
+    const id = s.slice('studio-ai-blob-ref://'.length);
+    const actual = longDataImageBlobRefMap.get(id);
+    if (actual) {
+      return <StudioDraggableImage src={actual} alt={alt} />;
+    }
+    return (
+      <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', my: 0.5 }}>
+        {(alt || '').toString().trim() ? `${(alt || '').toString().trim()} — ` : ''}
+        Image preview unavailable in this message view.
+      </Typography>
+    );
+  }
+  if (assistantMarkdownUnresolvedStudioInlineImageRef(s)) {
+    return (
+      <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', my: 0.5 }}>
+        {(alt || '').toString().trim() ? `${(alt || '').toString().trim()}: ` : ''}
+        Image preview unavailable (inline image reference was not expanded by the server).
+      </Typography>
+    );
+  }
+  return <StudioDraggableImage src={s} alt={alt} />;
+}
+
 /**
  * Default hast-util-sanitize schema only allows {@code http(s)} on {@code src}, which strips
  * inline {@code data:image/...} from assistant markdown (e.g. {@code GenerateImage} previews).
@@ -196,9 +232,7 @@ function studioAiChatMarkdownSanitizeSchema() {
     'data',
     'blob',
     'studio-ai-inline-image',
-    'studio-ai-blob-ref',
-    // Legacy threads / older plugin builds
-    'crafterq-tool-image'
+    'studio-ai-blob-ref'
   ];
   return {
     ...defaultSchema,
@@ -280,17 +314,9 @@ function DraftMarkdownPreview(props: Readonly<{ value: string }>) {
           {children}
         </Box>
       ),
-      img: ({ src, alt }: { src?: string | null; alt?: string | null }) => {
-        const s = src?.trim() ?? '';
-        if (s.startsWith('studio-ai-blob-ref://')) {
-          const id = s.slice('studio-ai-blob-ref://'.length);
-          const actual = longDataImageBlobRefMap.get(id);
-          if (actual) {
-            return <StudioDraggableImage src={actual} alt={alt} />;
-          }
-        }
-        return <StudioDraggableImage src={src} alt={alt} />;
-      },
+      img: ({ src, alt }: { src?: string | null; alt?: string | null }) => (
+        <AssistantMarkdownImg src={src} alt={alt} longDataImageBlobRefMap={longDataImageBlobRefMap} />
+      ),
       code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
         const raw = String(children ?? '').replace(/\n$/, '');
         const isInline = !className;
@@ -665,17 +691,9 @@ export default function MarkdownMessage(props: Readonly<{ text: string }>) {
           {children}
         </Box>
       ),
-      img: ({ src, alt }: { src?: string | null; alt?: string | null }) => {
-        const s = src?.trim() ?? '';
-        if (s.startsWith('studio-ai-blob-ref://')) {
-          const id = s.slice('studio-ai-blob-ref://'.length);
-          const actual = longDataImageBlobRefMap.get(id);
-          if (actual) {
-            return <StudioDraggableImage src={actual} alt={alt} />;
-          }
-        }
-        return <StudioDraggableImage src={src} alt={alt} />;
-      },
+      img: ({ src, alt }: { src?: string | null; alt?: string | null }) => (
+        <AssistantMarkdownImg src={src} alt={alt} longDataImageBlobRefMap={longDataImageBlobRefMap} />
+      ),
       table: ({ children }: { children?: React.ReactNode }) => (
         <TableContainer
           component={Paper}

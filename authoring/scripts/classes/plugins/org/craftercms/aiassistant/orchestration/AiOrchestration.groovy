@@ -123,12 +123,9 @@ class AiOrchestration {
   /**
    * Markdown / assistant-text placeholder expanded server-side before SSE (not a network URL). Value in markdown is
    * the wire {@code tool_call_id} (e.g. {@code call_…}). {@link #openAiExpandInlineImageRefs} swaps this for the real
-   * image URL in the author-facing response. Legacy {@code crafterq-tool-image://} is still expanded for old threads.
+   * image URL in the author-facing response.
    */
   private static final String STUDIO_AI_INLINE_IMAGE_REF_PREFIX = 'studio-ai-inline-image://'
-
-  /** Legacy placeholder from older plugin builds; still expanded when present in history. */
-  private static final String LEGACY_STUDIO_AI_INLINE_IMAGE_REF_PREFIX = 'crafterq-tool-image://'
 
   /**
    * Latest worker phase for logs and **SSE heartbeats** (Tools-loop+tools worker sets it; servlet thread reads it while
@@ -3226,13 +3223,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       return
     }
     Iterator<String> it = backlog.iterator()
-    Pattern pat = Pattern.compile(
-      '(?:' +
-        Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) +
-        '|' +
-        Pattern.quote(LEGACY_STUDIO_AI_INLINE_IMAGE_REF_PREFIX) +
-        ')([A-Za-z0-9_-]+)'
-    )
+    Pattern pat = Pattern.compile(Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) + '([A-Za-z0-9_-]+)')
     Matcher scan = pat.matcher(text.toString())
     while (scan.find()) {
       String id = scan.group(1)
@@ -3251,8 +3242,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
   }
 
   /**
-   * Replaces {@code studio-ai-inline-image://<toolCallId>} (and legacy {@code crafterq-tool-image://}) with stored
-   * image URLs for author-visible output.
+   * Replaces {@code studio-ai-inline-image://<toolCallId>} with stored image URLs for author-visible output.
    *
    * @param generateImageUrlBacklog optional FIFO of image URLs from {@code GenerateImage} completions (tool-progress),
    *        used when the compacted RestClient map is empty or missing ids (Spring-AI {@code chatResponse()} flux path).
@@ -3272,7 +3262,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     }
     openAiAugmentEffMapWithGenerateImageBacklog(out, eff, generateImageUrlBacklog)
     if (eff.isEmpty()) {
-      if (out.contains(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) || out.contains(LEGACY_STUDIO_AI_INLINE_IMAGE_REF_PREFIX)) {
+      if (out.contains(STUDIO_AI_INLINE_IMAGE_REF_PREFIX)) {
         log.warn(
           'Tools-loop native tools: assistant text still contains inline image ref placeholder(s) but inline image map is empty (GenerateImage wire may not have been compacted).'
         )
@@ -3280,13 +3270,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       return out
     }
     String soleUrl = eff.size() == 1 ? eff.values().iterator().next() : null
-    Pattern pat = Pattern.compile(
-      '(?:' +
-        Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) +
-        '|' +
-        Pattern.quote(LEGACY_STUDIO_AI_INLINE_IMAGE_REF_PREFIX) +
-        ')([A-Za-z0-9_-]+)'
-    )
+    Pattern pat = Pattern.compile(Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) + '([A-Za-z0-9_-]+)')
     Matcher mat = pat.matcher(out)
     StringBuffer sb = new StringBuffer()
     while (mat.find()) {
@@ -3327,8 +3311,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
         continue
       }
       String ref = STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id
-      String legacyRef = LEGACY_STUDIO_AI_INLINE_IMAGE_REF_PREFIX + id
-      if (text.contains(ref) || text.contains(legacyRef) || text.contains(url)) {
+      if (text.contains(ref) || text.contains(url)) {
         continue
       }
       tail.append('\n\n![](').append(ref).append(')')
@@ -3938,11 +3921,13 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     }
     try {
       synchronized (out) {
-        // Always emit the final assistant text chunk: only the terminal `metadata.completed` frame is
-        // CAS-guarded (servlet timeout/recovery may have claimed first). Skipping the text here would drop a
-        // valid reply on an otherwise live connection — duplicate completed is what we must avoid.
-        String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
-        openAiWriteSseFinalAssistantTextChunks(out, finalChunk)
+        // If timeout/recovery already emitted a terminal SSE, do not append more assistant text after it — that
+        // ordering confuses the client. Duplicate `completed` remains suppressed by the CAS below.
+        boolean terminalAlready = terminalEmitted != null && terminalEmitted.get()
+        if (!terminalAlready) {
+          String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
+          openAiWriteSseFinalAssistantTextChunks(out, finalChunk)
+        }
         if (tryClaimOpenAiToolsTerminalEmit(terminalEmitted)) {
           def doneMeta = new LinkedHashMap()
           doneMeta.completed = true
@@ -4918,6 +4903,9 @@ Technical detail: ''' + msg
         def sentCompletedAtomic = new AtomicBoolean(false)
         def sawFirstClientChunk = new AtomicBoolean(false)
         def loggedEmptyAssistantTextDelta = new AtomicBoolean(false)
+        /** Merge stream deltas so {@code studio-ai-inline-image://…} is never split across {@link #openAiExpandInlineImageRefs} calls. */
+        StringBuilder fluxAssistRawAcc = new StringBuilder()
+        AtomicInteger fluxAssistExpandedSentLen = new AtomicInteger(0)
 
         def fluxTimed = (flux instanceof Flux) ? ((Flux) flux).timeout(Duration.ofMillis(CHAT_FLUX_AWAIT_MS)) : flux
 
@@ -4983,8 +4971,23 @@ Technical detail: ''' + msg
             if (finishReason && log.isDebugEnabled()) {
               log.debug('chatStreamWithSpringAi: chunk finishReason={} streamFinished={} (agentId={}, model={})', finishReason, streamFinished, agentId, modelForLog)
             }
-            String fluxChunkText = openAiStripForbiddenMetaPlanFromAssistantText((content ?: '').toString())
-            fluxChunkText = openAiExpandInlineImageRefs(fluxChunkText, null, genImgBacklog)
+            String curRaw = (content != null ? content.toString() : '')
+            if (curRaw) {
+              String prevRaw = fluxAssistRawAcc.toString()
+              if (prevRaw.isEmpty() || curRaw.startsWith(prevRaw)) {
+                fluxAssistRawAcc.setLength(0)
+                fluxAssistRawAcc.append(curRaw)
+              } else {
+                fluxAssistRawAcc.append(curRaw)
+              }
+            }
+            String fullRaw = fluxAssistRawAcc.toString()
+            String expandedFull =
+              openAiExpandInlineImageRefs(openAiStripForbiddenMetaPlanFromAssistantText(fullRaw), null, genImgBacklog)
+            int sent = fluxAssistExpandedSentLen.get()
+            int expLen = expandedFull.length()
+            String fluxChunkText = sent < expLen ? expandedFull.substring(sent) : ''
+            fluxAssistExpandedSentLen.set(expLen)
             def event = [text: fluxChunkText, metadata: metaOut]
             if (streamFinished) sentCompletedAtomic.set(true)
             def payload = "data: ${JsonOutput.toJson(event)}\n\n"

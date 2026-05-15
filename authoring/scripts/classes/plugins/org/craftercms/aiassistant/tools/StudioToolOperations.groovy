@@ -2835,8 +2835,34 @@ class StudioToolOperations {
   }
 
   /**
-   * Collects {@code rel=stylesheet} {@code <link href="…">} targets from an HTML prefix (either attribute order)
-   * so {@link #fetchHttpUrl} tool JSON lists real CSS entry points even when {@code body} is truncated later on the wire.
+   * Reads a single {@code <link …>} attribute value (quoted). Attribute name match is ASCII case-insensitive.
+   */
+  private static String httpFetchExtractLinkAttrInsensitive(String attrs, String name) {
+    if (!attrs || !name) {
+      return null
+    }
+    String q = java.util.regex.Pattern.quote(name.toString())
+    def m = (attrs =~ /(?is)\b${q}\s*=\s*["']([^"']*)["']/)
+    return m.find() ? m.group(1)?.toString()?.trim() : null
+  }
+
+  /** True when {@code rel} is a space-separated token list that includes {@code stylesheet} (HTML allows multiple link types). */
+  private static boolean httpFetchRelContainsStylesheetToken(String rel) {
+    if (!rel) {
+      return false
+    }
+    for (String tok : rel.toLowerCase(Locale.ROOT).trim().split(/\s+/)) {
+      if ('stylesheet'.equals(tok)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Collects {@code rel} stylesheet {@code <link href="…">} targets from an HTML prefix (any attribute order;
+   * {@code rel} may list multiple space-separated tokens such as {@code alternate stylesheet}).
+   * Used so {@link #fetchHttpUrl} tool JSON lists real CSS entry points even when {@code body} is truncated later on the wire.
    */
   private static List<String> httpFetchCollectStylesheetHrefs(String html, int max) {
     if (html == null || max < 1) {
@@ -2857,13 +2883,14 @@ class StudioToolOperations {
       seen.add(t)
       out.add(t)
     }
-    def m1 = (s =~ /(?is)<link[^>]+href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/)
-    while (m1.find() && out.size() < max) {
-      push(m1.group(1))
-    }
-    def m2 = (s =~ /(?is)<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/)
-    while (m2.find() && out.size() < max) {
-      push(m2.group(1))
+    def linkMatcher = (s =~ /(?is)<link\s([^>]+)>/)
+    while (linkMatcher.find() && out.size() < max) {
+      String attrs = linkMatcher.group(1)?.toString() ?: ''
+      String href = httpFetchExtractLinkAttrInsensitive(attrs, 'href')
+      String rel = httpFetchExtractLinkAttrInsensitive(attrs, 'rel')
+      if (href && httpFetchRelContainsStylesheetToken(rel)) {
+        push(href)
+      }
     }
     return out
   }

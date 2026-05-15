@@ -185,7 +185,7 @@ function dedupeAssistantPostToolsMarkdown(preTools: string | undefined, tail: st
   if (nlExec) {
     const prefix = t0.slice(0, nlExec.index);
     // Do not drop intro / markdown images that appear before "## Plan Execution" (dedupe is plan-shape only).
-    if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|crafterq-tool-image:|data:image\//i.test(prefix)) {
+    if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|data:image\//i.test(prefix)) {
       return t0;
     }
     return t0.slice(nlExec.index + 1).trimStart();
@@ -938,7 +938,7 @@ function hasCompleteMarkdownInlineImage(markdown: string | undefined): boolean {
     const url = (m[1] || m[2] || '').trim();
     if (/^data:image\//i.test(url) && url.length > 120) return true;
     if (/^https?:\/\//i.test(url) && url.length > 12) return true;
-    // studio-ai-inline-image / crafterq-tool-image are server-expanded placeholders — not a loadable image until expanded.
+    // studio-ai-inline-image: refs are server-expanded placeholders — not a loadable image until expanded.
   }
   return false;
 }

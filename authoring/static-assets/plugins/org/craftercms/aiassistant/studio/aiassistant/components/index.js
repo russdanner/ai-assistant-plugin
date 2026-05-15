@@ -28516,6 +28516,26 @@ function wrapDataImageMarkdownDestInAngleBrackets(input) {
     }
     return parts.join('');
 }
+function assistantMarkdownUnresolvedStudioInlineImageRef(src) {
+    return src.trim().toLowerCase().startsWith('studio-ai-inline-image:');
+}
+/** Resolves {@code studio-ai-blob-ref://}; avoids passing unresolved custom schemes to {@link StudioDraggableImage}. */
+function AssistantMarkdownImg(props) {
+    const { src, alt, longDataImageBlobRefMap } = props;
+    const s = src?.trim() ?? '';
+    if (s.startsWith('studio-ai-blob-ref://')) {
+        const id = s.slice('studio-ai-blob-ref://'.length);
+        const actual = longDataImageBlobRefMap.get(id);
+        if (actual) {
+            return jsx$1(StudioDraggableImage, { src: actual, alt: alt });
+        }
+        return (jsxs(Typography, { component: "span", variant: "caption", color: "text.secondary", sx: { display: 'block', my: 0.5 }, children: [(alt || '').toString().trim() ? `${(alt || '').toString().trim()} — ` : '', "Image preview unavailable in this message view."] }));
+    }
+    if (assistantMarkdownUnresolvedStudioInlineImageRef(s)) {
+        return (jsxs(Typography, { component: "span", variant: "caption", color: "text.secondary", sx: { display: 'block', my: 0.5 }, children: [(alt || '').toString().trim() ? `${(alt || '').toString().trim()}: ` : '', "Image preview unavailable (inline image reference was not expanded by the server)."] }));
+    }
+    return jsx$1(StudioDraggableImage, { src: s, alt: alt });
+}
 /**
  * Default hast-util-sanitize schema only allows {@code http(s)} on {@code src}, which strips
  * inline {@code data:image/...} from assistant markdown (e.g. {@code GenerateImage} previews).
@@ -28526,9 +28546,7 @@ function studioAiChatMarkdownSanitizeSchema() {
         'data',
         'blob',
         'studio-ai-inline-image',
-        'studio-ai-blob-ref',
-        // Legacy threads / older plugin builds
-        'crafterq-tool-image'
+        'studio-ai-blob-ref'
     ];
     return {
         ...defaultSchema,
@@ -28570,17 +28588,7 @@ function DraftMarkdownPreview(props) {
         li: ({ children }) => (jsx$1(Box, { component: "li", sx: { mb: 0.25, whiteSpace: 'normal' }, children: children })),
         strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
         a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-        img: ({ src, alt }) => {
-            const s = src?.trim() ?? '';
-            if (s.startsWith('studio-ai-blob-ref://')) {
-                const id = s.slice('studio-ai-blob-ref://'.length);
-                const actual = longDataImageBlobRefMap.get(id);
-                if (actual) {
-                    return jsx$1(StudioDraggableImage, { src: actual, alt: alt });
-                }
-            }
-            return jsx$1(StudioDraggableImage, { src: src, alt: alt });
-        },
+        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap })),
         code: ({ className, children }) => {
             const raw = String(children ?? '').replace(/\n$/, '');
             const isInline = !className;
@@ -28753,17 +28761,7 @@ function MarkdownMessage(props) {
         strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
         em: ({ children }) => (jsx$1(Box, { component: "em", sx: { fontStyle: 'italic' }, children: children })),
         a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-        img: ({ src, alt }) => {
-            const s = src?.trim() ?? '';
-            if (s.startsWith('studio-ai-blob-ref://')) {
-                const id = s.slice('studio-ai-blob-ref://'.length);
-                const actual = longDataImageBlobRefMap.get(id);
-                if (actual) {
-                    return jsx$1(StudioDraggableImage, { src: actual, alt: alt });
-                }
-            }
-            return jsx$1(StudioDraggableImage, { src: src, alt: alt });
-        },
+        img: ({ src, alt }) => (jsx$1(AssistantMarkdownImg, { src: src, alt: alt, longDataImageBlobRefMap: longDataImageBlobRefMap })),
         table: ({ children }) => (jsx$1(TableContainer, { component: Paper, elevation: 0, sx: {
                 my: 1.5,
                 overflow: 'auto',
@@ -28960,7 +28958,7 @@ function dedupeAssistantPostToolsMarkdown(preTools, tail) {
     if (nlExec) {
         const prefix = t0.slice(0, nlExec.index);
         // Do not drop intro / markdown images that appear before "## Plan Execution" (dedupe is plan-shape only).
-        if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|crafterq-tool-image:|data:image\//i.test(prefix)) {
+        if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|data:image\//i.test(prefix)) {
             return t0;
         }
         return t0.slice(nlExec.index + 1).trimStart();
@@ -29685,7 +29683,7 @@ function hasCompleteMarkdownInlineImage(markdown) {
             return true;
         if (/^https?:\/\//i.test(url) && url.length > 12)
             return true;
-        // studio-ai-inline-image / crafterq-tool-image are server-expanded placeholders — not a loadable image until expanded.
+        // studio-ai-inline-image: refs are server-expanded placeholders — not a loadable image until expanded.
     }
     return false;
 }
