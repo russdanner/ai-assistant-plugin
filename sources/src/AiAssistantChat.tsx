@@ -182,7 +182,14 @@ function dedupeAssistantPostToolsMarkdown(preTools: string | undefined, tail: st
   if (!/^##\s*plan\b/im.test(pre)) return t0;
 
   const nlExec = /\n##\s*Plan Execution\b/im.exec(t0);
-  if (nlExec) return t0.slice(nlExec.index + 1).trimStart();
+  if (nlExec) {
+    const prefix = t0.slice(0, nlExec.index);
+    // Do not drop intro / markdown images that appear before "## Plan Execution" (dedupe is plan-shape only).
+    if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|crafterq-tool-image:|data:image\//i.test(prefix)) {
+      return t0;
+    }
+    return t0.slice(nlExec.index + 1).trimStart();
+  }
   if (/^##\s*Plan Execution\b/im.test(t0)) return t0.trimStart();
 
   const nlPlan = /\n##\s*Plan\b/im.exec(t0);
@@ -882,10 +889,28 @@ const cqGenerateImageAuraShift = keyframes({
 });
 
 /**
+ * True once the server emitted a terminal {@code GenerateImage} tool-progress row (✅ finished, ❌, or ⚠️).
+ * Scans all lines so a later debug/flatten block mentioning GenerateImage cannot keep the shimmer stuck on.
+ */
+function generateImageToolSettledInToolProgress(toolProgressText: string | undefined): boolean {
+  if (!toolProgressText?.trim()) return false;
+  for (const raw of toolProgressText.split('\n')) {
+    const L = raw.trim();
+    if (!L.includes('🛠️') || !L.includes('GenerateImage') || !/\*\*GenerateImage\*\*/.test(L)) continue;
+    if (/\bfinished\b/i.test(L)) return true;
+    if (/❌\s*\*\*GenerateImage\*\*/.test(L)) return true;
+    if (/⚠️\s*\*\*GenerateImage\*\*/.test(L)) return true;
+    if (/✅\s*\*\*GenerateImage\*\*/.test(L)) return true;
+  }
+  return false;
+}
+
+/**
  * True when the latest server-injected {@code GenerateImage} line is the running “…” row, not {@code finished} /
  * warning / error.
  */
 function isGenerateImageRunRowActive(toolProgressText: string | undefined): boolean {
+  if (generateImageToolSettledInToolProgress(toolProgressText)) return false;
   const s = toolProgressText?.trim();
   if (!s?.includes('GenerateImage')) return false;
   const lines = s.split(/\n/).map((l) => l.trim());
@@ -894,7 +919,8 @@ function isGenerateImageRunRowActive(toolProgressText: string | undefined): bool
     if (!L.includes('GenerateImage')) continue;
     if (/\bfinished\b/i.test(L)) return false;
     if (L.includes('\u26A0\uFE0F') || L.includes('\u274C')) return false;
-    if (/\*\*GenerateImage\*\*/.test(L) && (/…/.test(L) || /\.{3}/.test(L))) return true;
+    // Server uses Unicode ellipsis U+2026 in " …\n"; `/…/` in JS is three wildcards — must match U+2026 or ASCII "..."
+    if (/\*\*GenerateImage\*\*/.test(L) && (/\u2026/.test(L) || /\.{3}/.test(L))) return true;
     return false;
   }
   return false;
@@ -905,12 +931,14 @@ function isGenerateImageRunRowActive(toolProgressText: string | undefined): bool
  */
 function hasCompleteMarkdownInlineImage(markdown: string | undefined): boolean {
   if (!markdown?.trim()) return false;
-  const re = /!\[[^\]]*\]\(([^)]+)\)/g;
+  // Destination may be `<data:image/...>` (CommonMark) or bare `data:image/...`; bare `[^)]+` stops at first `)`.
+  const re = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(markdown)) !== null) {
-    const url = m[1].trim();
+    const url = (m[1] || m[2] || '').trim();
     if (/^data:image\//i.test(url) && url.length > 120) return true;
     if (/^https?:\/\//i.test(url) && url.length > 12) return true;
+    // studio-ai-inline-image / crafterq-tool-image are server-expanded placeholders — not a loadable image until expanded.
   }
   return false;
 }

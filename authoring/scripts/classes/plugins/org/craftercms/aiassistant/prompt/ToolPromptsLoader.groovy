@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
  * <strong>Override mechanism</strong> for {@link ToolPrompts}: built-in Groovy strings remain the defaults; a
  * non-blank {@code KEY.md} replaces that key only. Omit the file (or leave it blank) to keep the shipped default —
  * no merge, no partial patch.
- * <p>Lookup order for each key (e.g. {@code GENERAL_OPENAI_AUTHORING_INSTRUCTIONS}):</p>
+ * <p>Lookup order for each key (e.g. {@code GENERAL_LLM_AUTHORING_INSTRUCTIONS}):</p>
  * <ol>
  *   <li>When {@link ToolPromptsSiteContext} is active: site sandbox {@code /scripts/aiassistant/prompts/&lt;KEY&gt;.md}.</li>
  *   <li>Classpath resource {@link #CLASSPATH_PREFIX}{@code <KEY>.md} (e.g.
@@ -35,7 +35,7 @@ final class ToolPromptsLoader {
   private ToolPromptsLoader() {}
 
   /**
-   * @param key  stable id matching {@link ToolPromptsOverrideCatalog}, e.g. {@code GENERAL_OPENAI_AUTHORING_INSTRUCTIONS}
+   * @param key  stable id matching {@link ToolPromptsOverrideCatalog}, e.g. {@code GENERAL_LLM_AUTHORING_INSTRUCTIONS}
    * @param defaultText  built-in string when no override is present
    */
   static String resolve(String key, String defaultText) {
@@ -153,8 +153,8 @@ final class ToolPromptsLoader {
     if (key.startsWith('CRAFTERQ_DESC_')) {
       return 'getDESC_' + key.substring('CRAFTERQ_DESC_'.length())
     }
-    if (key.startsWith('GENERAL_OPENAI_')) {
-      return 'getOPENAI_' + key.substring('GENERAL_OPENAI_'.length())
+    if (key.startsWith('GENERAL_LLM_')) {
+      return 'getLlm_' + key.substring('GENERAL_LLM_'.length())
     }
     if ('GENERAL_XML_REPAIR_REMINDER_AFTER_BAD_READ' == key) {
       return 'getXML_REPAIR_REMINDER_AFTER_BAD_READ'

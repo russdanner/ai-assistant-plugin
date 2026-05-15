@@ -91,6 +91,162 @@ class AuthoringPreviewContext {
   }
 
   /**
+   * Strips Studio-injected blocks from the orchestration user prompt so intent checks
+   * (e.g. trivial greeting) only see what the author typed, not metadata that quotes
+   * phrases like {@code "this page"} as examples.
+   */
+  static String stripStudioInjectedPromptBlocks(String fullPrompt) {
+    def s = (fullPrompt ?: '').toString()
+    if (!s.trim()) {
+      return ''
+    }
+    def out = s
+    try {
+      // [Prior conversation …] … ---\n\n (from AiOrchestration.buildPriorTurnsContextBlock)
+      out = out.replaceAll('(?s)\\[Prior conversation[^\\]]*\\][\\s\\S]*?\\n---\\s*\\n\\n', '')
+      // [Request anchor …]\nRepository path: …\nContent-type id: …\n\n
+      out = out.replaceAll(
+        '(?is)\\[Request anchor[^\\]]*\\][^\\n]*\\nRepository path:\\s*[^\\n]+\\n(?:Content-type id:\\s*[^\\n]+\\n)?\\s*',
+        ''
+      )
+      // --- Studio authoring context … --- (standalone closing line `---` before preview bundle or EOF)
+      def ctxIdx = out.indexOf('--- Studio authoring context')
+      if (ctxIdx >= 0) {
+        def lineStart = out.lastIndexOf('\n', ctxIdx)
+        def blockStart = lineStart >= 0 ? lineStart : 0
+        def scan = out.indexOf('\n', ctxIdx)
+        while (scan >= 0) {
+          def nextNl = out.indexOf('\n', scan + 1)
+          def line = nextNl < 0 ? out.substring(scan + 1) : out.substring(scan + 1, nextNl)
+          if ('---'.equals(line.trim())) {
+            def endExclusive = nextNl < 0 ? out.length() : nextNl + 1
+            out = out.substring(0, blockStart) + out.substring(endExclusive)
+            break
+          }
+          scan = nextNl
+        }
+      }
+      // Trailing preview bundle (appendEnginePreviewHintIfPossible)
+      out = out.replaceAll('(?ms)\\n\\n--- Studio preview URL[\\s\\S]*', '')
+      out = out.replaceAll('(?ms)\\n\\n--- Engine preview URL[\\s\\S]*', '')
+    } catch (Throwable ignored) {
+    }
+    return out.trim()
+  }
+
+  private static final Pattern CMS_TASK_SIGNAL = Pattern.compile(
+    '(?i)(\\b(translat|localiz|publish|deploy|go\\s+live|revert|update|edit|change|rewrite|rephrase|delete|create|write|draft|generate\\s+image|draw|fix|content|templates?|template|css|scss|less|stylesheet|styling|branding|mockup|theme|layout|ftl|freemarker|component|sections?_o|writecontent|listpages|getcontent|static-assets|update_template|analyze_template)\\b|https?://|\\blook\\s+like\\b|\\bsimilar\\s+to\\b|\\bmatch(es)?\\b|\\bsite\\b|\\bwebsite\\b)'
+  )
+
+  /**
+   * {@code google.com}, {@code www.nytimes.com/…} — authors often omit {@code https://}. TLD allow-list avoids
+   * matching {@code index.xml}, {@code form-definition.xml}, etc.
+   */
+  private static final Pattern BARE_REFERENCE_HOST_PATTERN = Pattern.compile(
+    '(?i)\\b(?:www\\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])\\.)+(?:com|org|net|io|co\\.uk|co|gov|edu|dev|app|cms|ai|uk|de|fr|es|it|ca|au|nz|jp|cn|in|br|mx|blog|news|shop|store|tv|me|info|biz)\\b'
+  )
+
+  /**
+   * Broad visual / reference language — used for **longer** prompts when a URL/host is present (see
+   * {@link #isAuthoringIntentExpansionCandidate}); **short** prompts use length alone (still require CMS tooling signal).
+   */
+  private static final Pattern AUTHORING_INTENT_EXPANSION_VISUAL = Pattern.compile(
+    '(?i)(\\blook\\s+like\\b|\\bsimilar\\s+to\\b|\\bmatch(?:es)?\\b|\\bresemble\\b|\\bfeel\\s+like\\b|\\bstyled?\\s+like\\b|\\bsame\\s+(look|style)\\b|\\bvisual\\s+(transform|overhaul|refresh|redesign)\\b|\\bredesign\\b|\\bbranding\\b|\\bmockup\\b|\\btheme\\b|\\b(css|stylesheet|scss|less)\\b.*\\b(template|templates?|ftl|layout|site|page)\\b|\\b(template|templates?|ftl|layout)\\b.*\\b(css|stylesheet|theme)\\b)'
+  )
+
+  /** Author-visible text (after stripping Studio blocks) this long or shorter is treated as likely underspecified. */
+  private static final int AUTHORING_INTENT_EXPANSION_SHORT_VISIBLE_MAX_CHARS = 320
+
+  /**
+   * After stripping Studio-injected blocks, true when the author-visible text suggests CMS / repo / fetch work
+   * (used server-side to avoid false “trivial greeting” tool suppression and to recover missing {@code tool_calls}).
+   */
+  static boolean authorVisibleSuggestsCmsTooling(String fullOrUserPrompt) {
+    def v = stripStudioInjectedPromptBlocks((fullOrUserPrompt ?: '').toString())
+    return v && CMS_TASK_SIGNAL.matcher(v).find()
+  }
+
+  /**
+   * True when the author-visible text names an {@code http(s)} URL or a **likely external host** (e.g. {@code google.com}
+   * without a scheme).
+   */
+  static boolean authorVisibleContainsHttpOrLikelyExternalHost(String visible) {
+    def v = (visible ?: '').toString()
+    if (!v) {
+      return false
+    }
+    def low = v.toLowerCase(Locale.ROOT)
+    if (low.contains('http://') || low.contains('https://')) {
+      return true
+    }
+    return BARE_REFERENCE_HOST_PATTERN.matcher(v).find()
+  }
+
+  /**
+   * Eligible for the server’s **pre-tools** intent-expansion completion: either **short** author-visible text
+   * (usually a one-liner too terse for reliable tool planning) or a **longer** message that combines a URL/host with
+   * reference / visual language.
+   */
+  static boolean isAuthoringIntentExpansionCandidate(String fullPrompt) {
+    if (isTrivialNonAuthoringTurn(fullPrompt)) {
+      return false
+    }
+    def v = stripStudioInjectedPromptBlocks((fullPrompt ?: '').toString())
+    if (!v) {
+      return false
+    }
+    if (v.length() > 1600) {
+      return false
+    }
+    if (!authorVisibleSuggestsCmsTooling(fullPrompt)) {
+      return false
+    }
+    if (v.length() <= AUTHORING_INTENT_EXPANSION_SHORT_VISIBLE_MAX_CHARS) {
+      return true
+    }
+    if (!authorVisibleContainsHttpOrLikelyExternalHost(v)) {
+      return false
+    }
+    return AUTHORING_INTENT_EXPANSION_VISUAL.matcher(v).find()
+  }
+
+  /**
+   * True when the author-visible part of the prompt is a short greeting / chit-chat with
+   * no CMS authoring signal — used to force tools off for preview chat (avoids destructive
+   * tool runs when only Studio metadata was appended).
+   */
+  static boolean isTrivialNonAuthoringTurn(String fullPrompt) {
+    def visible = stripStudioInjectedPromptBlocks(fullPrompt)
+    if (!visible) {
+      return true
+    }
+    // Any CMS / site / template signal — never force tools off (check before length heuristics).
+    if (authorVisibleSuggestsCmsTooling(fullPrompt)) {
+      return false
+    }
+    if (visible.length() > 160) {
+      return false
+    }
+    def t = visible.trim().toLowerCase(Locale.ROOT)
+    if (t.matches('(?is)^(hello|hi|hey(\\s+there)?|good\\s+(morning|afternoon|evening)|thanks?|thank\\s+you|thx|ok(ay)?|yes|no|howdy|sup|yo|\\?)+[\\s!.?]*$')) {
+      return true
+    }
+    def words = t.split(/\s+/).findAll { it }
+    if (words.isEmpty() || words.size() > 6) {
+      return false
+    }
+    def first = words[0].replaceAll('^\\p{Punct}+|\\p{Punct}+$', '')
+    def openers = [
+      'hello', 'hi', 'hey', 'thanks', 'thank', 'thx', 'yo', 'sup', 'howdy',
+      'greetings', 'morning', 'evening', 'afternoon', 'ok', 'okay', 'yes', 'no', 'cheers'
+    ] as Set
+    if (openers.contains(first)) {
+      return true
+    }
+    return words.size() >= 2 && first == 'good' && ['morning', 'afternoon', 'evening'].contains(words[1])
+  }
+
+  /**
    * If {@code contentPath} is non-empty, appends a fixed block the model must honor.
    * {@code contentTypeId} is optional (e.g. from Studio preview); may be blank.
    * {@code contentTypeLabelRaw} optional Studio UI label for the open item’s type when the client supplies it.
@@ -123,6 +279,7 @@ class AuthoringPreviewContext {
     return """${base}
 
 --- Studio authoring context (when the user does not name a repository path) ---
+**This block is Studio metadata, not the author’s request.** Quoted example phrases below explain how to **resolve paths** when the author’s **own words** use relative references — **do not** treat those examples as the author having said “this page”, “update my content”, etc., unless the same words appear **above** this block in the author’s message. **Greeting-only turns** (“hello”, “thanks”, tiny chitchat with **no** ask to change the site): **do not** open with **ListContentTranslationScope**, **TranslateContentItem**, **TranslateContentBatch**, or broad **GetContent** “discovery” just because this path exists — answer in prose. **That narrow rule applies only to pure greetings.** When the author **does** ask to change the site — including **CSS**, **SCSS/LESS**, **templates / FTL**, **static-assets**, **themes**, **layout**, **“make it look like”** a **URL**, or **reference-site** styling — that **is** an authoring task: use the normal **GetContent** / **update_template** / **WriteContent** / **FetchHttpUrl** (read-only reference) / **analyze_template** flow per system policy; **do not** refuse because the work is “not content XML.”
 Current content item repository path: ${path}${ctLine}${labelLine}
 **Content-type id vs. Studio label:** Authors often name a type by its **Studio list label** while items use a repository **content-type id** (`/page/...`, `/component/...`). **Resolve** with **siteId** + **ListStudioContentTypes**, then system **Exact catalog match beats guessing** (**string equality** after the same normalization on **`label`**, **`name`**, and **`name`** tail — **no** fuzzy “closest” pick). If **exactly one** row matches, use its **`name`** as **`contentTypeId`**; if **zero** or **many**, ask the author. **Do not** invent a **content-type id** from keywords alone.
 When the author says "this page", "my page", "the current page", "this item", "update my content", or similar without specifying which file, treat that as **this** repository path. Use it as **contentPath** for update_content, GetContent, ListContentTranslationScope, WriteContent, GetContentTypeFormDefinition (when reading **that** item’s form), publish_content, revert_change, and for update_template / analyze_template when resolving the item's display-template. For **ListStudioContentTypes**, **do not** default to passing this path: call with **siteId** only first (full type catalog); pass **contentPath** only when you deliberately need folder-scoped allowed types. **Do not** call ListPagesAndComponents to guess a target when this block is present unless the user clearly refers to a different item or asks to browse or list the site.

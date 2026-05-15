@@ -378,8 +378,10 @@ async function streamChat(args) {
                     sawTerminalEvent = true;
                 }
             }
-            catch {
-                // ignore malformed chunks
+            catch (e) {
+                if (jsonLine.length > 80000) {
+                    console.warn('[AiAssistant] SSE JSON parse failed (likely oversized frame). lineChars=', jsonLine.length, e?.message ?? e);
+                }
             }
         };
         const processBufferFrames = () => {
@@ -28018,6 +28020,29 @@ function isImageUrlImportableOnDrop(src) {
     return /^data:image\//i.test(s);
 }
 
+/**
+ * Turn an inline {@code data:image/...;base64,...} into an object URL for {@code <img src>}.
+ * Avoids {@code fetch(data:...)} (blocked or flaky in some embeds) and keeps revoke scoped to the effect closure
+ * so React 18 StrictMode cannot revoke a URL that state still references.
+ */
+function dataImageToObjectUrl(dataUrl) {
+    const s = dataUrl.trim();
+    const comma = s.indexOf(',');
+    if (comma < 0 || comma >= s.length - 1)
+        return null;
+    const header = s.slice(0, comma);
+    if (!/;base64/i.test(header))
+        return null;
+    const mimeMatch = /^data:([^;]+)/i.exec(s);
+    const mime = mimeMatch?.[1]?.trim() || 'image/png';
+    const b64 = s.slice(comma + 1).replace(/\s/g, '');
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+}
 function fileNameFromUrl(src) {
     try {
         const u = new URL(src, typeof window !== 'undefined' ? window.location.origin : 'https://local');
@@ -28150,7 +28175,7 @@ function StudioDraggableImage(props) {
     const activeSiteId = useActiveSiteId();
     const effectiveSite = activeSiteId?.trim() || '';
     const [blobPreviewUrl, setBlobPreviewUrl] = useState(null);
-    /** True once the object URL is decoded so we can show it (avoids visible flicker from remote URL expiry/reloads). */
+    /** When set, {@code <img>} uses the object URL (CSP-safe) instead of the wire {@code src}. */
     const [blobDecoded, setBlobDecoded] = useState(false);
     const [blobLoading, setBlobLoading] = useState(false);
     useEffect(() => {
@@ -28161,19 +28186,56 @@ function StudioDraggableImage(props) {
     }, []);
     const trimmed = src?.trim() ?? '';
     const isRemote = trimmed ? isProbablyRemoteImageUrl(trimmed) : false;
-    /** Fetch into a blob URL for stable in-chat display and drag thumbnail; drop/import still uses {@code trimmed}. */
+    /**
+     * Prefer an object URL for {@code <img src>}: Studio CSP often allows {@code blob:} while blocking {@code data:},
+     * and revoking is tied to this effect's closure (avoids React 18 StrictMode revoking a URL state still points at).
+     * Drop/import still uses the original {@code trimmed} wire URL.
+     */
     useEffect(() => {
         const ac = new AbortController();
-        if (blobUrlRef.current) {
-            URL.revokeObjectURL(blobUrlRef.current);
+        let objectUrl = null;
+        const revokeOwned = () => {
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+                objectUrl = null;
+            }
             blobUrlRef.current = null;
-        }
+        };
         setBlobPreviewUrl(null);
         setBlobDecoded(false);
         setBlobLoading(false);
-        if (!trimmed || trimmed.startsWith('data:')) {
-            setBlobDecoded(true);
-            return () => ac.abort();
+        if (!trimmed) {
+            return () => {
+                ac.abort();
+                revokeOwned();
+            };
+        }
+        if (/^data:image\//i.test(trimmed)) {
+            setBlobLoading(true);
+            try {
+                const u = dataImageToObjectUrl(trimmed);
+                if (u && !ac.signal.aborted) {
+                    objectUrl = u;
+                    blobUrlRef.current = u;
+                    setBlobPreviewUrl(u);
+                    setBlobDecoded(true);
+                }
+                else if (!ac.signal.aborted) {
+                    setBlobDecoded(true);
+                }
+            }
+            catch {
+                if (!ac.signal.aborted) {
+                    setBlobDecoded(true);
+                }
+            }
+            if (!ac.signal.aborted) {
+                setBlobLoading(false);
+            }
+            return () => {
+                ac.abort();
+                revokeOwned();
+            };
         }
         const fetchUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://')
             ? trimmed
@@ -28194,17 +28256,16 @@ function StudioDraggableImage(props) {
             if (ac.signal.aborted)
                 return;
             const u = URL.createObjectURL(blob);
+            objectUrl = u;
             blobUrlRef.current = u;
             setBlobPreviewUrl(u);
+            setBlobDecoded(true);
             setBlobLoading(false);
         })
             .catch(() => {
             if (ac.signal.aborted)
                 return;
-            if (blobUrlRef.current) {
-                URL.revokeObjectURL(blobUrlRef.current);
-                blobUrlRef.current = null;
-            }
+            revokeOwned();
             setBlobPreviewUrl(null);
             setBlobLoading(false);
             setBlobDecoded(true);
@@ -28212,31 +28273,9 @@ function StudioDraggableImage(props) {
         return () => {
             ac.abort();
             setBlobLoading(false);
-            if (blobUrlRef.current) {
-                URL.revokeObjectURL(blobUrlRef.current);
-                blobUrlRef.current = null;
-            }
+            revokeOwned();
         };
     }, [trimmed]);
-    /** Decode blob URL off-DOM so we only swap the visible {@code src} once (reduces flicker vs loading remote URL in {@code <img>}). */
-    useEffect(() => {
-        if (!blobPreviewUrl) {
-            setBlobDecoded(false);
-            return;
-        }
-        const im = new Image();
-        im.onload = () => {
-            setBlobDecoded(true);
-        };
-        im.onerror = () => {
-            setBlobDecoded(false);
-        };
-        im.src = blobPreviewUrl;
-        return () => {
-            im.onload = null;
-            im.onerror = null;
-        };
-    }, [blobPreviewUrl]);
     const onDragStart = useCallback((e) => {
         if (!trimmed)
             return;
@@ -28328,11 +28367,169 @@ function normalizeOpenAiLiteralEscapes(input) {
         .replace(/\\t/g, '\t');
 }
 /**
+ * Micromark / GFM can fail to emit an {@code image} node for very long raw {@code data:image/...;base64,...}
+ * destinations in {@code ![alt](...)} form, leaving the literal markdown visible. CommonMark allows
+ * {@code ![alt](<...>)} so the destination is unambiguous; {@link StudioDraggableImage} still receives the
+ * inner {@code data:} URL for decode / blob preview.
+ */
+function newBlobRefId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+/**
+ * Micromark / GFM can leave {@code ![alt](data:image/...;base64,...)} as plain text when the destination is huge.
+ * Replace long {@code data:image/} destinations with short {@code studio-ai-blob-ref://<id>} URLs and record the
+ * mapping in {@code outMap} so the {@code img} renderer can pass the original wire URL to {@link StudioDraggableImage}.
+ */
+function replaceLongDataImageMarkdownWithBlobRefs(input, outMap) {
+    if (!input || input.indexOf('![') < 0 || input.indexOf('data:image') < 0) {
+        return input;
+    }
+    const parts = [];
+    let i = 0;
+    while (i < input.length) {
+        const start = input.indexOf('![', i);
+        if (start < 0) {
+            parts.push(input.slice(i));
+            break;
+        }
+        parts.push(input.slice(i, start));
+        const rb = input.indexOf(']', start + 2);
+        if (rb < 0) {
+            parts.push(input.slice(start));
+            break;
+        }
+        const op = input.indexOf('(', rb);
+        if (op !== rb + 1) {
+            parts.push(input[start]);
+            i = start + 1;
+            continue;
+        }
+        let p = op + 1;
+        while (p < input.length && /\s/.test(input[p])) {
+            p++;
+        }
+        let url = '';
+        let closeParen = -1;
+        if (input[p] === '<') {
+            const gt = input.indexOf('>', p + 1);
+            if (gt < 0) {
+                parts.push(input.slice(start));
+                break;
+            }
+            url = input.slice(p + 1, gt).trim();
+            closeParen = input.indexOf(')', gt + 1);
+        }
+        else {
+            closeParen = input.indexOf(')', p);
+            if (closeParen < 0) {
+                parts.push(input.slice(start));
+                break;
+            }
+            url = input.slice(p, closeParen).trim();
+        }
+        if (closeParen < 0) {
+            parts.push(input.slice(start));
+            break;
+        }
+        const alt = input.slice(start + 2, rb);
+        const low = url.toLowerCase();
+        if (low.startsWith('data:image/') && url.length > 256) {
+            const id = newBlobRefId();
+            outMap.set(id, url);
+            parts.push(`![${alt}](studio-ai-blob-ref://${id})`);
+        }
+        else {
+            parts.push(input.slice(start, closeParen + 1));
+        }
+        i = closeParen + 1;
+    }
+    return parts.join('');
+}
+function wrapDataImageMarkdownDestInAngleBrackets(input) {
+    if (!input || input.indexOf('![') < 0 || input.indexOf('data:image') < 0) {
+        return input;
+    }
+    const parts = [];
+    let i = 0;
+    while (i < input.length) {
+        const start = input.indexOf('![', i);
+        if (start < 0) {
+            parts.push(input.slice(i));
+            break;
+        }
+        parts.push(input.slice(i, start));
+        const rb = input.indexOf(']', start + 2);
+        if (rb < 0) {
+            parts.push(input.slice(start));
+            break;
+        }
+        const op = input.indexOf('(', rb);
+        if (op !== rb + 1) {
+            parts.push(input[start]);
+            i = start + 1;
+            continue;
+        }
+        let p = op + 1;
+        while (p < input.length && /\s/.test(input[p])) {
+            p++;
+        }
+        let url = '';
+        let closeParen = -1;
+        if (input[p] === '<') {
+            const gt = input.indexOf('>', p + 1);
+            if (gt < 0) {
+                parts.push(input.slice(start));
+                break;
+            }
+            url = input.slice(p + 1, gt).trim();
+            closeParen = input.indexOf(')', gt + 1);
+        }
+        else {
+            closeParen = input.indexOf(')', p);
+            if (closeParen < 0) {
+                parts.push(input.slice(start));
+                break;
+            }
+            url = input.slice(p, closeParen).trim();
+        }
+        if (closeParen < 0) {
+            parts.push(input.slice(start));
+            break;
+        }
+        const alt = input.slice(start + 2, rb);
+        const low = url.toLowerCase();
+        if (!low.startsWith('data:image/')) {
+            parts.push(input.slice(start, closeParen + 1));
+            i = closeParen + 1;
+            continue;
+        }
+        if (input[p] === '<') {
+            parts.push(input.slice(start, closeParen + 1));
+            i = closeParen + 1;
+            continue;
+        }
+        parts.push(`![${alt}](<${url}>)`);
+        i = closeParen + 1;
+    }
+    return parts.join('');
+}
+/**
  * Default hast-util-sanitize schema only allows {@code http(s)} on {@code src}, which strips
  * inline {@code data:image/...} from assistant markdown (e.g. {@code GenerateImage} previews).
  */
-function crafterqChatMarkdownSanitizeSchema() {
-    const srcProtocols = [...(defaultSchema.protocols?.src ?? []), 'data', 'blob'];
+function studioAiChatMarkdownSanitizeSchema() {
+    const srcProtocols = [
+        ...(defaultSchema.protocols?.src ?? []),
+        'data',
+        'blob',
+        'studio-ai-inline-image',
+        'studio-ai-blob-ref',
+        // Legacy threads / older plugin builds
+        'crafterq-tool-image'
+    ];
     return {
         ...defaultSchema,
         protocols: {
@@ -28342,7 +28539,7 @@ function crafterqChatMarkdownSanitizeSchema() {
     };
 }
 function fencedBlockSanitizeSchema() {
-    const base = crafterqChatMarkdownSanitizeSchema();
+    const base = studioAiChatMarkdownSanitizeSchema();
     return {
         ...base,
         attributes: {
@@ -28356,6 +28553,58 @@ function DraftMarkdownPreview(props) {
     const theme = useTheme();
     const sanitizeSchema = useMemo(() => fencedBlockSanitizeSchema(), []);
     const { value } = props;
+    const { md, longDataImageBlobRefMap } = useMemo(() => {
+        const map = new Map();
+        const normalized = normalizeOpenAiLiteralEscapes(value);
+        const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
+        const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
+        return { md: wrapped, longDataImageBlobRefMap: map };
+    }, [value]);
+    const mdComponents = useMemo(() => ({
+        h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 0.5, mb: 0.5 }, children: children })),
+        h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
+        h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 0.75, mb: 0.35 }, children: children })),
+        p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
+        ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
+        ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
+        li: ({ children }) => (jsx$1(Box, { component: "li", sx: { mb: 0.25, whiteSpace: 'normal' }, children: children })),
+        strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
+        a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
+        img: ({ src, alt }) => {
+            const s = src?.trim() ?? '';
+            if (s.startsWith('studio-ai-blob-ref://')) {
+                const id = s.slice('studio-ai-blob-ref://'.length);
+                const actual = longDataImageBlobRefMap.get(id);
+                if (actual) {
+                    return jsx$1(StudioDraggableImage, { src: actual, alt: alt });
+                }
+            }
+            return jsx$1(StudioDraggableImage, { src: src, alt: alt });
+        },
+        code: ({ className, children }) => {
+            const raw = String(children ?? '').replace(/\n$/, '');
+            const isInline = !className;
+            if (isInline) {
+                return (jsx$1(Box, { component: "code", sx: {
+                        px: 0.35,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        fontSize: '0.8125rem',
+                        bgcolor: theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
+                        borderRadius: 0.5
+                    }, children: raw }));
+            }
+            return (jsx$1(Box, { component: "pre", sx: {
+                    m: 0,
+                    my: 1,
+                    p: 1,
+                    overflow: 'auto',
+                    borderRadius: 1,
+                    fontSize: 12.5,
+                    bgcolor: theme.palette.mode === 'dark' ? 'grey.950' : 'grey.100',
+                    border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[300]}`
+                }, children: jsx$1("code", { children: raw }) }));
+        }
+    }), [theme, longDataImageBlobRefMap]);
     return (jsx$1(Box, { sx: {
             maxHeight: 440,
             overflow: 'auto',
@@ -28363,40 +28612,7 @@ function DraftMarkdownPreview(props) {
             bgcolor: theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
             borderRadius: 1,
             border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`
-        }, children: jsx$1(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [[rehypeSanitize, sanitizeSchema]], components: {
-                h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 0.5, mb: 0.5 }, children: children })),
-                h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
-                h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 0.75, mb: 0.35 }, children: children })),
-                p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
-                ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
-                ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
-                li: ({ children }) => (jsx$1(Box, { component: "li", sx: { mb: 0.25, whiteSpace: 'normal' }, children: children })),
-                strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
-                a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-                code: ({ className, children }) => {
-                    const raw = String(children ?? '').replace(/\n$/, '');
-                    const isInline = !className;
-                    if (isInline) {
-                        return (jsx$1(Box, { component: "code", sx: {
-                                px: 0.35,
-                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                                fontSize: '0.8125rem',
-                                bgcolor: theme.palette.mode === 'dark' ? 'grey.800' : 'grey.200',
-                                borderRadius: 0.5
-                            }, children: raw }));
-                    }
-                    return (jsx$1(Box, { component: "pre", sx: {
-                            m: 0,
-                            my: 1,
-                            p: 1,
-                            overflow: 'auto',
-                            borderRadius: 1,
-                            fontSize: 12.5,
-                            bgcolor: theme.palette.mode === 'dark' ? 'grey.950' : 'grey.100',
-                            border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[300]}`
-                        }, children: jsx$1("code", { children: raw }) }));
-                }
-            }, children: value }) }));
+        }, children: jsx$1(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [[rehypeSanitize, sanitizeSchema]], components: mdComponents, children: md }) }));
 }
 async function copyToClipboard$1(text) {
     try {
@@ -28498,9 +28714,15 @@ function CodeBlock(props) {
 function MarkdownMessage(props) {
     const theme = useTheme();
     const { text } = props;
-    const displayText = useMemo(() => normalizeOpenAiLiteralEscapes(text), [text]);
+    const { displayText, longDataImageBlobRefMap } = useMemo(() => {
+        const map = new Map();
+        const normalized = normalizeOpenAiLiteralEscapes(text);
+        const shortened = replaceLongDataImageMarkdownWithBlobRefs(normalized, map);
+        const wrapped = wrapDataImageMarkdownDestInAngleBrackets(shortened);
+        return { displayText: wrapped, longDataImageBlobRefMap: map };
+    }, [text]);
     const sanitizeSchema = useMemo(() => {
-        const base = crafterqChatMarkdownSanitizeSchema();
+        const base = studioAiChatMarkdownSanitizeSchema();
         return {
             ...base,
             attributes: {
@@ -28509,78 +28731,89 @@ function MarkdownMessage(props) {
             }
         };
     }, []);
+    const markdownComponents = useMemo(() => ({
+        h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
+        h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
+        h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
+        p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
+        ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
+        ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
+        li: ({ children }) => (jsx$1(Box, { component: "li", sx: {
+                mb: 0.25,
+                whiteSpace: 'normal',
+                '& > p': {
+                    display: 'inline',
+                    m: 0
+                },
+                '& > p + p': {
+                    display: 'block',
+                    mt: 0.5
+                }
+            }, children: children })),
+        strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
+        em: ({ children }) => (jsx$1(Box, { component: "em", sx: { fontStyle: 'italic' }, children: children })),
+        a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
+        img: ({ src, alt }) => {
+            const s = src?.trim() ?? '';
+            if (s.startsWith('studio-ai-blob-ref://')) {
+                const id = s.slice('studio-ai-blob-ref://'.length);
+                const actual = longDataImageBlobRefMap.get(id);
+                if (actual) {
+                    return jsx$1(StudioDraggableImage, { src: actual, alt: alt });
+                }
+            }
+            return jsx$1(StudioDraggableImage, { src: src, alt: alt });
+        },
+        table: ({ children }) => (jsx$1(TableContainer, { component: Paper, elevation: 0, sx: {
+                my: 1.5,
+                overflow: 'auto',
+                borderRadius: 1.5,
+                border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`,
+                background: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50]
+            }, children: jsx$1(Table$1, { size: "small", stickyHeader: true, sx: { minWidth: 280 }, children: children }) })),
+        thead: ({ children }) => jsx$1(TableHead, { children: children }),
+        tbody: ({ children }) => jsx$1(TableBody, { children: children }),
+        tr: ({ children }) => (jsx$1(TableRow, { sx: {
+                '&:last-child td, &:last-child th': { borderBottom: 0 }
+            }, children: children })),
+        th: ({ children }) => (jsx$1(TableCell, { component: "th", scope: "col", sx: {
+                fontWeight: 700,
+                py: 1,
+                px: 1.5,
+                borderBottom: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
+                background: theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[100],
+                color: theme.palette.text.primary,
+                fontSize: '0.8125rem'
+            }, children: children })),
+        td: ({ children }) => (jsx$1(TableCell, { sx: {
+                py: 1,
+                px: 1.5,
+                borderBottom: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`,
+                fontSize: '0.8125rem'
+            }, children: children })),
+        code: ({ className, children }) => {
+            const raw = String(children ?? '');
+            const isInline = !className;
+            if (isInline) {
+                return (jsx$1(Box, { component: "code", sx: {
+                        px: 0.5,
+                        py: 0.1,
+                        borderRadius: 0.75,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        fontSize: 12.5,
+                        background: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[100],
+                        border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`
+                    }, children: raw }));
+            }
+            const match = /language-(\w+)/.exec(className || '');
+            const language = match?.[1];
+            return jsx$1(CodeBlock, { language: language, value: raw.replace(/\n$/, '') });
+        }
+    }), [theme, longDataImageBlobRefMap]);
     return (jsx$1(Box, { sx: {
             '& :first-of-type': { mt: 0 },
             '& :last-of-type': { mb: 0 }
-        }, children: jsx$1(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [[rehypeSanitize, sanitizeSchema]], components: {
-                h1: ({ children }) => (jsx$1(Typography, { variant: "h6", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
-                h2: ({ children }) => (jsx$1(Typography, { variant: "subtitle1", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
-                h3: ({ children }) => (jsx$1(Typography, { variant: "subtitle2", sx: { fontWeight: 700, mt: 1, mb: 0.5 }, children: children })),
-                p: ({ children }) => (jsx$1(Typography, { variant: "body2", sx: { whiteSpace: 'pre-wrap', mb: 0.75 }, children: children })),
-                ul: ({ children }) => (jsx$1(Box, { component: "ul", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
-                ol: ({ children }) => (jsx$1(Box, { component: "ol", sx: { m: 0, pl: 2.2, mb: 0.75 }, children: children })),
-                li: ({ children }) => (jsx$1(Box, { component: "li", sx: {
-                        mb: 0.25,
-                        whiteSpace: 'normal',
-                        '& > p': {
-                            display: 'inline',
-                            m: 0
-                        },
-                        '& > p + p': {
-                            display: 'block',
-                            mt: 0.5
-                        }
-                    }, children: children })),
-                strong: ({ children }) => (jsx$1(Box, { component: "strong", sx: { fontWeight: 700 }, children: children })),
-                em: ({ children }) => (jsx$1(Box, { component: "em", sx: { fontStyle: 'italic' }, children: children })),
-                a: ({ href, children }) => (jsx$1(Box, { component: "a", href: href, target: "_blank", rel: "noreferrer", sx: { color: theme.palette.primary.main }, children: children })),
-                img: ({ src, alt }) => (jsx$1(StudioDraggableImage, { src: src, alt: alt })),
-                table: ({ children }) => (jsx$1(TableContainer, { component: Paper, elevation: 0, sx: {
-                        my: 1.5,
-                        overflow: 'auto',
-                        borderRadius: 1.5,
-                        border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`,
-                        background: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50]
-                    }, children: jsx$1(Table$1, { size: "small", stickyHeader: true, sx: { minWidth: 280 }, children: children }) })),
-                thead: ({ children }) => jsx$1(TableHead, { children: children }),
-                tbody: ({ children }) => jsx$1(TableBody, { children: children }),
-                tr: ({ children }) => (jsx$1(TableRow, { sx: {
-                        '&:last-child td, &:last-child th': { borderBottom: 0 }
-                    }, children: children })),
-                th: ({ children }) => (jsx$1(TableCell, { component: "th", scope: "col", sx: {
-                        fontWeight: 700,
-                        py: 1,
-                        px: 1.5,
-                        borderBottom: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
-                        background: theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[100],
-                        color: theme.palette.text.primary,
-                        fontSize: '0.8125rem'
-                    }, children: children })),
-                td: ({ children }) => (jsx$1(TableCell, { sx: {
-                        py: 1,
-                        px: 1.5,
-                        borderBottom: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`,
-                        fontSize: '0.8125rem'
-                    }, children: children })),
-                code: ({ className, children }) => {
-                    const raw = String(children ?? '');
-                    const isInline = !className;
-                    if (isInline) {
-                        return (jsx$1(Box, { component: "code", sx: {
-                                px: 0.5,
-                                py: 0.1,
-                                borderRadius: 0.75,
-                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                                fontSize: 12.5,
-                                background: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[100],
-                                border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[800] : theme.palette.grey[200]}`
-                            }, children: raw }));
-                    }
-                    const match = /language-(\w+)/.exec(className || '');
-                    const language = match?.[1];
-                    return jsx$1(CodeBlock, { language: language, value: raw.replace(/\n$/, '') });
-                }
-            }, children: displayText }) }));
+        }, children: jsx$1(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [[rehypeSanitize, sanitizeSchema]], components: markdownComponents, children: displayText }) }));
 }
 
 function getSpeechRecognitionCtor() {
@@ -28724,8 +28957,14 @@ function dedupeAssistantPostToolsMarkdown(preTools, tail) {
     if (!/^##\s*plan\b/im.test(pre))
         return t0;
     const nlExec = /\n##\s*Plan Execution\b/im.exec(t0);
-    if (nlExec)
+    if (nlExec) {
+        const prefix = t0.slice(0, nlExec.index);
+        // Do not drop intro / markdown images that appear before "## Plan Execution" (dedupe is plan-shape only).
+        if (/!\[[^\]]*\]\([^)]+\)|studio-ai-inline-image:|crafterq-tool-image:|data:image\//i.test(prefix)) {
+            return t0;
+        }
         return t0.slice(nlExec.index + 1).trimStart();
+    }
     if (/^##\s*Plan Execution\b/im.test(t0))
         return t0.trimStart();
     const nlPlan = /\n##\s*Plan\b/im.exec(t0);
@@ -29384,10 +29623,34 @@ const cqGenerateImageAuraShift = keyframes({
     '100%': { backgroundPosition: '100% 60%' }
 });
 /**
+ * True once the server emitted a terminal {@code GenerateImage} tool-progress row (✅ finished, ❌, or ⚠️).
+ * Scans all lines so a later debug/flatten block mentioning GenerateImage cannot keep the shimmer stuck on.
+ */
+function generateImageToolSettledInToolProgress(toolProgressText) {
+    if (!toolProgressText?.trim())
+        return false;
+    for (const raw of toolProgressText.split('\n')) {
+        const L = raw.trim();
+        if (!L.includes('🛠️') || !L.includes('GenerateImage') || !/\*\*GenerateImage\*\*/.test(L))
+            continue;
+        if (/\bfinished\b/i.test(L))
+            return true;
+        if (/❌\s*\*\*GenerateImage\*\*/.test(L))
+            return true;
+        if (/⚠️\s*\*\*GenerateImage\*\*/.test(L))
+            return true;
+        if (/✅\s*\*\*GenerateImage\*\*/.test(L))
+            return true;
+    }
+    return false;
+}
+/**
  * True when the latest server-injected {@code GenerateImage} line is the running “…” row, not {@code finished} /
  * warning / error.
  */
 function isGenerateImageRunRowActive(toolProgressText) {
+    if (generateImageToolSettledInToolProgress(toolProgressText))
+        return false;
     const s = toolProgressText?.trim();
     if (!s?.includes('GenerateImage'))
         return false;
@@ -29400,7 +29663,8 @@ function isGenerateImageRunRowActive(toolProgressText) {
             return false;
         if (L.includes('\u26A0\uFE0F') || L.includes('\u274C'))
             return false;
-        if (/\*\*GenerateImage\*\*/.test(L) && (/…/.test(L) || /\.{3}/.test(L)))
+        // Server uses Unicode ellipsis U+2026 in " …\n"; `/…/` in JS is three wildcards — must match U+2026 or ASCII "..."
+        if (/\*\*GenerateImage\*\*/.test(L) && (/\u2026/.test(L) || /\.{3}/.test(L)))
             return true;
         return false;
     }
@@ -29412,14 +29676,16 @@ function isGenerateImageRunRowActive(toolProgressText) {
 function hasCompleteMarkdownInlineImage(markdown) {
     if (!markdown?.trim())
         return false;
-    const re = /!\[[^\]]*\]\(([^)]+)\)/g;
+    // Destination may be `<data:image/...>` (CommonMark) or bare `data:image/...`; bare `[^)]+` stops at first `)`.
+    const re = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)]+))\s*\)/g;
     let m;
     while ((m = re.exec(markdown)) !== null) {
-        const url = m[1].trim();
+        const url = (m[1] || m[2] || '').trim();
         if (/^data:image\//i.test(url) && url.length > 120)
             return true;
         if (/^https?:\/\//i.test(url) && url.length > 12)
             return true;
+        // studio-ai-inline-image / crafterq-tool-image are server-expanded placeholders — not a loadable image until expanded.
     }
     return false;
 }

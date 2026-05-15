@@ -62,7 +62,7 @@ class PluginRagVectorRegistry {
 
   /** Compact kernel for {@code replace} mode — leading slice of full authoring instructions (classpath overrides apply). */
   static String ragKernelFromAuthoringInstructions() {
-    String full = ToolPrompts.getOPENAI_AUTHORING_INSTRUCTIONS()
+    String full = ToolPrompts.getLlm_AUTHORING_INSTRUCTIONS()
     int max = resolveKernelMaxChars()
     if (full.length() <= max) {
       return full
@@ -82,7 +82,7 @@ class PluginRagVectorRegistry {
   }
 
   /**
-   * When native tools are on, optionally shrink or augment {@code authoringCore} (full {@link ToolPrompts#getOPENAI_AUTHORING_INSTRUCTIONS()}).
+   * When native tools are on, optionally shrink or augment {@code authoringCore} (full {@link ToolPrompts#getLlm_AUTHORING_INSTRUCTIONS()}).
    */
   static String adjustAuthoringCore(
     String authoringCore,
@@ -491,10 +491,10 @@ class PluginRagVectorRegistry {
 
   static String buildCorpusText() {
     StringBuilder sb = new StringBuilder(256_000)
-    appendSection(sb, 'GENERAL_OPENAI_AUTHORING_INSTRUCTIONS', ToolPrompts.getOPENAI_AUTHORING_INSTRUCTIONS())
-    appendSection(sb, 'GENERAL_OPENAI_USER_MESSAGE_TOOLS_POLICY_PREFIX', ToolPrompts.getOPENAI_USER_MESSAGE_TOOLS_POLICY_PREFIX())
-    appendSection(sb, 'GENERAL_OPENAI_CHAT_ONLY_SYSTEM', ToolPrompts.getOPENAI_CHAT_ONLY_SYSTEM())
-    appendSection(sb, 'GENERAL_OPENAI_FORM_ENGINE_SUPPRESS_REPO_WRITES', ToolPrompts.getOPENAI_FORM_ENGINE_SUPPRESS_REPO_WRITES())
+    appendSection(sb, 'GENERAL_LLM_AUTHORING_INSTRUCTIONS', ToolPrompts.getLlm_AUTHORING_INSTRUCTIONS())
+    appendSection(sb, 'GENERAL_LLM_USER_MESSAGE_TOOLS_POLICY_PREFIX', ToolPrompts.getLlm_USER_MESSAGE_TOOLS_POLICY_PREFIX())
+    appendSection(sb, 'GENERAL_LLM_CHAT_ONLY_SYSTEM', ToolPrompts.getLlm_CHAT_ONLY_SYSTEM())
+    appendSection(sb, 'GENERAL_LLM_FORM_ENGINE_SUPPRESS_REPO_WRITES', ToolPrompts.getLlm_FORM_ENGINE_SUPPRESS_REPO_WRITES())
     appendSection(sb, 'GENERAL_XML_REPAIR_REMINDER_AFTER_BAD_READ', ToolPrompts.getXML_REPAIR_REMINDER_AFTER_BAD_READ())
     appendSection(sb, 'CMS_CONTENT_UPDATE_CONTENT', ToolPrompts.getUPDATE_CONTENT())
     appendSection(sb, 'CMS_CONTENT_UPDATE_CONTENT_FORM_ENGINE', ToolPrompts.getUPDATE_CONTENT_FORM_ENGINE())

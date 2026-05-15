@@ -410,13 +410,13 @@ All paths in this section are under the **site** Git sandbox (`config/studio/scr
 config/studio/scripts/aiassistant/prompts/<KEY>.md
 ```
 
-**`<KEY>`** is the exact **prompt key** passed to `ToolPrompts.p('KEY', …)` (listed in `ToolPromptsOverrideCatalog.KEYS`). Files use a **purpose prefix**: **`GENERAL_`** (OpenAI policy / cross-cutting), **`CMS_CONTENT_`** (repository content, translate, preview, publish), **`CMS_DEVELOPMENT_`** (templates, content types, analyze), **`CRAFTERQ_`** (CrafterQ SME and hosted-chat prompts). The file on disk is **`<KEY>.md`**.
+**`<KEY>`** is the exact **prompt key** passed to `ToolPrompts.p('KEY', …)` (listed in `ToolPromptsOverrideCatalog.KEYS`). Files use a **purpose prefix**: **`GENERAL_`** (LLM / native-tools policy and other cross-cutting Studio text), **`CMS_CONTENT_`** (repository content, translate, preview, publish), **`CMS_DEVELOPMENT_`** (templates, content types, analyze), **`CRAFTERQ_`** (CrafterQ SME and hosted-chat prompts). The file on disk is **`<KEY>.md`**.
 
 | Example `<KEY>.md` |
 |--------------------|
-| `GENERAL_OPENAI_AUTHORING_INSTRUCTIONS.md` |
+| `GENERAL_LLM_AUTHORING_INSTRUCTIONS.md` |
 | `CMS_CONTENT_DESC_GET_CONTENT.md` |
-| `GENERAL_OPENAI_CHAT_ONLY_SYSTEM.md` |
+| `GENERAL_LLM_CHAT_ONLY_SYSTEM.md` |
 
 | Rule | Detail |
 |------|--------|
@@ -426,9 +426,11 @@ config/studio/scripts/aiassistant/prompts/<KEY>.md
 
 **Finding keys:** Search **`ToolPrompts.groovy`** in this plugin repo for `p('SOME_KEY',` — the first argument is the filename stem (`SOME_KEY.md`). The canonical list is **`ToolPromptsOverrideCatalog.groovy`** (`KEYS`).
 
-**Upgrades:** If your site still has overrides under the **old** names (e.g. `OPENAI_AUTHORING_INSTRUCTIONS.md`, `DESC_GET_CONTENT.md`), **rename** those files to the new prefixed keys (e.g. `GENERAL_OPENAI_AUTHORING_INSTRUCTIONS.md`, `CMS_CONTENT_DESC_GET_CONTENT.md`) or Studio will keep using the built‑in defaults.
+**Upgrades:** If your site still has overrides under **legacy** names, **rename** files to the keys in `ToolPromptsOverrideCatalog.KEYS` (e.g. `DESC_GET_CONTENT.md` → `CMS_CONTENT_DESC_GET_CONTENT.md`). Authoring policy overrides use **`GENERAL_LLM_*.md`** (e.g. `GENERAL_LLM_AUTHORING_INSTRUCTIONS.md`); the filename stem must match the catalog key exactly.
 
-**Example — tighten the main OpenAI authoring system prompt** (file on disk: `config/studio/scripts/aiassistant/prompts/GENERAL_OPENAI_AUTHORING_INSTRUCTIONS.md`):
+**Overlap (`GENERAL_LLM_AUTHORING_INSTRUCTIONS` vs `GENERAL_LLM_USER_MESSAGE_TOOLS_POLICY_PREFIX`):** The large **system** prompt holds full workflow and edge cases. The shorter **user-prefix** repeats the highest-signal plan/tool rules because many models weight the start of the user message heavily. When editing overrides, change **both** only if you need the same wording in both places; otherwise adjust the system file for detail and the user-prefix file for “above the fold” reminders.
+
+**Example — tighten the main authoring system prompt** (file on disk: `config/studio/scripts/aiassistant/prompts/GENERAL_LLM_AUTHORING_INSTRUCTIONS.md`):
 
 ```markdown
 ## OUR STUDIO POLICY (override)

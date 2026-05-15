@@ -171,7 +171,15 @@ try {
   def omitTools = AuthoringPreviewContext.isTruthy(body?.omitTools)
   def enableToolsRequested = AuthoringPreviewContext.parseEnableTools(body?.enableTools)
   def enableTools = omitTools ? false : enableToolsRequested
-  log.info("STREAM endpoint hit: agentId={} llm={} promptLen={} chatIdPresent={} siteId={} contentPathPresent={} previewTokenResolvedPresent={} formEngineSurface={} formEngineClientJsonApply={} formEngineItemPath={} fullSuppressWritesFallback={} omitTools={} enableToolsRequested={} enableToolsEffective={}", agentId, llm, (promptForOrchestration ?: '').length(), (chatId != null && chatId.toString().trim().length() > 0), siteIdBody ?: params?.siteId, (previewPathForLog ? true : false), previewTokenResolvedPresent, formEngineForLog, clientJsonApplyForLog, formEngineItemNorm ?: '(none)', fullSuppressWritesFallback, omitTools, enableToolsRequested, enableTools)
+  def enableToolsBeforeTrivial = enableTools
+  if (!formEngineForLog && enableTools && AuthoringPreviewContext.isTrivialNonAuthoringTurn(promptForOrchestration?.toString() ?: '')) {
+    enableTools = false
+    log.info(
+      'STREAM endpoint: trivial non-authoring turn — forcing enableTools=false (authorVisibleLen={})',
+      AuthoringPreviewContext.stripStudioInjectedPromptBlocks(promptForOrchestration?.toString() ?: '').length()
+    )
+  }
+  log.info("STREAM endpoint hit: agentId={} llm={} promptLen={} chatIdPresent={} siteId={} contentPathPresent={} previewTokenResolvedPresent={} formEngineSurface={} formEngineClientJsonApply={} formEngineItemPath={} fullSuppressWritesFallback={} omitTools={} enableToolsRequested={} enableToolsEffective={} trivialNoToolsOverride={}", agentId, llm, (promptForOrchestration ?: '').length(), (chatId != null && chatId.toString().trim().length() > 0), siteIdBody ?: params?.siteId, (previewPathForLog ? true : false), previewTokenResolvedPresent, formEngineForLog, clientJsonApplyForLog, formEngineItemNorm ?: '(none)', fullSuppressWritesFallback, omitTools, enableToolsRequested, enableTools, (enableToolsBeforeTrivial && !enableTools))
 
   // Default remote hosted chat adapter requires agentId; in-studio Spring AI paths (tools-loop chat, Claude, script) may omit it.
   if (!agentId && StudioAiLlmKind.isCrafterQRemoteApi(llmNorm)) {

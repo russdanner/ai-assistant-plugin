@@ -349,8 +349,14 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
         if (m && (m.completed === true || m.error === true)) {
           sawTerminalEvent = true;
         }
-      } catch {
-        // ignore malformed chunks
+      } catch (e) {
+        if (jsonLine.length > 80_000) {
+          console.warn(
+            '[AiAssistant] SSE JSON parse failed (likely oversized frame). lineChars=',
+            jsonLine.length,
+            (e as Error)?.message ?? e
+          );
+        }
       }
     };
 

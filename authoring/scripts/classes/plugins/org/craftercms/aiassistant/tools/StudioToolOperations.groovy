@@ -2835,6 +2835,40 @@ class StudioToolOperations {
   }
 
   /**
+   * Collects {@code rel=stylesheet} {@code <link href="…">} targets from an HTML prefix (either attribute order)
+   * so {@link #fetchHttpUrl} tool JSON lists real CSS entry points even when {@code body} is truncated later on the wire.
+   */
+  private static List<String> httpFetchCollectStylesheetHrefs(String html, int max) {
+    if (html == null || max < 1) {
+      return []
+    }
+    int cap = Math.min(html.length(), 400_000)
+    String s = html.substring(0, cap)
+    Set<String> seen = new LinkedHashSet<>()
+    List<String> out = []
+    def push = { String href ->
+      if (!href) {
+        return
+      }
+      String t = href.trim()
+      if (!t || seen.contains(t)) {
+        return
+      }
+      seen.add(t)
+      out.add(t)
+    }
+    def m1 = (s =~ /(?is)<link[^>]+href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/)
+    while (m1.find() && out.size() < max) {
+      push(m1.group(1))
+    }
+    def m2 = (s =~ /(?is)<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/)
+    while (m2.find() && out.size() < max) {
+      push(m2.group(1))
+    }
+    return out
+  }
+
+  /**
    * GET an http(s) URL and return response body as text (HTML, CSS, JSON, etc.) for reference / redesign workflows.
    * <p>SSRF: only public hosts; blocks loopback, link-local, site-local, CGNAT, ULA; optional
    * {@code crafterq.httpFetch.allowedHostSuffixes}. Redirects are followed manually (max 5) with validation each hop.
@@ -2955,6 +2989,16 @@ class StudioToolOperations {
         } catch (Throwable ignored) {
           finalUrl = currentUri.toString()
         }
+        def ctLower = (ct ?: '').toString().toLowerCase(Locale.ROOT)
+        boolean looksHtml =
+          ctLower.contains('html') ||
+            body.contains('<html') ||
+            body.contains('<HTML') ||
+            body.contains('<head') ||
+            body.contains('<HEAD') ||
+            body.contains('<link') ||
+            body.contains('<LINK')
+        List stylesheetHrefs = looksHtml ? httpFetchCollectStylesheetHrefs(body, 48) : []
         return [
           action    : 'fetch_http_url',
           ok        : status >= 200 && status < 300,
@@ -2964,6 +3008,7 @@ class StudioToolOperations {
           charCount : body.length(),
           truncated : truncated,
           body      : body,
+          stylesheetHrefs: stylesheetHrefs,
           redirects : redirectCount,
           message   : status >= 200 && status < 300
             ? 'Fetched URL body as UTF-8 text.'

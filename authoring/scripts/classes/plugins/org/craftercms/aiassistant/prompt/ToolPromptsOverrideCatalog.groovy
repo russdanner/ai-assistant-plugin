@@ -3,7 +3,7 @@ package plugins.org.craftercms.aiassistant.prompt
 /**
  * Keys accepted for site overrides {@code /scripts/aiassistant/prompts/&lt;KEY&gt;.md}
  * (must match {@link ToolPrompts} {@code p('KEY', ...)} usages).
- * <p>Prefixes: {@code GENERAL_} (cross-cutting Studio / OpenAI policy), {@code CMS_CONTENT_} (repository content,
+ * <p>Prefixes: {@code GENERAL_} (cross-cutting Studio / LLM policy), {@code CMS_CONTENT_} (repository content,
  * translate, preview, publish), {@code CMS_DEVELOPMENT_} (templates, content types, analyze), {@code CRAFTERQ_}
  * (CrafterQ SME and hosted-chat tool prompts).</p>
  * <p>When adding a new {@code p('NEW_KEY', ...)} in {@link ToolPrompts}, append here.</p>
@@ -55,14 +55,15 @@ final class ToolPromptsOverrideCatalog {
     'GENERAL_DESC_FETCH_HTTP_URL',
     'GENERAL_DESC_GENERATE_TEXT_NO_TOOLS',
     'GENERAL_DESC_QUERY_EXPERT_GUIDANCE',
-    'GENERAL_OPENAI_AUTHORING_INSTRUCTIONS',
-    'GENERAL_OPENAI_CHAT_ONLY_SYSTEM',
-    'GENERAL_OPENAI_FORM_ENGINE_SUPPRESS_REPO_WRITES',
-    'GENERAL_OPENAI_PLAN_GATE_ASSISTANT_ACK',
-    'GENERAL_OPENAI_PLAN_GATE_USER_RETRY',
-    'GENERAL_OPENAI_PLAN_ONLY_PHASE_SYSTEM',
-    'GENERAL_OPENAI_POST_EXECUTION_REVIEW_SYSTEM',
-    'GENERAL_OPENAI_USER_MESSAGE_TOOLS_POLICY_PREFIX',
+    'GENERAL_LLM_AUTHORING_INSTRUCTIONS',
+    'GENERAL_LLM_AUTHORING_INTENT_EXPANSION_SYSTEM',
+    'GENERAL_LLM_CHAT_ONLY_SYSTEM',
+    'GENERAL_LLM_FORM_ENGINE_SUPPRESS_REPO_WRITES',
+    'GENERAL_LLM_PLAN_GATE_ASSISTANT_ACK',
+    'GENERAL_LLM_PLAN_GATE_USER_RETRY',
+    'GENERAL_LLM_PLAN_ONLY_PHASE_SYSTEM',
+    'GENERAL_LLM_POST_EXECUTION_REVIEW_SYSTEM',
+    'GENERAL_LLM_USER_MESSAGE_TOOLS_POLICY_PREFIX',
     'GENERAL_XML_REPAIR_REMINDER_AFTER_BAD_READ'
   ].asImmutable()
 }

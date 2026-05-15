@@ -13,6 +13,28 @@ import type { SearchItem } from '@craftercms/studio-ui/models/Search';
 import useActiveSiteId from '@craftercms/studio-ui/hooks/useActiveSiteId';
 import { isProbablyRemoteImageUrl } from './aiAssistantImportApi';
 
+/**
+ * Turn an inline {@code data:image/...;base64,...} into an object URL for {@code <img src>}.
+ * Avoids {@code fetch(data:...)} (blocked or flaky in some embeds) and keeps revoke scoped to the effect closure
+ * so React 18 StrictMode cannot revoke a URL that state still references.
+ */
+function dataImageToObjectUrl(dataUrl: string): string | null {
+  const s = dataUrl.trim();
+  const comma = s.indexOf(',');
+  if (comma < 0 || comma >= s.length - 1) return null;
+  const header = s.slice(0, comma);
+  if (!/;base64/i.test(header)) return null;
+  const mimeMatch = /^data:([^;]+)/i.exec(s);
+  const mime = mimeMatch?.[1]?.trim() || 'image/png';
+  const b64 = s.slice(comma + 1).replace(/\s/g, '');
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: mime }));
+}
+
 function fileNameFromUrl(src: string): string {
   try {
     const u = new URL(src, typeof window !== 'undefined' ? window.location.origin : 'https://local');
@@ -161,7 +183,7 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
   const effectiveSite = activeSiteId?.trim() || '';
 
   const [blobPreviewUrl, setBlobPreviewUrl] = useState<string | null>(null);
-  /** True once the object URL is decoded so we can show it (avoids visible flicker from remote URL expiry/reloads). */
+  /** When set, {@code <img>} uses the object URL (CSP-safe) instead of the wire {@code src}. */
   const [blobDecoded, setBlobDecoded] = useState(false);
   const [blobLoading, setBlobLoading] = useState(false);
 
@@ -175,20 +197,57 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
   const trimmed = src?.trim() ?? '';
   const isRemote = trimmed ? isProbablyRemoteImageUrl(trimmed) : false;
 
-  /** Fetch into a blob URL for stable in-chat display and drag thumbnail; drop/import still uses {@code trimmed}. */
+  /**
+   * Prefer an object URL for {@code <img src>}: Studio CSP often allows {@code blob:} while blocking {@code data:},
+   * and revoking is tied to this effect's closure (avoids React 18 StrictMode revoking a URL state still points at).
+   * Drop/import still uses the original {@code trimmed} wire URL.
+   */
   useEffect(() => {
     const ac = new AbortController();
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current);
+    let objectUrl: string | null = null;
+    const revokeOwned = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }
       blobUrlRef.current = null;
-    }
+    };
+
     setBlobPreviewUrl(null);
     setBlobDecoded(false);
     setBlobLoading(false);
 
-    if (!trimmed || trimmed.startsWith('data:')) {
-      setBlobDecoded(true);
-      return () => ac.abort();
+    if (!trimmed) {
+      return () => {
+        ac.abort();
+        revokeOwned();
+      };
+    }
+
+    if (/^data:image\//i.test(trimmed)) {
+      setBlobLoading(true);
+      try {
+        const u = dataImageToObjectUrl(trimmed);
+        if (u && !ac.signal.aborted) {
+          objectUrl = u;
+          blobUrlRef.current = u;
+          setBlobPreviewUrl(u);
+          setBlobDecoded(true);
+        } else if (!ac.signal.aborted) {
+          setBlobDecoded(true);
+        }
+      } catch {
+        if (!ac.signal.aborted) {
+          setBlobDecoded(true);
+        }
+      }
+      if (!ac.signal.aborted) {
+        setBlobLoading(false);
+      }
+      return () => {
+        ac.abort();
+        revokeOwned();
+      };
     }
 
     const fetchUrl =
@@ -211,16 +270,15 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
       .then((blob) => {
         if (ac.signal.aborted) return;
         const u = URL.createObjectURL(blob);
+        objectUrl = u;
         blobUrlRef.current = u;
         setBlobPreviewUrl(u);
+        setBlobDecoded(true);
         setBlobLoading(false);
       })
       .catch(() => {
         if (ac.signal.aborted) return;
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-          blobUrlRef.current = null;
-        }
+        revokeOwned();
         setBlobPreviewUrl(null);
         setBlobLoading(false);
         setBlobDecoded(true);
@@ -229,32 +287,9 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
     return () => {
       ac.abort();
       setBlobLoading(false);
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
+      revokeOwned();
     };
   }, [trimmed]);
-
-  /** Decode blob URL off-DOM so we only swap the visible {@code src} once (reduces flicker vs loading remote URL in {@code <img>}). */
-  useEffect(() => {
-    if (!blobPreviewUrl) {
-      setBlobDecoded(false);
-      return;
-    }
-    const im = new Image();
-    im.onload = () => {
-      setBlobDecoded(true);
-    };
-    im.onerror = () => {
-      setBlobDecoded(false);
-    };
-    im.src = blobPreviewUrl;
-    return () => {
-      im.onload = null;
-      im.onerror = null;
-    };
-  }, [blobPreviewUrl]);
 
   const onDragStart = useCallback(
     (e: React.DragEvent) => {
