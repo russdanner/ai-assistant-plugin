@@ -3520,16 +3520,18 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       return
     }
     try {
-      if (!tryClaimOpenAiToolsTerminalEmit(terminalEmitted)) {
-        return
-      }
       synchronized (out) {
+        // Always emit the final assistant text chunk: only the terminal `metadata.completed` frame is
+        // CAS-guarded (servlet timeout/recovery may have claimed first). Skipping the text here would drop a
+        // valid reply on an otherwise live connection — duplicate completed is what we must avoid.
         String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
         out.write(("data: ${JsonOutput.toJson([text: finalChunk, metadata: [:]])}\n\n").getBytes(StandardCharsets.UTF_8))
-        def doneMeta = new LinkedHashMap()
-        doneMeta.completed = true
-        mergeToolPipelineWallMsIntoMetadata(doneMeta, toolTimingCtx)
-        out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
+        if (tryClaimOpenAiToolsTerminalEmit(terminalEmitted)) {
+          def doneMeta = new LinkedHashMap()
+          doneMeta.completed = true
+          mergeToolPipelineWallMsIntoMetadata(doneMeta, toolTimingCtx)
+          out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
+        }
         out.flush()
       }
     } catch (Throwable io) {
