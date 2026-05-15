@@ -10,8 +10,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Static in-memory state for autonomous assistants (prototype — JVM lifetime only).
- * <p>{@link #getState} returns a defensive copy; updates go through {@link #putState}, {@link #mergeState}, or
- * task helpers that use atomic {@link java.util.concurrent.ConcurrentHashMap} operations.</p>
+ * <p>{@link #getState} and related accessors return defensive <strong>deep</strong> copies (maps/lists nested under
+ * {@code humanTasks}, {@code executionHistory}, {@code pastRunReports}, etc.); updates go through {@link #putState},
+ * {@link #mergeState}, or task helpers that use atomic {@link java.util.concurrent.ConcurrentHashMap} operations.</p>
  */
 final class AutonomousAssistantStateStore {
 
@@ -19,11 +20,32 @@ final class AutonomousAssistantStateStore {
 
   private AutonomousAssistantStateStore() {}
 
-  private static Map newAgentShell(String id, Map defaults) {
-    Map m = new LinkedHashMap()
-    if (defaults) {
-      m.putAll(defaults)
+  private static Object copyValue(Object value) {
+    if (value instanceof Map) {
+      Map out = new LinkedHashMap<>()
+      ((Map) value).each { k, v -> out.put(k, copyValue(v)) }
+      return out
     }
+    if (value instanceof List) {
+      List out = new ArrayList<>()
+      for (Object v : (List) value) {
+        out.add(copyValue(v))
+      }
+      return out
+    }
+    return value
+  }
+
+  private static Map copyState(Map state) {
+    Map out = new LinkedHashMap<>()
+    if (state != null) {
+      state.each { k, v -> out.put(k, copyValue(v)) }
+    }
+    return out
+  }
+
+  private static Map newAgentShell(String id, Map defaults) {
+    Map m = defaults ? copyState(defaults) : new LinkedHashMap<>()
     m.put('agentId', id)
     if (!m.containsKey('status')) {
       m.put('status', AutonomousAssistantStatus.WAITING)
@@ -46,23 +68,24 @@ final class AutonomousAssistantStateStore {
     }
     String id = fullAgentId.trim()
     Map live = BY_AGENT_ID.computeIfAbsent(id, { k -> newAgentShell(k, defaults) })
-    return live != null ? new LinkedHashMap(live) : null
+    return live != null ? copyState(live) : null
   }
 
   static Map getState(String fullAgentId) {
     Map st = fullAgentId?.trim() ? BY_AGENT_ID.get(fullAgentId.trim()) : null
-    return st != null ? new LinkedHashMap(st) : null
+    return st != null ? copyState(st) : null
   }
 
   static void putState(String fullAgentId, Map state) {
     if (!fullAgentId?.trim() || state == null) {
       return
     }
-    BY_AGENT_ID.put(fullAgentId.trim(), new LinkedHashMap(state))
+    BY_AGENT_ID.put(fullAgentId.trim(), copyState(state))
   }
 
   /**
-   * Shallow-merges {@code patch} into stored state in one atomic step (avoids lost updates vs in-place mutation).
+   * Merges {@code patch} into stored state in one atomic step (top-level keys from {@code patch}; each value is
+   * deep-copied so nested maps/lists are not shared with the caller). Avoids lost updates vs in-place mutation.
    */
   static void mergeState(String fullAgentId, Map patch) {
     if (!fullAgentId?.trim() || patch == null) {
@@ -70,8 +93,8 @@ final class AutonomousAssistantStateStore {
     }
     String id = fullAgentId.trim()
     BY_AGENT_ID.compute(id) { k, cur ->
-      Map base = (cur instanceof Map) ? new LinkedHashMap(cur) : newAgentShell(k, [:])
-      base.putAll(patch)
+      Map base = (cur instanceof Map) ? copyState(cur) : newAgentShell(k, [:])
+      patch.each { ek, ev -> base.put(ek, copyValue(ev)) }
       return base
     }
   }
@@ -95,7 +118,7 @@ final class AutonomousAssistantStateStore {
   }
 
   /**
-   * Shallow copy of all in-memory state maps for this site (keys are full agent ids, {@code siteId + '-'}…).
+   * Deep copy of all in-memory state maps for this site (keys are full agent ids, {@code siteId + '-'}…).
    * Call before {@link AutonomousAssistantSupervisor#clearSite} so sync can restore terminal statuses.
    */
   static Map<String, Map> snapshotStatesForSite(String siteId) {
@@ -108,7 +131,7 @@ final class AutonomousAssistantStateStore {
       if (k != null && k.startsWith(p)) {
         Map st = BY_AGENT_ID.get(k)
         if (st != null) {
-          out.put(k, new LinkedHashMap(st))
+          out.put(k, copyState(st))
         }
       }
     }
@@ -130,32 +153,28 @@ final class AutonomousAssistantStateStore {
       if (!(cur instanceof Map)) {
         return cur
       }
-      Map st = new LinkedHashMap(cur)
-      List<Map> tasks = new ArrayList<>()
+      Map st = copyState(cur)
       Object raw = st.get('humanTasks')
       if (raw instanceof List) {
         for (Object o : (List) raw) {
           if (o instanceof Map) {
-            tasks.add(new LinkedHashMap((Map) o))
+            Map t = (Map) o
+            if (tid.equals(t?.get('id')?.toString())) {
+              String owner = t?.get('ownerAgentId')?.toString()?.trim()
+              if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
+                return cur
+              }
+              t.put('status', ns)
+              t.put('updatedAt', Instant.now().toString())
+              hit[0] = true
+              break
+            }
           }
-        }
-      }
-      for (Map t : tasks) {
-        if (tid.equals(t?.get('id')?.toString())) {
-          String owner = t?.get('ownerAgentId')?.toString()?.trim()
-          if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
-            return cur
-          }
-          t.put('status', ns)
-          t.put('updatedAt', Instant.now().toString())
-          hit[0] = true
-          break
         }
       }
       if (!hit[0]) {
         return cur
       }
-      st.put('humanTasks', tasks)
       return st
     }
     hit[0]
@@ -184,38 +203,34 @@ final class AutonomousAssistantStateStore {
       if (!(cur instanceof Map)) {
         return cur
       }
-      Map st = new LinkedHashMap(cur)
-      List<Map> tasks = new ArrayList<>()
+      Map st = copyState(cur)
       Object raw = st.get('humanTasks')
       if (raw instanceof List) {
         for (Object o : (List) raw) {
           if (o instanceof Map) {
-            tasks.add(new LinkedHashMap((Map) o))
+            Map t = (Map) o
+            if (tid.equals(t?.get('id')?.toString())) {
+              String owner = t?.get('ownerAgentId')?.toString()?.trim()
+              if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
+                return cur
+              }
+              if (au) {
+                t.put('assignedUsername', au)
+                t.put('assignedName', an ?: au)
+              } else {
+                t.remove('assignedUsername')
+                t.remove('assignedName')
+              }
+              t.put('updatedAt', Instant.now().toString())
+              hit[0] = true
+              break
+            }
           }
-        }
-      }
-      for (Map t : tasks) {
-        if (tid.equals(t?.get('id')?.toString())) {
-          String owner = t?.get('ownerAgentId')?.toString()?.trim()
-          if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
-            return cur
-          }
-          if (au) {
-            t.put('assignedUsername', au)
-            t.put('assignedName', an ?: au)
-          } else {
-            t.remove('assignedUsername')
-            t.remove('assignedName')
-          }
-          t.put('updatedAt', Instant.now().toString())
-          hit[0] = true
-          break
         }
       }
       if (!hit[0]) {
         return cur
       }
-      st.put('humanTasks', tasks)
       return st
     }
     hit[0]
