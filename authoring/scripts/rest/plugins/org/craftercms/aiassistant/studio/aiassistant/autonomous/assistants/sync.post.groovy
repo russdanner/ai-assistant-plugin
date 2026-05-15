@@ -9,13 +9,14 @@ import plugins.org.craftercms.aiassistant.autonomous.AutonomousAgentIdBuilder
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantRegistry
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStateStore
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantRuntimeHooks
+import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStatus
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantSupervisor
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
 
 def body = AiHttpProxy.parseJsonBody(request)
 if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [ok: false, message: 'Invalid JSON']
+  return [ok: false, message: 'Invalid JSON', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
 }
 String siteId = (body?.siteId ?: params?.siteId)?.toString()?.trim()
 if (!siteId) {
@@ -109,7 +110,7 @@ for (Object raw : (List) agents) {
   }
 
   boolean supervisorOn = AutonomousAssistantSupervisor.isSupervisorEnabled()
-  String initialStatus = (startAutomatically && supervisorOn) ? 'waiting' : 'stopped'
+  String initialStatus = (startAutomatically && supervisorOn) ? AutonomousAssistantStatus.WAITING : AutonomousAssistantStatus.STOPPED
 
   String fullId = AutonomousAgentIdBuilder.buildAgentId(siteId, scope, scopeId, name)
   startAutoByFullId.put(fullId, startAutomatically)
@@ -156,15 +157,15 @@ for (Object fidObj : outIds) {
   String ps = prev.get('status')?.toString()
   boolean sa = startAutoByFullId.containsKey(fid) ? Boolean.TRUE.equals(startAutoByFullId.get(fid)) : true
 
-  if ('disabled'.equals(ps)) {
+  if (AutonomousAssistantStatus.DISABLED == ps) {
     AutonomousAssistantStateStore.mergeState(fid, prev)
     continue
   }
-  if ('error'.equals(ps)) {
+  if (AutonomousAssistantStatus.ERROR == ps) {
     AutonomousAssistantStateStore.mergeState(fid, prev)
     continue
   }
-  if ('stopped'.equals(ps)) {
+  if (AutonomousAssistantStatus.STOPPED == ps) {
     boolean manualStop = Boolean.TRUE.equals(prev.get('manualStop')) ||
       'true'.equalsIgnoreCase(prev.get('manualStop')?.toString())
     // manualStop or !startAutomatically: restore. Else plain stopped + auto-start: keep ensureEntry waiting (system stop / re-sync).
@@ -185,13 +186,13 @@ if (!AutonomousAssistantSupervisor.isSupervisorEnabled()) {
       continue
     }
     String cst = cur.get('status')?.toString()
-    if ('disabled'.equals(cst) || 'error'.equals(cst)) {
+    if (AutonomousAssistantStatus.DISABLED == cst || AutonomousAssistantStatus.ERROR == cst) {
       continue
     }
     boolean preserveManual = Boolean.TRUE.equals(cur.get('manualStop')) ||
       'true'.equalsIgnoreCase(cur.get('manualStop')?.toString())
     AutonomousAssistantStateStore.mergeState(fid, [
-      status          : 'stopped',
+      status          : AutonomousAssistantStatus.STOPPED,
       nextStepRequired: Boolean.FALSE,
       manualStop      : preserveManual ? Boolean.TRUE : Boolean.FALSE
     ])

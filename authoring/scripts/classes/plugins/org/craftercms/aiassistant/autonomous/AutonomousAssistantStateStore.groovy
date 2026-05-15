@@ -4,11 +4,14 @@ import java.time.Instant
 import java.util.ArrayList
 import java.util.LinkedHashMap
 import java.util.List
+import java.util.Locale
 import java.util.Map
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Static in-memory state for autonomous assistants (prototype — JVM lifetime only).
+ * <p>{@link #getState} returns a defensive copy; updates go through {@link #putState}, {@link #mergeState}, or
+ * task helpers that use atomic {@link java.util.concurrent.ConcurrentHashMap} operations.</p>
  */
 final class AutonomousAssistantStateStore {
 
@@ -16,32 +19,39 @@ final class AutonomousAssistantStateStore {
 
   private AutonomousAssistantStateStore() {}
 
+  private static Map newAgentShell(String id, Map defaults) {
+    Map m = new LinkedHashMap()
+    if (defaults) {
+      m.putAll(defaults)
+    }
+    m.put('agentId', id)
+    if (!m.containsKey('status')) {
+      m.put('status', AutonomousAssistantStatus.WAITING)
+    }
+    if (!m.containsKey('nextStepRequired')) {
+      m.put('nextStepRequired', Boolean.FALSE)
+    }
+    m.put('pastRunReports', m.get('pastRunReports') ?: [])
+    m.put('executionHistory', m.get('executionHistory') ?: [])
+    m.put('humanTasks', m.get('humanTasks') ?: [])
+    m
+  }
+
+  /**
+   * Ensures a row exists; returns a <strong>copy</strong> of stored state (safe to read; do not expect live map).
+   */
   static Map ensureEntry(String fullAgentId, Map defaults) {
     if (!fullAgentId?.trim()) {
       return null
     }
     String id = fullAgentId.trim()
-    BY_AGENT_ID.computeIfAbsent(id, {
-      Map m = new LinkedHashMap()
-      if (defaults) {
-        m.putAll(defaults)
-      }
-      m.put('agentId', id)
-      if (!m.containsKey('status')) {
-        m.put('status', 'waiting')
-      }
-      if (!m.containsKey('nextStepRequired')) {
-        m.put('nextStepRequired', Boolean.FALSE)
-      }
-      m.put('pastRunReports', m.get('pastRunReports') ?: [])
-      m.put('executionHistory', m.get('executionHistory') ?: [])
-      m.put('humanTasks', m.get('humanTasks') ?: [])
-      m
-    })
+    Map live = BY_AGENT_ID.computeIfAbsent(id, { k -> newAgentShell(k, defaults) })
+    return live != null ? new LinkedHashMap(live) : null
   }
 
   static Map getState(String fullAgentId) {
-    fullAgentId?.trim() ? BY_AGENT_ID.get(fullAgentId.trim()) : null
+    Map st = fullAgentId?.trim() ? BY_AGENT_ID.get(fullAgentId.trim()) : null
+    return st != null ? new LinkedHashMap(st) : null
   }
 
   static void putState(String fullAgentId, Map state) {
@@ -51,12 +61,19 @@ final class AutonomousAssistantStateStore {
     BY_AGENT_ID.put(fullAgentId.trim(), new LinkedHashMap(state))
   }
 
+  /**
+   * Shallow-merges {@code patch} into stored state in one atomic step (avoids lost updates vs in-place mutation).
+   */
   static void mergeState(String fullAgentId, Map patch) {
-    Map cur = ensureEntry(fullAgentId, [:])
-    if (patch) {
-      cur.putAll(patch)
+    if (!fullAgentId?.trim() || patch == null) {
+      return
     }
-    putState(fullAgentId, cur)
+    String id = fullAgentId.trim()
+    BY_AGENT_ID.compute(id) { k, cur ->
+      Map base = (cur instanceof Map) ? new LinkedHashMap(cur) : newAgentShell(k, [:])
+      base.putAll(patch)
+      return base
+    }
   }
 
   static void clearAll() {
@@ -105,39 +122,43 @@ final class AutonomousAssistantStateStore {
     if (!fullAgentId?.trim() || !taskId?.trim() || !newStatus?.trim()) {
       return false
     }
-    Map st = getState(fullAgentId.trim())
-    if (st == null) {
-      return false
-    }
-    List<Map> tasks = new ArrayList<>()
-    Object raw = st.get('humanTasks')
-    if (raw instanceof List) {
-      for (Object o : (List) raw) {
-        if (o instanceof Map) {
-          tasks.add(new LinkedHashMap((Map) o))
+    String id = fullAgentId.trim()
+    String tid = taskId.trim()
+    String ns = newStatus.trim().toLowerCase(Locale.ROOT)
+    boolean[] hit = new boolean[1]
+    BY_AGENT_ID.computeIfPresent(id) { k, cur ->
+      if (!(cur instanceof Map)) {
+        return cur
+      }
+      Map st = new LinkedHashMap(cur)
+      List<Map> tasks = new ArrayList<>()
+      Object raw = st.get('humanTasks')
+      if (raw instanceof List) {
+        for (Object o : (List) raw) {
+          if (o instanceof Map) {
+            tasks.add(new LinkedHashMap((Map) o))
+          }
         }
       }
-    }
-    boolean hit = false
-    String ns = newStatus.trim().toLowerCase()
-    for (Map t : tasks) {
-      if (taskId.trim().equals(t?.get('id')?.toString())) {
-        String owner = t?.get('ownerAgentId')?.toString()?.trim()
-        if (!manageOtherAgentsHumanTasks && owner && !fullAgentId.trim().equals(owner)) {
-          return false
+      for (Map t : tasks) {
+        if (tid.equals(t?.get('id')?.toString())) {
+          String owner = t?.get('ownerAgentId')?.toString()?.trim()
+          if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
+            return cur
+          }
+          t.put('status', ns)
+          t.put('updatedAt', Instant.now().toString())
+          hit[0] = true
+          break
         }
-        t.put('status', ns)
-        t.put('updatedAt', Instant.now().toString())
-        hit = true
-        break
       }
+      if (!hit[0]) {
+        return cur
+      }
+      st.put('humanTasks', tasks)
+      return st
     }
-    if (!hit) {
-      return false
-    }
-    st.put('humanTasks', tasks)
-    putState(fullAgentId.trim(), st)
-    true
+    hit[0]
   }
 
   /**
@@ -154,45 +175,49 @@ final class AutonomousAssistantStateStore {
     if (!fullAgentId?.trim() || !taskId?.trim()) {
       return false
     }
-    Map st = getState(fullAgentId.trim())
-    if (st == null) {
-      return false
-    }
-    List<Map> tasks = new ArrayList<>()
-    Object raw = st.get('humanTasks')
-    if (raw instanceof List) {
-      for (Object o : (List) raw) {
-        if (o instanceof Map) {
-          tasks.add(new LinkedHashMap((Map) o))
-        }
-      }
-    }
-    boolean hit = false
+    String id = fullAgentId.trim()
+    String tid = taskId.trim()
+    boolean[] hit = new boolean[1]
     String au = assignedUsername?.trim()
     String an = assignedDisplayName?.trim()
-    for (Map t : tasks) {
-      if (taskId.trim().equals(t?.get('id')?.toString())) {
-        String owner = t?.get('ownerAgentId')?.toString()?.trim()
-        if (!manageOtherAgentsHumanTasks && owner && !fullAgentId.trim().equals(owner)) {
-          return false
-        }
-        if (au) {
-          t.put('assignedUsername', au)
-          t.put('assignedName', an ?: au)
-        } else {
-          t.remove('assignedUsername')
-          t.remove('assignedName')
-        }
-        t.put('updatedAt', Instant.now().toString())
-        hit = true
-        break
+    BY_AGENT_ID.computeIfPresent(id) { k, cur ->
+      if (!(cur instanceof Map)) {
+        return cur
       }
+      Map st = new LinkedHashMap(cur)
+      List<Map> tasks = new ArrayList<>()
+      Object raw = st.get('humanTasks')
+      if (raw instanceof List) {
+        for (Object o : (List) raw) {
+          if (o instanceof Map) {
+            tasks.add(new LinkedHashMap((Map) o))
+          }
+        }
+      }
+      for (Map t : tasks) {
+        if (tid.equals(t?.get('id')?.toString())) {
+          String owner = t?.get('ownerAgentId')?.toString()?.trim()
+          if (!manageOtherAgentsHumanTasks && owner && !id.equals(owner)) {
+            return cur
+          }
+          if (au) {
+            t.put('assignedUsername', au)
+            t.put('assignedName', an ?: au)
+          } else {
+            t.remove('assignedUsername')
+            t.remove('assignedName')
+          }
+          t.put('updatedAt', Instant.now().toString())
+          hit[0] = true
+          break
+        }
+      }
+      if (!hit[0]) {
+        return cur
+      }
+      st.put('humanTasks', tasks)
+      return st
     }
-    if (!hit) {
-      return false
-    }
-    st.put('humanTasks', tasks)
-    putState(fullAgentId.trim(), st)
-    true
+    hit[0]
   }
 }

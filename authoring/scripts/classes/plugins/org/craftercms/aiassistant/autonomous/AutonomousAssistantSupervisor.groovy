@@ -3,9 +3,11 @@ package plugins.org.craftercms.aiassistant.autonomous
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -47,14 +49,54 @@ final class AutonomousAssistantSupervisor {
       })
     }
     if (workerPool == null || workerPool.isShutdown()) {
-      workerPool = Executors.newCachedThreadPool(new ThreadFactory() {
+      int n = Math.max(1, Runtime.runtime.availableProcessors())
+      int maxPool = Math.min(16, Math.max(4, n * 2))
+      int corePool = Math.min(maxPool, Math.max(2, n))
+      int queueCap = 128
+      try {
+        Integer mp = Integer.getInteger('crafterq.autonomous.worker.max')
+        if (mp != null && mp >= 1) {
+          maxPool = mp
+        }
+      } catch (Throwable ignoredMax) {
+      }
+      try {
+        Integer cp = Integer.getInteger('crafterq.autonomous.worker.core')
+        if (cp != null && cp >= 1) {
+          corePool = Math.min(cp, maxPool)
+        }
+      } catch (Throwable ignoredCore) {
+      }
+      try {
+        Integer qc = Integer.getInteger('crafterq.autonomous.worker.queue')
+        if (qc != null && qc >= 8) {
+          queueCap = qc
+        }
+      } catch (Throwable ignoredQ) {
+      }
+      ThreadFactory tf = new ThreadFactory() {
         @Override
         Thread newThread(Runnable r) {
-          Thread t = new Thread(r, 'aiassistant-autonomous-worker')
+          Thread t = new Thread(r, 'aiassistant-autonomous-worker-' + Long.toHexString(System.nanoTime()))
           t.setDaemon(true)
           t
         }
-      })
+      }
+      workerPool = new ThreadPoolExecutor(
+        corePool,
+        maxPool,
+        60L,
+        TimeUnit.SECONDS,
+        new LinkedBlockingQueue<Runnable>(queueCap),
+        tf,
+        new ThreadPoolExecutor.CallerRunsPolicy()
+      )
+      log.info(
+        'Autonomous worker pool: core={} max={} queueCap={} (override crafterq.autonomous.worker.core/max/queue)',
+        corePool,
+        maxPool,
+        queueCap
+      )
     }
     if (supervisorFuture == null || supervisorFuture.isCancelled()) {
       supervisorFuture = supervisorExec.scheduleAtFixedRate(
@@ -125,6 +167,7 @@ final class AutonomousAssistantSupervisor {
 
   static synchronized void destroyInMemoryStore() {
     disableSupervisor()
+    shutdownPools()
     AutonomousAssistantStateStore.clearAll()
     AutonomousAssistantRegistry.clearAll()
     RUNNING.clear()
@@ -176,7 +219,8 @@ final class AutonomousAssistantSupervisor {
             continue
           }
           String stName = st.get('status')?.toString()
-          if ('disabled'.equals(stName) || 'stopped'.equals(stName) || 'error'.equals(stName)) {
+          if (AutonomousAssistantStatus.DISABLED == stName || AutonomousAssistantStatus.STOPPED == stName ||
+            AutonomousAssistantStatus.ERROR == stName) {
             continue
           }
           boolean nextStep = Boolean.TRUE.equals(st.get('nextStepRequired')) ||

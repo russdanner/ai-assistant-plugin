@@ -17,7 +17,11 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  * { "action": "invalidateToolPrompts" } — clears {@code ToolPromptsLoader} cache after editing {@code prompts/*.md} via {@code writeConfiguration}
  * </pre>
  */
-def body = AiHttpProxy.parseJsonBody(request) ?: [:]
+def body = AiHttpProxy.parseJsonBody(request)
+if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+  response.status = HttpServletResponse.SC_BAD_REQUEST
+  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
+}
 String siteId = (params?.siteId ?: body.siteId ?: request.getParameter('siteId'))?.toString()?.trim()
 if (!siteId) {
   response.status = HttpServletResponse.SC_BAD_REQUEST

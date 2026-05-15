@@ -63,6 +63,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -119,10 +120,15 @@ class AiOrchestration {
 
   /**
    * Latest worker phase for logs and **SSE heartbeats** (Tools-loop+tools worker sets it; servlet thread reads it while
-   * awaiting {@code Future#get}). Uses {@link AtomicReference} so it is **not** thread-local — otherwise heartbeats
-   * never see {@code TransformContentSubgraph_await_inner…} and always fall back to “waiting on POST…”.
+   * awaiting {@code Future#get}). Per-stream {@link #CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION} avoids cross-talk when
+   * several authors chat concurrently; {@link #CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF} remains a legacy fallback when no
+   * session id is bound on the worker thread.
    */
   private static final AtomicReference<String> CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF = new AtomicReference<>('')
+
+  private static final ConcurrentHashMap<String, String> CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION = new ConcurrentHashMap<>()
+
+  private static final ThreadLocal<String> CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID = new ThreadLocal<>()
 
   /**
    * In-flight {@link #openAiSimpleCompletionAssistantText} calls whose {@code workerPhasePrefix} is
@@ -177,8 +183,54 @@ class AiOrchestration {
     }
   }
 
+  /**
+   * Binds a unique id for this Tools-loop worker so {@link #crafterQToolWorkerDiagPhaseGet(String)} on the servlet
+   * thread reads the correct phase. Call {@link #crafterQToolWorkerDiagSessionEnd()} in a worker {@code finally}.
+   */
+  static void crafterQToolWorkerDiagSessionBind(String sessionId) {
+    try {
+      String s = (sessionId ?: '').toString().trim()
+      if (s) {
+        CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.set(s)
+        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(s, '')
+      }
+    } catch (Throwable ignored) {
+    }
+  }
+
+  static void crafterQToolWorkerDiagSessionEnd() {
+    try {
+      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      if (sid != null && sid.toString().trim()) {
+        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.remove(sid.toString().trim())
+      }
+    } catch (Throwable ignored) {
+    }
+    try {
+      CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.remove()
+    } catch (Throwable ignored2) {
+    }
+    try {
+      CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
+    } catch (Throwable ignored3) {
+    }
+  }
+
   /** Set from the worker thread only (tool loop, RestClient POST, TransformContentSubgraph, etc.). */
   static void crafterQToolWorkerDiagPhase(String phase) {
+    try {
+      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      if (sid != null && sid.toString().trim()) {
+        String key = sid.toString().trim()
+        if (phase != null && phase.toString().trim()) {
+          CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, phase.toString().trim())
+        } else {
+          CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, '')
+        }
+        return
+      }
+    } catch (Throwable ignoredBind) {
+    }
     try {
       if (phase != null && phase.toString().trim()) {
         CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set(phase.toString().trim())
@@ -189,7 +241,19 @@ class AiOrchestration {
     }
   }
 
-  static String crafterQToolWorkerDiagPhaseGet() {
+  /**
+   * @param sessionId when non-blank (same value passed to {@link #crafterQToolWorkerDiagSessionBind}), reads the
+   *                    phase for that stream; otherwise falls back to the global ref (legacy inner completions).
+   */
+  static String crafterQToolWorkerDiagPhaseGet(String sessionId = null) {
+    try {
+      String key = (sessionId ?: '')?.toString()?.trim()
+      if (key) {
+        def v = CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.get(key)
+        return v != null ? v.toString() : ''
+      }
+    } catch (Throwable ignoredMap) {
+    }
     try {
       def v = CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.get()
       return v != null ? v.toString() : ''
@@ -200,14 +264,22 @@ class AiOrchestration {
 
   static void crafterQToolWorkerDiagPhaseClear() {
     try {
-      CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
+      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      if (sid != null && sid.toString().trim()) {
+        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(sid.toString().trim(), '')
+        return
+      }
     } catch (Throwable ignored) {
+    }
+    try {
+      CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
+    } catch (Throwable ignored2) {
     }
   }
 
   /**
    * Short author-facing hint for SSE heartbeats while the Tools-loop+tools worker is busy — derived from
-   * {@link #crafterQToolWorkerDiagPhase} so we do not imply the main chat POST is slow when
+   * {@link #crafterQToolWorkerDiagPhaseGet(String)} (per-stream session on the servlet thread) so we do not imply the main chat POST is slow when
    * {@link AiOrchestrationTools} is inside a bundled inner completion (e.g. {@code TransformContentSubgraph}).
    */
   private static String openAiPipelineWaitHintMarkdown(String workerPhase) {
@@ -3428,45 +3500,41 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     Map toolsLoopSessionBundle = null
   ) {
     crafterQToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
+    String text
     try {
-      String text
-      try {
-        text = openAiExecuteNativeToolsViaRestClientReturnText(
-          apiKey, model, openAiPrompt, tools, agentId, out, toolTimingCtx, cancelRequested, wireBaseUrl, toolsLoopSessionBundle)
-      } catch (InterruptedException ie) {
+      text = openAiExecuteNativeToolsViaRestClientReturnText(
+        apiKey, model, openAiPrompt, tools, agentId, out, toolTimingCtx, cancelRequested, wireBaseUrl, toolsLoopSessionBundle)
+    } catch (InterruptedException ie) {
+      log.warn(
+        'AI Assistant chat stream: Tools-loop tools worker stopped after cancel (client abort / Stop). agentId={} reason={}',
+        agentId,
+        ie.message
+      )
+      writeSseErrorFrame(out, new InterruptedException('Request was cancelled or stopped before the assistant finished.'))
+      markOpenAiToolsTerminalEmitted(terminalEmitted)
+      return
+    }
+    try {
+      synchronized (out) {
+        String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
+        out.write(("data: ${JsonOutput.toJson([text: finalChunk, metadata: [:]])}\n\n").getBytes(StandardCharsets.UTF_8))
+        def doneMeta = new LinkedHashMap()
+        doneMeta.completed = true
+        mergeToolPipelineWallMsIntoMetadata(doneMeta, toolTimingCtx)
+        out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
+        out.flush()
+      }
+      markOpenAiToolsTerminalEmitted(terminalEmitted)
+    } catch (Throwable io) {
+      if (isSseClientDisconnected(io)) {
         log.warn(
-          'AI Assistant chat stream: Tools-loop tools worker stopped after cancel (client abort / Stop). agentId={} reason={}',
+          'AI Assistant chat stream: CLIENT_ABORT — final SSE not written (connection already closed). agentId={} detail={}',
           agentId,
-          ie.message
+          io.message
         )
-        writeSseErrorFrame(out, new InterruptedException('Request was cancelled or stopped before the assistant finished.'))
-        markOpenAiToolsTerminalEmitted(terminalEmitted)
-        return
+      } else {
+        throw io
       }
-      try {
-        synchronized (out) {
-          String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
-          out.write(("data: ${JsonOutput.toJson([text: finalChunk, metadata: [:]])}\n\n").getBytes(StandardCharsets.UTF_8))
-          def doneMeta = new LinkedHashMap()
-          doneMeta.completed = true
-          mergeToolPipelineWallMsIntoMetadata(doneMeta, toolTimingCtx)
-          out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
-          out.flush()
-        }
-        markOpenAiToolsTerminalEmitted(terminalEmitted)
-      } catch (Throwable io) {
-        if (isSseClientDisconnected(io)) {
-          log.warn(
-            'AI Assistant chat stream: CLIENT_ABORT — final SSE not written (connection already closed). agentId={} detail={}',
-            agentId,
-            io.message
-          )
-        } else {
-          throw io
-        }
-      }
-    } finally {
-      crafterQToolWorkerDiagPhaseClear()
     }
   }
 
@@ -4573,22 +4641,28 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
           ExecutorService pool = Executors.newSingleThreadExecutor()
           AtomicBoolean cancelRequested = new AtomicBoolean(false)
           AtomicBoolean openAiToolsTerminalEmitted = new AtomicBoolean(false)
+          String toolDiagSessionId = 'td-' + java.util.UUID.randomUUID().toString()
           try {
             def fut = pool.submit({
-              writeOpenAiToolsOnViaRestClientToolLoop(
-                out,
-                StudioAiLlmKind.toolsLoopChatApiKeyFromBundle(springAi),
-                (springAi.resolvedChatModel ?: resolveOpenAiModel(openAiModel)),
-                openAiPrompt,
-                springAi.tools,
-                agentId,
-                toolTimingCtx,
-                cancelRequested,
-                openAiToolsTerminalEmitted,
-                StudioAiLlmKind.toolsLoopChatBaseUrlFromBundle(springAi),
-                springAi
-              )
-              null
+              crafterQToolWorkerDiagSessionBind(toolDiagSessionId)
+              try {
+                writeOpenAiToolsOnViaRestClientToolLoop(
+                  out,
+                  StudioAiLlmKind.toolsLoopChatApiKeyFromBundle(springAi),
+                  (springAi.resolvedChatModel ?: resolveOpenAiModel(openAiModel)),
+                  openAiPrompt,
+                  springAi.tools,
+                  agentId,
+                  toolTimingCtx,
+                  cancelRequested,
+                  openAiToolsTerminalEmitted,
+                  StudioAiLlmKind.toolsLoopChatBaseUrlFromBundle(springAi),
+                  springAi
+                )
+                null
+              } finally {
+                crafterQToolWorkerDiagSessionEnd()
+              }
             } as Callable)
             long deadline = System.currentTimeMillis() + CHAT_FLUX_AWAIT_MS
             boolean stoppedByClient = false
@@ -4638,7 +4712,7 @@ If this is unexpected: verify outbound HTTPS from Studio to your configured chat
                   if (nowHb - lastSseHeartbeatMs >= OPENAI_SSE_WAIT_HEARTBEAT_MS) {
                     lastSseHeartbeatMs = nowHb
                     long elapsedSec = (nowHb - pipelineWaitStartMs) / 1000L
-                    def workerPhase = crafterQToolWorkerDiagPhaseGet()
+                    def workerPhase = crafterQToolWorkerDiagPhaseGet(toolDiagSessionId)
                     log.debug(
                       'Studio AI Assistant SSE heartbeat: waiting on Tools-loop+tools worker elapsedSec={} agentId={} model={} workerPhase={}',
                       elapsedSec,

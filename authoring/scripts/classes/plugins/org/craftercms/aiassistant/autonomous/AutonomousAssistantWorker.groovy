@@ -54,11 +54,12 @@ final class AutonomousAssistantWorker {
       return
     }
     String initialStatus = state.get('status')?.toString()
-    if ('disabled'.equals(initialStatus) || 'stopped'.equals(initialStatus) || 'error'.equals(initialStatus)) {
+    if (AutonomousAssistantStatus.DISABLED == initialStatus || AutonomousAssistantStatus.STOPPED == initialStatus ||
+      AutonomousAssistantStatus.ERROR == initialStatus) {
       return
     }
     long t0 = System.currentTimeMillis()
-    state.put('status', 'running')
+    state.put('status', AutonomousAssistantStatus.RUNNING)
     ensureHumanTaskOwners(state, fullAgentId)
     AutonomousAssistantStateStore.putState(fullAgentId, state)
     try {
@@ -279,7 +280,7 @@ final class AutonomousAssistantWorker {
       trimHumanTasksInState(state, HUMAN_TASKS_MAX, fullAgentId, manageOtherAgentsHumanTasks)
       boolean stopSelf = Boolean.TRUE.equals(parsed?.get('stopSelf')) ||
         'true'.equalsIgnoreCase(parsed?.get('stopSelf')?.toString())
-      state.put('status', stopSelf ? 'stopped' : 'waiting')
+      state.put('status', stopSelf ? AutonomousAssistantStatus.STOPPED : AutonomousAssistantStatus.WAITING)
       if (stopSelf) {
         state.put('manualStop', Boolean.TRUE)
       } else {
@@ -312,11 +313,11 @@ final class AutonomousAssistantWorker {
         ]
       )
       if (stopOnFailure) {
-        state.put('status', 'error')
+        state.put('status', AutonomousAssistantStatus.ERROR)
         state.put('nextStepRequired', Boolean.FALSE)
         state.put('manualStop', Boolean.FALSE)
       } else {
-        state.put('status', 'waiting')
+        state.put('status', AutonomousAssistantStatus.WAITING)
         state.put('nextStepRequired', Boolean.TRUE)
         state.put('manualStop', Boolean.FALSE)
       }

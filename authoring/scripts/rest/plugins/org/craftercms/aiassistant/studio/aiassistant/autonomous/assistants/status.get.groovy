@@ -3,6 +3,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantRegistry
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantRuntimeHooks
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStateStore
+import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStatus
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantSupervisor
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousScopeGuard
 
@@ -48,7 +49,7 @@ for (Map.Entry<String, Map> e : agents.entrySet()) {
       }
     }
   }
-  if ('error'.equals(st.get('status')?.toString())) {
+  if (AutonomousAssistantStatus.ERROR.equals(st.get('status')?.toString())) {
     agentsInError.add([
       agentId  : aid,
       name     : agentDef.get('name')?.toString(),

@@ -21,7 +21,11 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  * }
  * </pre>
  */
-def body = AiHttpProxy.parseJsonBody(request) ?: [:]
+def body = AiHttpProxy.parseJsonBody(request)
+if (Boolean.TRUE.equals(body?.get('__crafterqInvalidJson'))) {
+  response.status = HttpServletResponse.SC_BAD_REQUEST
+  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__crafterqInvalidJsonDetail')?.toString() ?: '']
+}
 def siteId = (params.siteId ?: body.siteId)?.toString()?.trim()
 def imageUrl = body.imageUrl?.toString()?.trim()
 def repoPath = body.repoPath != null ? body.repoPath.toString().trim() : ''

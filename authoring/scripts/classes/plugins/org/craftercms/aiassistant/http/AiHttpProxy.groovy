@@ -49,6 +49,11 @@ class AiHttpProxy {
     'host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
     /** Studio JWT must not be sent to CrafterQ — auth is {@code X-CrafterQ-Chat-User} (browser localStorage). */
     'authorization',
+    /** Never forward Studio session or response cookies to {@code api.crafterq.ai}. */
+    'cookie', 'cookie2', 'set-cookie', 'set-cookie2',
+    /** Avoid leaking client routing / CSRF / origin context to a third-party chat host. */
+    'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'x-real-ip', 'via',
+    'referer', 'origin', 'x-xsrf-token', 'x-csrf-token',
     'te', 'trailer', 'transfer-encoding', 'upgrade', 'expect',
     'content-length', 'content-type', 'accept'
   ] as Set
@@ -103,14 +108,16 @@ class AiHttpProxy {
       } catch (Throwable ignored0) {
       }
     }
-    logger.info(
-      'CrafterQ bearer install (POST body after optional ui.xml merge): crafterQBearerTokenEnv name={} getenvNonBlankForThatName={} crafterQBearerToken literal present={} literalChars={} literalPreview={}',
-      envKey ? envKey : '(omitted)',
-      getenvResolved,
-      literalPresent,
-      literalPresent ? literal.length() : 0,
-      literalPresent ? crafterQBearerLogPreview(literal) : '(none)'
-    )
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+        'CrafterQ bearer install (POST body after optional ui.xml merge): crafterQBearerTokenEnv name={} getenvNonBlankForThatName={} crafterQBearerToken literal present={} literalChars={} literalPreview={}',
+        envKey ? envKey : '(omitted)',
+        getenvResolved,
+        literalPresent,
+        literalPresent ? literal.length() : 0,
+        literalPresent ? crafterQBearerLogPreview(literal) : '(none)'
+      )
+    }
     String token = ''
     String source = ''
     if (envKey) {
@@ -153,12 +160,14 @@ class AiHttpProxy {
       servletRequest.setAttribute(CRAFTERRQ_API_BEARER_TOKEN_ATTR, token)
     } catch (Throwable ignored) {
     }
-    logger.info(
-      'CrafterQ API bearer installed for this Studio request: source={} chars={} preview={} (full token is never logged)',
-      source,
-      token.length(),
-      crafterQBearerLogPreview(token)
-    )
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+        'CrafterQ API bearer installed for this Studio request: source={} chars={} preview={} (full token is never logged)',
+        source,
+        token.length(),
+        crafterQBearerLogPreview(token)
+      )
+    }
   }
 
   /**
@@ -555,24 +564,53 @@ class AiHttpProxy {
   }
 
   /**
-   * Reads the servlet POST body as JSON. Never throws: invalid JSON returns a map with
+   * Reads the servlet POST body as JSON. Never throws: invalid JSON or oversize body returns a map with
    * {@code __crafterqInvalidJson} so REST scripts can return 400 instead of an unhandled 500/HTML error page.
+   * <p>Max characters read from the servlet reader default {@code 1_048_576} (1 MiB-ish); override JVM
+   * property {@code crafterq.maxJsonBodyChars}.</p>
    */
   static Map parseJsonBody(def request) {
     def reader = request?.getReader()
-    if (!reader) return [:]
-    def sb = new StringBuilder()
-    String line
-    while ((line = reader.readLine()) != null) {
-      sb.append(line)
+    if (!reader) {
+      return [:]
     }
-    def text = sb.toString()
-    if (!text?.trim()) return [:]
+    int maxChars = 1_048_576
+    try {
+      Integer prop = Integer.getInteger('crafterq.maxJsonBodyChars')
+      if (prop != null && prop > 4096) {
+        maxChars = prop
+      }
+    } catch (Throwable ignoredProp) {
+    }
+    StringBuilder sb = new StringBuilder(Math.min(maxChars, 131072))
+    char[] buf = new char[8192]
+    int total = 0
+    int n
+    while ((n = reader.read(buf)) != -1) {
+      if (total + n > maxChars) {
+        try {
+          while (reader.read(buf) != -1) {
+            // drain connection so client sees full upload accepted; we discard
+          }
+        } catch (Throwable ignoredDrain) {
+        }
+        return [
+          __crafterqInvalidJson      : true,
+          __crafterqInvalidJsonDetail: "Request body too large (>${maxChars} chars); raise crafterq.maxJsonBodyChars if needed."
+        ]
+      }
+      sb.append(buf, 0, n)
+      total += n
+    }
+    String text = sb.toString()
+    if (!text?.trim()) {
+      return [:]
+    }
     try {
       def parsed = new JsonSlurper().parseText(text)
       return (parsed instanceof Map) ? (Map) parsed : [value: parsed]
     } catch (Throwable t) {
-      logger.warn('parseJsonBody: invalid JSON ({} chars): {}', text.length(), t.message)
+      logger.warn('parseJsonBody: invalid JSON ({} chars): {}', total, t.message)
       return [
         __crafterqInvalidJson      : true,
         __crafterqInvalidJsonDetail: (t.message ?: t.toString())

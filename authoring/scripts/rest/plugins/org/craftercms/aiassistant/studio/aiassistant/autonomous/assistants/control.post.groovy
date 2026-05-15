@@ -3,6 +3,7 @@ import org.springframework.security.core.Authentication
 import org.springframework.security.core.context.SecurityContextHolder
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantRegistry
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStateStore
+import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantStatus
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousAssistantSupervisor
 import plugins.org.craftercms.aiassistant.autonomous.AutonomousScopeGuard
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
@@ -81,7 +82,7 @@ switch (action) {
         boolean preserveManual = Boolean.TRUE.equals(st.get('manualStop')) ||
           'true'.equalsIgnoreCase(st.get('manualStop')?.toString())
         AutonomousAssistantStateStore.mergeState(aid, [
-          status          : 'stopped',
+          status          : AutonomousAssistantStatus.STOPPED,
           nextStepRequired: Boolean.FALSE,
           manualStop      : preserveManual ? Boolean.TRUE : Boolean.FALSE
         ])
@@ -100,7 +101,7 @@ switch (action) {
         Map agentDef = (e.value instanceof Map) ? (Map) e.value : [:]
         Map st = AutonomousAssistantStateStore.getState(aid) ?: [:]
         String pst = st.get('status')?.toString()
-        if ('disabled'.equals(pst) || 'error'.equals(pst)) {
+        if (AutonomousAssistantStatus.DISABLED.equals(pst) || AutonomousAssistantStatus.ERROR.equals(pst)) {
           continue
         }
         boolean sa = cqParseStartAutomatically(agentDef)
@@ -108,19 +109,19 @@ switch (action) {
           'true'.equalsIgnoreCase(st.get('manualStop')?.toString())
         if (!sa) {
           AutonomousAssistantStateStore.mergeState(aid, [
-            status          : 'stopped',
+            status          : AutonomousAssistantStatus.STOPPED,
             nextStepRequired: Boolean.FALSE,
             manualStop      : Boolean.FALSE
           ])
         } else if (manualStop) {
           AutonomousAssistantStateStore.mergeState(aid, [
-            status          : 'stopped',
+            status          : AutonomousAssistantStatus.STOPPED,
             nextStepRequired: Boolean.FALSE,
             manualStop      : Boolean.TRUE
           ])
         } else {
           AutonomousAssistantStateStore.mergeState(aid, [
-            status          : 'waiting',
+            status          : AutonomousAssistantStatus.WAITING,
             nextStepRequired: Boolean.FALSE,
             manualStop      : Boolean.FALSE,
             lastError       : null
@@ -141,7 +142,7 @@ switch (action) {
       return [ok: false, message: 'Missing agentId']
     }
     AutonomousAssistantStateStore.mergeState(agentId, [
-      status          : 'waiting',
+      status          : AutonomousAssistantStatus.WAITING,
       nextStepRequired: Boolean.FALSE,
       lastError       : null,
       manualStop      : Boolean.FALSE
@@ -153,7 +154,7 @@ switch (action) {
       return [ok: false, message: 'Missing agentId']
     }
     AutonomousAssistantStateStore.mergeState(agentId, [
-      status          : 'waiting',
+      status          : AutonomousAssistantStatus.WAITING,
       nextStepRequired: Boolean.FALSE,
       lastError       : null,
       manualStop      : Boolean.FALSE
@@ -165,7 +166,7 @@ switch (action) {
       return [ok: false, message: 'Missing agentId']
     }
     AutonomousAssistantStateStore.mergeState(agentId, [
-      status          : 'stopped',
+      status          : AutonomousAssistantStatus.STOPPED,
       nextStepRequired: Boolean.FALSE,
       manualStop      : Boolean.TRUE
     ])
@@ -176,7 +177,7 @@ switch (action) {
       return [ok: false, message: 'Missing agentId']
     }
     AutonomousAssistantStateStore.mergeState(agentId, [
-      status          : 'waiting',
+      status          : AutonomousAssistantStatus.WAITING,
       nextStepRequired: Boolean.TRUE,
       manualStop      : Boolean.FALSE
     ])
@@ -186,7 +187,7 @@ switch (action) {
       response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
       return [ok: false, message: 'Missing agentId']
     }
-    AutonomousAssistantStateStore.mergeState(agentId, [status: 'disabled', nextStepRequired: Boolean.FALSE])
+    AutonomousAssistantStateStore.mergeState(agentId, [status: AutonomousAssistantStatus.DISABLED, nextStepRequired: Boolean.FALSE])
     return [ok: true, action: action, agentId: agentId]
   case 'enable_agent':
     if (!agentId) {
@@ -194,7 +195,7 @@ switch (action) {
       return [ok: false, message: 'Missing agentId']
     }
     AutonomousAssistantStateStore.mergeState(agentId, [
-      status          : 'waiting',
+      status          : AutonomousAssistantStatus.WAITING,
       nextStepRequired: Boolean.FALSE,
       lastError       : null,
       manualStop      : Boolean.FALSE
