@@ -6,7 +6,7 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  * Downloads an image from a remote URL and writes it to the site sandbox under {@code /static-assets/...},
  * same as a desktop upload, for use from:
  * <ul>
- *   <li>CrafterQ chat drag-and-drop (after client prefetch)</li>
+ *   <li>Authoring chat drag-and-drop (after client prefetch)</li>
  *   <li>Form data source {@code aiassistant-img-from-url} (URL prompt or data URL)</li>
  * </ul>
  *

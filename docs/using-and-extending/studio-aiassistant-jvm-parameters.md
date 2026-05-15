@@ -32,58 +32,58 @@ Use this file when you need to tune timeouts, logging, or defaults that are not 
 
 ---
 
-## Chat orchestration (`crafterq.*`)
+## Chat orchestration (`aiassistant.*`)
 
-Historical note: property names use the **`crafterq.*`** prefix; they apply to **Spring AI tools-loop** orchestration in Studio, not to a remote hosted chat service.
-
-| Property | Default / notes |
-|----------|-----------------|
-| **`crafterq.chatFluxAwaitMs`** | Max wait for Spring AI chat flux / tool **Future** (ms). Default **300000**; allowed range **120000–600000** in implementation. |
-| **`crafterq.openai.restReadTimeoutMs`** | Per-request read timeout for sync OpenAI **RestClient** `chat/completions` (ms). Tied to orchestration budget + margin. |
-| **`crafterq.openai.sseWaitHeartbeatMs`** | SSE / wait tuning inside **`AiOrchestration`**. |
-| **`crafterq.openai.reviewMaxChars`** | Caps review / analysis payloads in some tool paths. |
-| **`crafterq.translateContentItemMaxOutTokens`** | Inner completion token cap for **`TranslateContentItem`**-style paths. |
-| **`crafterq.springAiHttpDebug`** | When **`true`**, raises Log4j2 levels for Spring AI HTTP client logging on first use (Studio uses Log4j2). |
-
----
-
-## Outbound HTTP, Preview Fetch, MCP (`crafterq.*`)
+Historical note: property names use the **`aiassistant.*`** prefix; they apply to **Spring AI tools-loop** orchestration in Studio, not to a remote hosted chat service.
 
 | Property | Default / notes |
 |----------|-----------------|
-| **`crafterq.httpFetch.enabled`** | **`true`**. Set **`false`** to disable **`FetchHttpUrl`** and MCP HTTP client (SSRF-gated outbound). |
-| **`crafterq.httpFetch.maxChars`** | Max characters returned by **`FetchHttpUrl`**. |
-| **`crafterq.httpFetch.allowedHostSuffixes`** | Comma-separated host suffix allowlist for fetch/MCP (see **`StudioToolOperations`**). |
-| **`crafterq.preview.fetch.maxChars`** | Preview HTML fetch cap. |
-| **`crafterq.preview.fetch.allowedHosts`** | Extra allowed hosts for preview fetch. |
-| **`crafterq.preview.fetch.stripCookieNames`** | Cookie stripping for preview fetch. |
-| **`crafterq.preview.fetch.forwardAuthorization`** | **`false`** — whether to forward **`Authorization`** on preview fetch. |
-| **`crafterq.mcp.maxResponseChars`** | Max MCP HTTP response body size (default **500000**). |
+| **`aiassistant.chatFluxAwaitMs`** | Max wait for Spring AI chat flux / tool **Future** (ms). Default **300000**; allowed range **120000–600000** in implementation. |
+| **`aiassistant.openai.restReadTimeoutMs`** | Per-request read timeout for sync OpenAI **RestClient** `chat/completions` (ms). Tied to orchestration budget + margin. |
+| **`aiassistant.openai.sseWaitHeartbeatMs`** | SSE / wait tuning inside **`AiOrchestration`**. |
+| **`aiassistant.openai.reviewMaxChars`** | Caps review / analysis payloads in some tool paths. |
+| **`aiassistant.translateContentItemMaxOutTokens`** | Inner completion token cap for **`TranslateContentItem`**-style paths. |
+| **`aiassistant.springAiHttpDebug`** | When **`true`**, raises Log4j2 levels for Spring AI HTTP client logging on first use (Studio uses Log4j2). |
 
 ---
 
-## Expert Skills (`crafterq.expertSkill.*`)
+## Outbound HTTP, Preview Fetch, MCP (`aiassistant.*`)
 
-| Property | Role |
-|----------|------|
-| **`crafterq.expertSkill.embeddingModel`** | Embedding model id for **`QueryExpertGuidance`**. |
-| **`crafterq.expertSkill.maxSkills`** | Max distinct expert skills indexed. |
-| **`crafterq.expertSkill.maxChunks`** | Chunk count limits per skill. |
-| **`crafterq.expertSkill.maxChunkChars`** | Chunk size limits. |
+| Property | Default / notes |
+|----------|-----------------|
+| **`aiassistant.httpFetch.enabled`** | **`true`**. Set **`false`** to disable **`FetchHttpUrl`** and MCP HTTP client (SSRF-gated outbound). |
+| **`aiassistant.httpFetch.maxChars`** | Max characters returned by **`FetchHttpUrl`**. |
+| **`aiassistant.httpFetch.allowedHostSuffixes`** | Comma-separated host suffix allowlist for fetch/MCP (see **`StudioToolOperations`**). |
+| **`aiassistant.preview.fetch.maxChars`** | Preview HTML fetch cap. |
+| **`aiassistant.preview.fetch.allowedHosts`** | Extra allowed hosts for preview fetch. |
+| **`aiassistant.preview.fetch.stripCookieNames`** | Cookie stripping for preview fetch. |
+| **`aiassistant.preview.fetch.forwardAuthorization`** | **`false`** — whether to forward **`Authorization`** on preview fetch. |
+| **`aiassistant.mcp.maxResponseChars`** | Max MCP HTTP response body size (default **500000**). |
 
 ---
 
-## Plugin RAG (`crafterq.pluginRag.*`)
+## Expert Skills (`aiassistant.expertSkill.*`)
 
 | Property | Role |
 |----------|------|
-| **`crafterq.pluginRag.mode`** | **`off`** by default; enables bundled plugin RAG kernel when set. |
-| **`crafterq.pluginRag.kernelMaxChars`** | Kernel text size. |
-| **`crafterq.pluginRag.topK`** | Retrieval **`topK`**. |
-| **`crafterq.pluginRag.maxAppendChars`** | Max appended RAG text to prompts. |
-| **`crafterq.pluginRag.maxChunkChars`** / **`crafterq.pluginRag.maxChunks`** | Chunking for plugin RAG. |
-| **`crafterq.pluginRag.embedBatchSize`** | Embedding batch size. |
-| **`crafterq.pluginRag.pluginBuildId`** | Optional build id marker for caches. |
+| **`aiassistant.expertSkill.embeddingModel`** | Embedding model id for **`QueryExpertGuidance`**. |
+| **`aiassistant.expertSkill.maxSkills`** | Max distinct expert skills indexed. |
+| **`aiassistant.expertSkill.maxChunks`** | Chunk count limits per skill. |
+| **`aiassistant.expertSkill.maxChunkChars`** | Chunk size limits. |
+
+---
+
+## Plugin RAG (`aiassistant.pluginRag.*`)
+
+| Property | Role |
+|----------|------|
+| **`aiassistant.pluginRag.mode`** | **`off`** by default; enables bundled plugin RAG kernel when set. |
+| **`aiassistant.pluginRag.kernelMaxChars`** | Kernel text size. |
+| **`aiassistant.pluginRag.topK`** | Retrieval **`topK`**. |
+| **`aiassistant.pluginRag.maxAppendChars`** | Max appended RAG text to prompts. |
+| **`aiassistant.pluginRag.maxChunkChars`** / **`aiassistant.pluginRag.maxChunks`** | Chunking for plugin RAG. |
+| **`aiassistant.pluginRag.embedBatchSize`** | Embedding batch size. |
+| **`aiassistant.pluginRag.pluginBuildId`** | Optional build id marker for caches. |
 
 ---
 
@@ -91,7 +91,7 @@ Historical note: property names use the **`crafterq.*`** prefix; they apply to *
 
 | Property | Role |
 |----------|------|
-| **`crafterq.crafterizingPlaybook.path`** | Absolute path to markdown override for **`GetCrafterizingPlaybook`**. |
+| **`aiassistant.crafterizingPlaybook.path`** | Absolute path to markdown override for **`GetCrafterizingPlaybook`**. |
 
 ---
 

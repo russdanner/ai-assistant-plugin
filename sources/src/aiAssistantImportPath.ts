@@ -19,7 +19,7 @@ export function resolveImportRepoPathFromContentType(ct: unknown): string {
   const c = ct as ContentTypeLike;
 
   if (Array.isArray(c.dataSources)) {
-    for (const t of ['aiassistant-img-from-url', 'crafterq-img-from-url', 'img-desktop-upload'] as const) {
+    for (const t of ['aiassistant-img-from-url', 'img-desktop-upload'] as const) {
       const ds = c.dataSources.find((d) => d?.type === t && String(d.repoPath ?? '').trim());
       if (ds?.repoPath) return String(ds.repoPath).trim();
     }

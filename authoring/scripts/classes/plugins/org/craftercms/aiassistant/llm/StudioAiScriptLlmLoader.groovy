@@ -121,7 +121,7 @@ final class StudioAiScriptLlmLoader {
       extras.add(tccl)
     }
     try {
-      Object ctx = ops?.crafterqStudioApplicationContext()
+      Object ctx = ops?.studioApplicationContext()
       ClassLoader ctxCl = ctx?.getClassLoader()
       if (ctxCl != null) {
         extras.add(ctxCl)

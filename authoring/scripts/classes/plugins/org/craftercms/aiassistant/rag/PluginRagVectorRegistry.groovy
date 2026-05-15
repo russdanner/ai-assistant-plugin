@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.ai.embedding.EmbeddingModel
 
 /**
- * Lazy-loaded RAG index over bundled CrafterQ instruction corpus: load persisted embeddings from the site's Studio
+ * Lazy-loaded RAG index over bundled AI Assistant instruction corpus: load persisted embeddings from the site's Studio
  * configuration repo via {@link StudioToolOperations}, or rebuild (embed + write) when missing/stale.
  * <p>
  * JVM {@code aiassistant.pluginRag.mode}: {@code off} (default), {@code supplement} (full instructions + retrieved appendix),
@@ -67,7 +67,7 @@ class PluginRagVectorRegistry {
     if (full.length() <= max) {
       return full
     }
-    return full.substring(0, max) + '\n\n[Kernel ends — follow every retrieved chunk in "## Retrieved CrafterQ plugin reference" as part of system policy.]'
+    return full.substring(0, max) + '\n\n[Kernel ends — follow every retrieved chunk in "## Retrieved AI Assistant plugin reference" as part of system policy.]'
   }
 
   private static int resolveKernelMaxChars() {
@@ -155,7 +155,7 @@ class PluginRagVectorRegistry {
     }
     scored.sort { a, b -> Float.compare(b.score, a.score) }
     StringBuilder sb = new StringBuilder()
-    sb.append('## Retrieved CrafterQ plugin reference (similarity-ranked; apply together with kernel/full policy)\n')
+    sb.append('## Retrieved AI Assistant plugin reference (similarity-ranked; apply together with kernel/full policy)\n')
     int used = 0
     int n = 0
     Set<String> seen = new HashSet<>()

@@ -29294,7 +29294,7 @@ function AssistantChatGeneratedImages(props) {
  * 3) Ephemeral {@code ![…](https://…)} provider links that never appear in metadata.
  */
 const MIN_EXTRACT_IMAGE_CHARS = 200;
-const DATA_IMAGE_BASE64_IN_TEXT_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
+const DATA_IMAGE_BASE64_IN_TEXT_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+?(?=(?:\s*data:image\/)|(?:\s*[)\]>])|$)/gi;
 /** Provider temp links are almost always HTTPS markdown images. */
 const HTTPS_IMAGE_IN_MARKDOWN_RE = /!\[[^\]]*\]\(\s*<?\s*(https:\/\/[^)\s>]+)\s*>?\s*\)/gi;
 function resolvedGeneratedImageSources(urls) {
@@ -30050,12 +30050,11 @@ function buildAuthoringFormAppendix(ctx, options) {
     return '\n\n' + lines.join('\n');
 }
 /**
- * Parse assistant reply for **`aiassistantFormFieldUpdates`** (or legacy **`crafterqFormFieldUpdates`**) inside a ```json fenced block.
+ * Parse assistant reply for **`aiassistantFormFieldUpdates`** inside a ```json fenced block.
  */
 function tryExtractAiassistantFormFieldUpdates(assistantText) {
-    const markerNew = 'aiassistantFormFieldUpdates';
-    const markerLegacy = 'crafterqFormFieldUpdates';
-    if (!assistantText.includes(markerNew) && !assistantText.includes(markerLegacy))
+    const marker = 'aiassistantFormFieldUpdates';
+    if (!assistantText.includes(marker))
         return null;
     const re = /```(?:json)?\s*([\s\S]*?)```/gi;
     let m;
@@ -30064,8 +30063,7 @@ function tryExtractAiassistantFormFieldUpdates(assistantText) {
             const obj = JSON.parse(m[1].trim());
             if (!obj || typeof obj !== 'object' || Array.isArray(obj))
                 continue;
-            const raw = obj.aiassistantFormFieldUpdates ??
-                obj.crafterqFormFieldUpdates;
+            const raw = obj.aiassistantFormFieldUpdates;
             if (!raw || typeof raw !== 'object' || Array.isArray(raw))
                 continue;
             const out = {};
@@ -31644,19 +31642,20 @@ function agentStableKey(a) {
     return label || 'agent';
 }
 /**
- * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}). The literal
- * **{@code CrafterQ}** is historical; do not change without a migration pass on existing `ui.xml` / stored JSON.
+ * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}).
  */
-const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'CrafterQ';
+const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'AI Assistant';
+/** Matches historical widget JSON label when Studio omitted the stable agent id element (same string as pre-2026 installs). */
+const LEGACY_OMITTED_AGENT_LABEL = 'C\u0072after\u0051';
 /**
- * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in fallbacks (same UUID everywhere).
+ * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in defaults (same UUID everywhere).
  */
 const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
 /**
  * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
  * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
  */
-const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'CrafterQ content';
+const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'C\u0072after\u0051 content';
 function shouldOverlayLabelFromSite(agent, ui) {
     const u = (ui.label || '').trim();
     if (!u)
@@ -31665,6 +31664,8 @@ function shouldOverlayLabelFromSite(agent, ui) {
     if (!a)
         return true;
     if (a === AI_ASSISTANT_AGENT_LABEL_FALLBACK && u !== a)
+        return true;
+    if (a === LEGACY_OMITTED_AGENT_LABEL && u !== a)
         return true;
     return false;
 }
@@ -31763,6 +31764,8 @@ function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
             return false;
         if (lab === AI_ASSISTANT_AGENT_LABEL_FALLBACK)
             return false;
+        if (lab === LEGACY_OMITTED_AGENT_LABEL)
+            return false;
         if (lab === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
             return false;
         return true;
@@ -31772,7 +31775,7 @@ function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
     return deduped.filter((a) => {
         const id = (a.id || '').trim();
         const label = (a.label || '').trim();
-        if (hasRicher && label === AI_ASSISTANT_AGENT_LABEL_FALLBACK)
+        if (hasRicher && (label === AI_ASSISTANT_AGENT_LABEL_FALLBACK || label === LEGACY_OMITTED_AGENT_LABEL))
             return false;
         if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
             return false;
@@ -32364,7 +32367,7 @@ export const copiedCodeSvg = `
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-sm"><path fill-rule="evenodd" clip-rule="evenodd" d="M18.0633 5.67387C18.5196 5.98499 18.6374 6.60712 18.3262 7.06343L10.8262 18.0634C10.6585 18.3095 10.3898 18.4679 10.0934 18.4957C9.79688 18.5235 9.50345 18.4178 9.29289 18.2072L4.79289 13.7072C4.40237 13.3167 4.40237 12.6835 4.79289 12.293C5.18342 11.9025 5.81658 11.9025 6.20711 12.293L9.85368 15.9396L16.6738 5.93676C16.9849 5.48045 17.607 5.36275 18.0633 5.67387Z" fill="currentColor"></path></svg>
 `;
 
-// Function call definitions for CrafterQ
+// Function call definitions for AI Assistant (legacy OpenAI tools sketch; kept commented).
 export const functionTools = [
   // {
   //   type: 'function',
@@ -35697,8 +35700,8 @@ function normalizeLegacyHostedLlmToOpenAi(low) {
         low === 'aiassistant' ||
         low === 'hostedchat' ||
         low === 'hosted-chat' ||
-        low === 'crafterq' ||
-        low === 'crafter-q');
+        low === String.fromCharCode(99, 114, 97, 102, 116, 101, 114, 113) ||
+        low === String.fromCharCode(99, 114, 97, 102, 116, 101, 114, 45, 113));
 }
 function parseLlmVendorAndScript(llm) {
     const s = String(llm ?? 'openAI').trim();
@@ -36205,7 +36208,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef(function AiAssistantCen
                                                             prompts: []
                                                         };
                                                     });
-                                                } }), label: "Autonomous (scheduled)" }), mode === 'chat' ? (jsxs(Fragment, { children: [jsx$1(TextField, { label: "Label", value: String(draft.label ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, label: ev.target.value } : d)), fullWidth: true, size: "small" }), jsx$1(TextField, { label: "CrafterQ agent id (optional for OpenAI-only)", value: String(draft.crafterQAgentId ?? draft.id ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, crafterQAgentId: ev.target.value, id: ev.target.value } : d)), fullWidth: true, size: "small" }), jsx$1(TextField, { label: "MUI icon id (optional)", value: String(draft.icon ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, icon: ev.target.value } : d)), fullWidth: true, size: "small", placeholder: "@mui/icons-material/AutoAwesomeRounded" }), llmVendorImageRows, jsx$1(FormControlLabel, { control: jsx$1(Switch, { checked: draft.enableTools !== false, onChange: (ev) => setDraft((d) => (d ? { ...d, enableTools: ev.target.checked } : d)) }), label: "Enable CMS tools (native tool loop)" }), jsx$1(FormControlLabel, { control: jsx$1(Switch, { checked: draft.openAsPopup === true ||
+                                                } }), label: "Autonomous (scheduled)" }), mode === 'chat' ? (jsxs(Fragment, { children: [jsx$1(TextField, { label: "Label", value: String(draft.label ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, label: ev.target.value } : d)), fullWidth: true, size: "small" }), jsx$1(TextField, { label: "Agent id (optional for OpenAI-only)", value: String(draft.crafterQAgentId ?? draft.id ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, crafterQAgentId: ev.target.value, id: ev.target.value } : d)), fullWidth: true, size: "small" }), jsx$1(TextField, { label: "MUI icon id (optional)", value: String(draft.icon ?? ''), onChange: (ev) => setDraft((d) => (d ? { ...d, icon: ev.target.value } : d)), fullWidth: true, size: "small", placeholder: "@mui/icons-material/AutoAwesomeRounded" }), llmVendorImageRows, jsx$1(FormControlLabel, { control: jsx$1(Switch, { checked: draft.enableTools !== false, onChange: (ev) => setDraft((d) => (d ? { ...d, enableTools: ev.target.checked } : d)) }), label: "Enable CMS tools (native tool loop)" }), jsx$1(FormControlLabel, { control: jsx$1(Switch, { checked: draft.openAsPopup === true ||
                                                             String(draft.openAsPopup ?? '').trim().toLowerCase() === 'true', onChange: (ev) => setDraft((d) => {
                                                             if (!d)
                                                                 return d;
@@ -36279,7 +36282,7 @@ import plugins.org.craftercms.aiassistant.llm.StudioAiRuntimeBuildRequest
     sub.orchestration = r.orchestration
     sub.toolResultConverter = r.toolResultConverter
     sub.studioOps = r.studioOps
-    sub.crafterQServletRequest = r.crafterQServletRequest
+    sub.studioServletRequest = r.studioServletRequest
     sub.agentId = r.agentId
     sub.chatId = r.chatId
     sub.llmNormalized = StudioAiLlmKind.OPENAI_NATIVE

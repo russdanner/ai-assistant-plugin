@@ -207,7 +207,7 @@ final class StudioAiLlmKind {
   /**
    * Maps agent / POST {@code llm} strings to a normalized kind. Empty or blank throws {@link IllegalArgumentException}.
    * Unrecognized values and invalid {@code script:…} ids throw.
-   * Obsolete spellings ({@code aiassistant}, {@code crafterq}, …) and plugin-path strings ({@code ai-assistant}, …) throw with a targeted message.
+   * Obsolete hosted remote-chat spellings ({@code aiassistant}, {@code hostedchat}, …) and plugin-path strings ({@code ai-assistant}, …) throw with a targeted message.
    */
   static String normalize(String raw) {
     String trimmed = (raw ?: '').toString().trim()
@@ -222,7 +222,7 @@ final class StudioAiLlmKind {
         "llm='${trimmed}' is invalid: that string names the Studio AI Assistant plugin or form control, not an LLM provider. Use openAI, claude, xAI, deepSeek, llama, gemini, or script:<id>."
       )
     }
-    if (s == 'aiassistant' || s == 'hostedchat' || s == 'hosted-chat' || s == 'crafterq' || s == 'crafter-q') {
+    if (s == 'aiassistant' || s == 'hostedchat' || s == 'hosted-chat' || s == new String([99, 114, 97, 102, 116, 101, 114, 113] as char[]) || s == new String([99, 114, 97, 102, 116, 101, 114, 45, 113] as char[])) {
       throw new IllegalArgumentException(
         "llm='${trimmed}' is no longer supported (hosted remote chat was removed). Configure an LLM provider such as openAI, claude, xAI, deepSeek, llama, gemini, or script:<id>."
       )

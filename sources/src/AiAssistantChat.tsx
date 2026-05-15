@@ -713,21 +713,18 @@ function buildAuthoringFormAppendix(
 }
 
 /**
- * Parse assistant reply for **`aiassistantFormFieldUpdates`** (or legacy **`crafterqFormFieldUpdates`**) inside a ```json fenced block.
+ * Parse assistant reply for **`aiassistantFormFieldUpdates`** inside a ```json fenced block.
  */
 function tryExtractAiassistantFormFieldUpdates(assistantText: string): Record<string, string> | null {
-  const markerNew = 'aiassistantFormFieldUpdates';
-  const markerLegacy = 'crafterqFormFieldUpdates';
-  if (!assistantText.includes(markerNew) && !assistantText.includes(markerLegacy)) return null;
+  const marker = 'aiassistantFormFieldUpdates';
+  if (!assistantText.includes(marker)) return null;
   const re = /```(?:json)?\s*([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(assistantText)) !== null) {
     try {
       const obj = JSON.parse(m[1].trim()) as unknown;
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
-      const raw =
-        (obj as { aiassistantFormFieldUpdates?: unknown }).aiassistantFormFieldUpdates ??
-        (obj as { crafterqFormFieldUpdates?: unknown }).crafterqFormFieldUpdates;
+      const raw = (obj as { aiassistantFormFieldUpdates?: unknown }).aiassistantFormFieldUpdates;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw)) {

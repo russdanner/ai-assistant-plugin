@@ -227,11 +227,6 @@ class StudioToolOperations {
         def s = a.toString()?.trim()
         if (s) return s
       }
-      def legacyPreview = request.getAttribute('crafterq.previewToken')
-      if (legacyPreview != null) {
-        def s2 = legacyPreview.toString()?.trim()
-        if (s2) return s2
-      }
     } catch (Throwable ignored) {}
     try {
       def cookies = request.getCookies()
@@ -327,7 +322,7 @@ class StudioToolOperations {
     def tok = (crafterPreviewTokenResolved ?: '').toString().trim()
     if (!tok) return ''
     String site = (siteIdForCookie ?: '').toString().trim()
-    String raw = (crafterqFrozenCookieHeader ?: '').trim()
+    String raw = (frozenCookieHeaderFromRequest ?: '').trim()
     if (!raw) {
       try {
         raw = request?.getHeader('Cookie')?.toString()?.trim() ?: ''
@@ -458,13 +453,13 @@ class StudioToolOperations {
    * Studio Experience Builder preview cookie value ({@code crafterPreview}), set on the HTTP request as attribute
    * {@code aiassistant.previewToken} by the chat/stream REST scripts when the UI POSTs it.
    */
-  private final String crafterqPreviewToken
+  private final String resolvedPreviewTokenFromRequest
   /**
    * Snapshot of {@code Cookie} from the Studio chat/stream servlet request at {@code StudioToolOperations} construction
    * (servlet thread). Tool callbacks run on worker threads where {@code request.getHeader("Cookie")} can be empty; Engine
    * preview GET still needs forwarded non-session cookies (e.g. other Studio cookies), plus {@code crafterPreview} / {@code crafterSite}.
    */
-  private final String crafterqFrozenCookieHeader
+  private final String frozenCookieHeaderFromRequest
   /** Resolved once: v2 {@code contentService} (reads/history only on studio {@code support/4.x} — no {@code write} there). */
   final Object contentServiceBean
   /** Resolved once for support/4.x direct calls. */
@@ -493,16 +488,16 @@ class StudioToolOperations {
     try {
       frozenCookie = request?.getHeader('Cookie')?.toString()?.trim() ?: ''
     } catch (Throwable ignored) {}
-    this.crafterqFrozenCookieHeader = frozenCookie
-    this.crafterqPreviewToken = readCrafterPreviewTokenFromServletRequest(request)
+    this.frozenCookieHeaderFromRequest = frozenCookie
+    this.resolvedPreviewTokenFromRequest = readCrafterPreviewTokenFromServletRequest(request)
     this.contentServiceBean = resolveRequiredBean('contentService',
-      'Studio bean contentService not found. CrafterQ expects the same in-process content service Crafter Studio registers (support/4.x).')
+      'Studio bean contentService not found. The AI Assistant expects the same in-process content service Crafter Studio registers (support/4.x).')
     this.configurationServiceBean = resolveRequiredBean('configurationService',
-      'Studio configurationService bean not found (configurationService). CrafterQ tools use the Studio JVM only.')
+      'Studio configurationService bean not found (configurationService). AI Assistant tools use the Studio JVM only.')
     this.deploymentServiceBean = resolveRequiredBean('cstudioDeploymentService',
       'Studio cstudioDeploymentService bean not found (DeploymentService).')
     this.cstudioContentServiceBean = resolveRequiredBean('cstudioContentService',
-      'Studio cstudioContentService bean not found (v1 ContentService). CrafterQ writeContent uses this bean.')
+      'Studio cstudioContentService bean not found (v1 ContentService). AI Assistant writeContent uses this bean.')
     Object cts = null
     try {
       cts = applicationContext?.get('cstudioContentTypeService')
@@ -519,7 +514,7 @@ class StudioToolOperations {
    * Exposed for site-authored Groovy under {@code config/studio/scripts/aiassistant/user-tools/} (see {@code StudioAiUserSiteTools}).
    * Prefer {@link StudioToolOperations} methods for repository work; use the context only when you need additional Spring beans.
    */
-  Object crafterqStudioApplicationContext() {
+  Object studioApplicationContext() {
     applicationContext
   }
 
@@ -555,9 +550,6 @@ class StudioToolOperations {
   int resolveTranslateBatchDefaultMaxConcurrency() {
     try {
       def v = request?.getAttribute('aiassistant.translateBatchConcurrency')
-      if (v == null) {
-        v = request?.getAttribute('crafterq.translateBatchConcurrency')
-      }
       if (v instanceof Number) {
         int n = ((Number) v).intValue()
         return Math.max(1, Math.min(64, n))
@@ -596,7 +588,6 @@ class StudioToolOperations {
     def reqSite = ''
     try {
       reqSite = request?.getAttribute('aiassistant.siteId')?.toString()?.trim() ?: ''
-      if (!reqSite) reqSite = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('crafterSite')?.toString()?.trim() ?: ''
       if (!reqSite && params != null) {
@@ -2241,14 +2232,14 @@ class StudioToolOperations {
     }
     urlStr = rewriteStudioPreviewShellUrlForEngineFetch(urlStr, siteForQuery)
     String token = (toolPreviewToken ?: '').toString().trim()
-    if (!token) token = crafterqPreviewToken ?: ''
+    if (!token) token = resolvedPreviewTokenFromRequest ?: ''
     if (!token) token = readCrafterPreviewTokenFromServletRequest(request) ?: ''
     if (!token) {
       return [
         ok     : false,
         action : 'get_preview_html',
         message:
-          'Missing preview token: pass previewToken in tool arguments, send previewToken in the CrafterQ chat POST body, or ensure the browser sends the crafterPreview cookie on the chat request (HttpOnly cookies are read server-side).'
+          'Missing preview token: pass previewToken in tool arguments, send previewToken in the AI Assistant chat POST body, or ensure the browser sends the crafterPreview cookie on the chat request (HttpOnly cookies are read server-side).'
       ]
     }
     // Tool/UI may echo crafterPreview in the URL with literal '+' (base64); form-style query parsing treats '+' as
@@ -2691,7 +2682,7 @@ class StudioToolOperations {
           'text/html,text/css,text/plain,text/javascript,application/javascript,application/json,application/xhtml+xml,*/*;q=0.5'
         )
         conn.setRequestProperty('Accept-Encoding', 'identity')
-        conn.setRequestProperty('User-Agent', 'CrafterQ-Studio-Plugin/1.0 (+https://craftercms.org)')
+        conn.setRequestProperty('User-Agent', 'CrafterCMS-AI-Assistant-Studio-Plugin/1.0 (+https://craftercms.org)')
         int status = conn.getResponseCode()
         if (status >= 300 && status < 400 && redirectCount < maxRedirects) {
           String loc = conn.getHeaderField('Location')?.toString()?.trim()

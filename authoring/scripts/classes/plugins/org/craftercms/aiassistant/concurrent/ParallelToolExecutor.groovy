@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * JVM-wide bounded executor for CrafterQ parallel server tool work (e.g. {@code TranslateContentBatch} cells).
+ * JVM-wide bounded executor for parallel server tool work (e.g. {@code TranslateContentBatch} cells).
  * <p>Uses named <strong>daemon</strong> threads (not Tomcat HTTP workers). Callers bound per-job parallelism with a
  * {@link java.util.concurrent.Semaphore}; this pool only provides stable capacity + a bounded queue so bursts do not
  * spawn unbounded short-lived pools or risk queue growth without limit.</p>
@@ -35,21 +35,6 @@ final class ParallelToolExecutor {
     return defaultValue
   }
 
-  /** Prefer {@code aiassistant.*}; fall back to legacy {@code crafterq.*} JVM keys (compatibility). */
-  private static int resolveIntPropPrimaryOrLegacy(String primaryKey, String legacyKey, int defaultValue, int min, int max) {
-    try {
-      def p = System.getProperty(primaryKey)?.toString()?.trim()
-      if (!p) {
-        p = System.getProperty(legacyKey)?.toString()?.trim()
-      }
-      if (p) {
-        int v = Integer.parseInt(p)
-        return Math.max(min, Math.min(max, v))
-      }
-    } catch (Throwable ignored) {}
-    return defaultValue
-  }
-
   static ThreadPoolExecutor executor() {
     ThreadPoolExecutor ex = INSTANCE
     if (ex != null && !ex.isShutdown()) {
@@ -61,37 +46,19 @@ final class ParallelToolExecutor {
         return ex
       }
       int n = Math.max(1, Runtime.runtime.availableProcessors())
-      int maxPool = resolveIntPropPrimaryOrLegacy(
-        'aiassistant.parallelToolPoolMax',
-        'crafterq.parallelToolPoolMax',
-        Math.min(32, Math.max(8, n * 2)),
-        2,
-        64
-      )
-      int corePool = resolveIntPropPrimaryOrLegacy(
-        'aiassistant.parallelToolPoolCore',
-        'crafterq.parallelToolPoolCore',
-        Math.min(maxPool, Math.max(2, n)),
-        1,
-        maxPool
-      )
+      int maxPool = resolveIntProp('aiassistant.parallelToolPoolMax', Math.min(32, Math.max(8, n * 2)), 2, 64)
+      int corePool = resolveIntProp('aiassistant.parallelToolPoolCore', Math.min(maxPool, Math.max(2, n)), 1, maxPool)
       if (corePool > maxPool) {
         corePool = maxPool
       }
-      int queueCap = resolveIntPropPrimaryOrLegacy(
-        'aiassistant.parallelToolPoolQueue',
-        'crafterq.parallelToolPoolQueue',
-        512,
-        16,
-        4096
-      )
+      int queueCap = resolveIntProp('aiassistant.parallelToolPoolQueue', 512, 16, 4096)
       ThreadFactory tf = { Runnable r ->
         Thread t = new Thread(r, 'aiassistant-parallel-tools-' + THREAD_SEQ.getAndIncrement())
         t.setDaemon(true)
         t.setUncaughtExceptionHandler(
           new Thread.UncaughtExceptionHandler() {
             void uncaughtException(Thread th, Throwable err) {
-              log.error('Uncaught exception on CrafterQ parallel tool thread {}', th?.name, err)
+              log.error('Uncaught exception on parallel tool thread {}', th?.name, err)
             }
           })
         t

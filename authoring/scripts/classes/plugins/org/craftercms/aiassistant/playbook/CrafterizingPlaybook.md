@@ -52,4 +52,4 @@ Maintain `/docs/` (README, pages, components, items, global, architecture diagra
 
 ---
 
-*This file is loaded at runtime by the CrafterQ plugin. Edit it to match your team’s conventions.*
+*This file is loaded at runtime by the AI Assistant plugin. Edit it to match your team’s conventions.*

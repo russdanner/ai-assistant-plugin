@@ -18,7 +18,7 @@ import plugins.org.craftercms.aiassistant.llm.StudioAiRuntimeBuildRequest
     sub.orchestration = r.orchestration
     sub.toolResultConverter = r.toolResultConverter
     sub.studioOps = r.studioOps
-    sub.crafterQServletRequest = r.crafterQServletRequest
+    sub.studioServletRequest = r.studioServletRequest
     sub.agentId = r.agentId
     sub.chatId = r.chatId
     sub.llmNormalized = StudioAiLlmKind.OPENAI_NATIVE

@@ -33,15 +33,6 @@ class ExpertSkillVectorRegistry {
   private static final ConcurrentHashMap<String, SimpleVectorStore> STORES = new ConcurrentHashMap<>()
   private static final ConcurrentHashMap<String, Object> LOCKS = new ConcurrentHashMap<>()
 
-  /** Prefer {@code aiassistant.expertSkill.*}; fall back to legacy {@code crafterq.expertSkill.*}. */
-  private static String sysPropExpertSkillPrimaryOrLegacy(String primaryKey, String legacyKey) {
-    def p = System.getProperty(primaryKey)?.toString()?.trim()
-    if (p) {
-      return p
-    }
-    return System.getProperty(legacyKey)?.toString()?.trim()
-  }
-
   /** Stable id for RAG corpus keyed by URL (first 16 hex chars of SHA-256 of trimmed URL UTF-8). */
   static String skillIdForUrl(String url) {
     def u = (url ?: '').toString().trim()
@@ -66,7 +57,7 @@ class ExpertSkillVectorRegistry {
     Set<String> seen = new HashSet<>()
     int cap = 12
     try {
-      def p = sysPropExpertSkillPrimaryOrLegacy('aiassistant.expertSkill.maxSkills', 'crafterq.expertSkill.maxSkills')
+      def p = System.getProperty('aiassistant.expertSkill.maxSkills')?.toString()?.trim()
       if (p) {
         cap = Math.min(32, Math.max(1, Integer.parseInt(p)))
       }
@@ -101,7 +92,7 @@ class ExpertSkillVectorRegistry {
   }
 
   static String resolveEmbeddingModelName() {
-    def p = sysPropExpertSkillPrimaryOrLegacy('aiassistant.expertSkill.embeddingModel', 'crafterq.expertSkill.embeddingModel')
+    def p = System.getProperty('aiassistant.expertSkill.embeddingModel')?.toString()?.trim()
     return p ?: 'text-embedding-3-small'
   }
 
@@ -173,7 +164,7 @@ class ExpertSkillVectorRegistry {
       }
       int maxChunks = 400
       try {
-        def pc = sysPropExpertSkillPrimaryOrLegacy('aiassistant.expertSkill.maxChunks', 'crafterq.expertSkill.maxChunks')
+        def pc = System.getProperty('aiassistant.expertSkill.maxChunks')?.toString()?.trim()
         if (pc) {
           maxChunks = Math.min(2000, Math.max(8, Integer.parseInt(pc)))
         }
@@ -182,7 +173,7 @@ class ExpertSkillVectorRegistry {
       }
       int maxChunkChars = 1800
       try {
-        def pcc = sysPropExpertSkillPrimaryOrLegacy('aiassistant.expertSkill.maxChunkChars', 'crafterq.expertSkill.maxChunkChars')
+        def pcc = System.getProperty('aiassistant.expertSkill.maxChunkChars')?.toString()?.trim()
         if (pcc) {
           maxChunkChars = Math.min(8000, Math.max(512, Integer.parseInt(pcc)))
         }

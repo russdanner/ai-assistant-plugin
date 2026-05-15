@@ -4,7 +4,7 @@ Companion to **[`spec.md`](spec.md)** for tools, REST bodies, MCP, and runtime t
 
 **Audience:** Maintainers and advanced integrators working on **tools**, **SSE**, or **Studio integration**. For **`<llm>`** selection and keys, see [llm-configuration.md](../using-and-extending/llm-configuration.md).
 
-**Hosted-only `<llm>` via remote CrafterQ chat:** earlier releases could use CrafterQ-hosted **`llm`** values tied to `api.crafterq.ai`. That path **has been removed**. Chat always runs against **your configured provider** (**`openAI`**, **`claude`**, **`script:{id}`**, etc.); legacy spellings such as **`crafterQ`**, **`aiassistant`**, and **`hostedchat`** are **rejected** by **`StudioAiLlmKind.normalize`** (**HTTP 400**).
+**Hosted-only `<llm>` via removed remote chat integration:** earlier releases could use hosted **`llm`** values tied to a third-party API host. That path **has been removed**. Chat always runs against **your configured provider** (**`openAI`**, **`claude`**, **`script:{id}`**, etc.); legacy spellings such as **`crafterQ`**, **`aiassistant`**, and **`hostedchat`** are **rejected** by **`StudioAiLlmKind.normalize`** (**HTTP 400**).
 
 **Optional CrafterQ tools (integration):** a CrafterQ deployment may still be reachable as **optional** function tools the model can call when a site wires them (e.g. list agents, list conversations, ask an expert). That is an **add-on integration**, not part of core Studio authoring UX and not implied by the **`crafterQAgentId`** XML tag name.
 
@@ -78,7 +78,7 @@ Each **`crafterQAgentId`** value is the stable **`agentId`** sent on **`/ai/stre
 
 ---
 
-## `ui.xml` merge helper (`CrafterQBearerUiXmlMerge`)
+## `ui.xml` merge helper (`AiAssistantBearerUiXmlMerge`)
 
 Despite the class name, this helper **only** merges **`llm`**, **`llmModel`**, **`imageModel`**, and **`imageGenerator`** from the matching **`<agent>`** row when those fields are missing on the POST body. Matching uses **`crafterQAgentId`** **===** request **`agentId`**.
 
@@ -104,9 +104,9 @@ Sites can attach **remote MCP servers** so **tools-loop chat** agents (and other
 
 - Each MCP tool from **`tools/list`** becomes a Studio tool whose name is **`mcp_<serverId>_<mcpToolName>`** (non-alphanumeric segments collapsed to `_`, total length capped at **64** characters to match the **tools-loop** wire’s tool-name constraints).
 - **Per chat request**, when the plugin builds **`AiOrchestrationTools`**, it runs **`initialize`** → **`notifications/initialized`** → **`tools/list`** for **each** configured server, then keeps a **single session** (including **`Mcp-Session-Id`** when returned) for all **`tools/call`** invocations from that request.
-- **Security:** MCP **`url`** values use the **same SSRF policy** as **`FetchHttpUrl`** (`StudioToolOperations.validateOutboundHttpUrlForSsrf`). Host allowlists and disabling outbound fetch (which also blocks MCP) are **JVM-only** — see **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (`crafterq.httpFetch.*`).
+- **Security:** MCP **`url`** values use the **same SSRF policy** as **`FetchHttpUrl`** (`StudioToolOperations.validateOutboundHttpUrlForSsrf`). Host allowlists and disabling outbound fetch (which also blocks MCP) are **JVM-only** — see **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (`aiassistant.httpFetch.*`).
 - **Whitelist:** When **`enabledBuiltInTools`** is a non-empty whitelist, **built-in** CMS tools are filtered to that list, but **`mcp_*`** tools and **`InvokeSiteUserTool`** are **still registered** unless their wire names appear in **`disabledBuiltInTools`** / **`disabledMcpTools`**.
-- **Response size:** MCP HTTP bodies are capped server-side (default **500000** characters); JVM override: **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (`crafterq.mcp.maxResponseChars`).
+- **Response size:** MCP HTTP bodies are capped server-side (default **500000** characters); JVM override: **[studio-aiassistant-jvm-parameters.md](../using-and-extending/studio-aiassistant-jvm-parameters.md)** (`aiassistant.mcp.maxResponseChars`).
 
 ---
 
@@ -178,7 +178,7 @@ The React widget sends `llm` / model / key from the selected agent config and se
 
 Edit that file to change phases, checklists, and team conventions without changing Groovy.
 
-**Override (optional):** absolute path to a markdown file via JVM — see **[studio-aiassistant-jvm-parameters.md § Misc](../using-and-extending/studio-aiassistant-jvm-parameters.md#misc)** (`crafterq.crafterizingPlaybook.path`).
+**Override (optional):** absolute path to a markdown file via JVM — see **[studio-aiassistant-jvm-parameters.md § Misc](../using-and-extending/studio-aiassistant-jvm-parameters.md#misc)** (`aiassistant.crafterizingPlaybook.path`).
 
 If the file is missing at runtime, the tool still returns a short embedded fallback and sets `loadedFromEditableFile: false` in the JSON result.
 
@@ -198,7 +198,7 @@ If you see **`Unexpected end-of-input`** while parsing `ChatCompletion` during *
 
 - **Fix (ops):** Ensure the **authoring OpenSearch** service is running and reachable from the Studio JVM (Docker Compose / Kubernetes / local install — match your Crafter distribution docs). Until search is up, **`GetContent` / `WriteContent` / `GetContentTypeFormDefinition`** still work when you pass a real **`siteId`** and repository **`path`**.
 - **Plugin behavior:** If OpenSearch is down, `ListPagesAndComponents` returns a JSON tool result with **`error: true`** and a short message instead of throwing, so the chat stream can continue and the model can fall back to paths the user provides.
-- **`siteId`:** The widget and REST body should send the **actual Studio site id** (e.g. `new-demo` for this repo’s default local test site in `install-plugin.sh`). If the model passes `default`, the server substitutes the request’s `siteId` when present (`crafterq.siteId` attribute / query / body).
+- **`siteId`:** The widget and REST body should send the **actual Studio site id** (e.g. `new-demo` for this repo’s default local test site in `install-plugin.sh`). If the model passes `default`, the server substitutes the request’s `siteId` when present (`aiassistant.siteId` request attribute / query / body).
 
 ### `WriteContent` Returns `ok: false` / “No Commit” (Studio Did Not Save)
 

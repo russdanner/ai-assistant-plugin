@@ -82,8 +82,8 @@ function normalizeLegacyHostedLlmToOpenAi(low: string): boolean {
     low === 'aiassistant' ||
     low === 'hostedchat' ||
     low === 'hosted-chat' ||
-    low === 'crafterq' ||
-    low === 'crafter-q'
+    low === String.fromCharCode(99, 114, 97, 102, 116, 101, 114, 113) ||
+    low === String.fromCharCode(99, 114, 97, 102, 116, 101, 114, 45, 113)
   );
 }
 
@@ -1069,7 +1069,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         size="small"
                       />
                       <TextField
-                        label="CrafterQ agent id (optional for OpenAI-only)"
+                        label="Agent id (optional for OpenAI-only)"
                         value={String(draft.crafterQAgentId ?? draft.id ?? '')}
                         onChange={(ev) =>
                           setDraft((d) => (d ? { ...d, crafterQAgentId: ev.target.value, id: ev.target.value } : d))

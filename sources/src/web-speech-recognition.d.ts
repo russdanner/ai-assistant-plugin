@@ -1,5 +1,5 @@
 /**
- * Minimal Web Speech API surface used by CrafterQ voice input.
+ * Minimal Web Speech API surface used by AI Assistant voice input.
  * Some TS `lib` combinations omit these global types even with `"DOM"`.
  */
 interface SpeechRecognitionResultList {

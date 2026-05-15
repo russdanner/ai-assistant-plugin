@@ -7,7 +7,7 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
 
 /**
  * Inputs for {@link StudioAiLlmRuntime#buildSessionBundle(StudioAiRuntimeBuildRequest)} — shared servlet-thread context
- * plus pre-built {@link StudioToolOperations} (security context, CrafterQ caps).
+ * plus pre-built {@link StudioToolOperations} (security context, Studio caps).
  */
 class StudioAiRuntimeBuildRequest {
 
@@ -15,8 +15,8 @@ class StudioAiRuntimeBuildRequest {
   /** Spring AI {@code ToolCallResultConverter} or Groovy closure; typed as {@code Object} so site Groovy compiles without that class on the script classpath. */
   Object toolResultConverter
   StudioToolOperations studioOps
-  /** Studio chat/stream servlet request (CrafterQ adapter forwards headers/cookies). */
-  Object crafterQServletRequest
+  /** Studio chat/stream servlet request (headers/cookies forwarded for script LLM helpers). */
+  Object studioServletRequest
 
   String agentId
   String chatId

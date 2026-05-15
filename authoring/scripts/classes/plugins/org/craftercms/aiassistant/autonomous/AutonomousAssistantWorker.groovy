@@ -154,7 +154,7 @@ final class AutonomousAssistantWorker {
           orchestration: orch,
           toolResultConverter: null,
           studioOps: studioOps,
-          crafterQServletRequest: null,
+          studioServletRequest: null,
           agentId: fullAgentId,
           chatId: null,
           llmNormalized: normLlm,

@@ -2,7 +2,7 @@ import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
-import plugins.org.craftercms.aiassistant.http.CrafterQBearerUiXmlMerge
+import plugins.org.craftercms.aiassistant.http.AiAssistantBearerUiXmlMerge
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 import plugins.org.craftercms.aiassistant.prompt.ToolPromptsSiteContext
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -60,25 +60,22 @@ def openAiApiKey = body.openAiApiKey?.toString()
 if (siteIdBody) {
   try {
     request.setAttribute('aiassistant.siteId', siteIdBody)
-    request.setAttribute('crafterq.siteId', siteIdBody)
   } catch (Throwable ignored) {}
 }
 def previewTokenBody = body?.previewToken?.toString()?.trim()
 if (previewTokenBody) {
   try {
     request.setAttribute('aiassistant.previewToken', previewTokenBody)
-    request.setAttribute('crafterq.previewToken', previewTokenBody)
   } catch (Throwable ignored) {}
 }
 def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
 try {
   request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
-  request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
 } catch (Throwable ignored) {}
 def siteForBearer = siteIdBody ?: params?.siteId?.toString()?.trim()
 if (body instanceof Map && siteForBearer && agentId) {
   try {
-    CrafterQBearerUiXmlMerge.mergeStreamAgentFieldsFromSiteUiXmlIfMissing(applicationContext, (Map) body, siteForBearer, agentId)
+    AiAssistantBearerUiXmlMerge.mergeStreamAgentFieldsFromSiteUiXmlIfMissing(applicationContext, (Map) body, siteForBearer, agentId)
   } catch (Throwable mergeEx) {
     log.debug('Agent ui.xml merge skipped: {}', mergeEx.message ?: mergeEx.toString())
   }

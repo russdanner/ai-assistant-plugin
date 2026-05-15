@@ -92,14 +92,14 @@ class AiOrchestration {
    * Max wait for Spring AI {@code chatResponse()} flux to finish (complete or error), and for the native-tools
    * RestClient loop ({@code Future#get}) on the worker thread.
    * Default **10 minutes** — aligns with {@code CHAT_STREAM_TIMEOUT_MS} in {@code AiAssistantChat.tsx} (600_000).
-   * Override JVM {@code crafterq.chatFluxAwaitMs} (120_000–1_200_000).
+   * Override JVM {@code aiassistant.chatFluxAwaitMs} (120_000–1_200_000).
    * On expiry we {@code dispose()} the subscription / cancel the future so the outbound HTTP call is torn down
    * (the upstream chat host sees a client disconnect on that connection).
    */
   private static final long CHAT_FLUX_AWAIT_MS = resolveChatFluxAwaitMs()
 
   /** Worker throws {@link InterruptedException} with this message when the SSE client disconnects or Stop cancels the pipeline. */
-  private static final String AIASSISTANT_PIPELINE_CANCELLED = 'crafterq.pipeline.cancelled'
+  private static final String AIASSISTANT_PIPELINE_CANCELLED = 'aiassistant.pipeline.cancelled'
 
   /**
    * Max characters per {@code role:tool} message in the native-tools RestClient loop. Huge tool JSON (e.g.
@@ -128,23 +128,20 @@ class AiOrchestration {
 
   /**
    * Latest worker phase for logs and **SSE heartbeats** (Tools-loop+tools worker sets it; servlet thread reads it while
-   * awaiting {@code Future#get}). Per-stream {@link #CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION} avoids cross-talk when
-   * several authors chat concurrently; {@link #CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF} remains a legacy fallback when no
-   * session id is bound on the worker thread.
+   * awaiting {@code Future#get}). Per-stream {@link #AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION} avoids cross-talk when
+   * several authors chat concurrently. Worker threads must call {@link #aiAssistantToolWorkerDiagSessionBind(String)}
+   * before phases are visible to the servlet thread.
    */
-  private static final AtomicReference<String> CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF = new AtomicReference<>('')
+  private static final ConcurrentHashMap<String, String> AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION = new ConcurrentHashMap<>()
 
-  private static final ConcurrentHashMap<String, String> CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION = new ConcurrentHashMap<>()
-
-  private static final ThreadLocal<String> CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID = new ThreadLocal<>()
+  private static final ThreadLocal<String> AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID = new ThreadLocal<>()
 
   /**
    * In-flight {@link #openAiSimpleCompletionAssistantText} calls whose {@code workerPhasePrefix} is
-   * {@code TranslateContentItem} (parallel {@code TranslateContentBatch} workers). Heartbeats read
-   * {@link #CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF}, which pool threads overwrite, so this count gives a truthful
-   * “several inner calls may be parallel” hint when {@code inflight > 1}.
+   * {@code TranslateContentItem} (parallel {@code TranslateContentBatch} workers). When {@code inflight > 1},
+   * heartbeats can hint that several inner completions may run in parallel.
    */
-  private static final AtomicInteger CRAFTERQ_TRANSLATE_ITEM_INNER_INFLIGHT = new AtomicInteger(0)
+  private static final AtomicInteger AIASSISTANT_TRANSLATE_ITEM_INNER_INFLIGHT = new AtomicInteger(0)
 
   /**
    * Native tools worker thread: shared with {@link AiOrchestrationTools#runWithToolProgress} so repository
@@ -152,22 +149,22 @@ class AiOrchestration {
    * {@link Future#cancel(boolean)} interrupts the worker. Cleared in {@link #openAiExecuteNativeToolsViaRestClientReturnText}
    * {@code finally} so the next chat prompt does not inherit a stale flag.
    */
-  private static final ThreadLocal<AtomicBoolean> CRAFTERQ_PIPELINE_CANCEL_REQUESTED = new ThreadLocal<>()
+  private static final ThreadLocal<AtomicBoolean> AIASSISTANT_PIPELINE_CANCEL_REQUESTED = new ThreadLocal<>()
 
-  static void crafterQPipelineCancelBindingSet(AtomicBoolean cancelRequestedRef) {
+  static void aiAssistantPipelineCancelBindingSet(AtomicBoolean cancelRequestedRef) {
     try {
       if (cancelRequestedRef != null) {
-        CRAFTERQ_PIPELINE_CANCEL_REQUESTED.set(cancelRequestedRef)
+        AIASSISTANT_PIPELINE_CANCEL_REQUESTED.set(cancelRequestedRef)
       } else {
-        CRAFTERQ_PIPELINE_CANCEL_REQUESTED.remove()
+        AIASSISTANT_PIPELINE_CANCEL_REQUESTED.remove()
       }
     } catch (Throwable ignored) {
     }
   }
 
-  static void crafterQPipelineCancelBindingClear() {
+  static void aiAssistantPipelineCancelBindingClear() {
     try {
-      CRAFTERQ_PIPELINE_CANCEL_REQUESTED.remove()
+      AIASSISTANT_PIPELINE_CANCEL_REQUESTED.remove()
     } catch (Throwable ignored) {
     }
   }
@@ -176,9 +173,9 @@ class AiOrchestration {
    * True when this thread is running the Tools-loop+tools pipeline and the author cancelled, or the worker was interrupted.
    * Repository tools should treat this as "do not read/write the repo for this call".
    */
-  static boolean crafterQPipelineCancelEffective() {
+  static boolean aiAssistantPipelineCancelEffective() {
     try {
-      AtomicBoolean a = CRAFTERQ_PIPELINE_CANCEL_REQUESTED.get()
+      AtomicBoolean a = AIASSISTANT_PIPELINE_CANCEL_REQUESTED.get()
       if (a == null) {
         return false
       }
@@ -192,110 +189,83 @@ class AiOrchestration {
   }
 
   /**
-   * Binds a unique id for this Tools-loop worker so {@link #crafterQToolWorkerDiagPhaseGet(String)} on the servlet
-   * thread reads the correct phase. Call {@link #crafterQToolWorkerDiagSessionEnd()} in a worker {@code finally}.
+   * Binds a unique id for this Tools-loop worker so {@link #aiAssistantToolWorkerDiagPhaseGet(String)} on the servlet
+   * thread reads the correct phase. Call {@link #aiAssistantToolWorkerDiagSessionEnd()} in a worker {@code finally}.
    */
-  static void crafterQToolWorkerDiagSessionBind(String sessionId) {
+  static void aiAssistantToolWorkerDiagSessionBind(String sessionId) {
     try {
       String s = (sessionId ?: '').toString().trim()
       if (s) {
-        CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.set(s)
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(s, '')
+        AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID.set(s)
+        AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(s, '')
       }
     } catch (Throwable ignored) {
     }
   }
 
-  static void crafterQToolWorkerDiagSessionEnd() {
-    String sid = null
+  static void aiAssistantToolWorkerDiagSessionEnd() {
     try {
-      sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      String sid = AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID.get()
       if (sid != null && sid.toString().trim()) {
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.remove(sid.toString().trim())
+        AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.remove(sid.toString().trim())
       }
     } catch (Throwable ignored) {
     }
     try {
-      CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.remove()
+      AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID.remove()
     } catch (Throwable ignored2) {
-    }
-    // Only reset the legacy global slot if this thread did not bind a session id (it owned the global ref).
-    if (sid == null || !sid.toString().trim()) {
-      try {
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
-      } catch (Throwable ignored3) {
-      }
     }
   }
 
   /** Set from the worker thread only (tool loop, RestClient POST, TransformContentSubgraph, etc.). */
-  static void crafterQToolWorkerDiagPhase(String phase) {
+  static void aiAssistantToolWorkerDiagPhase(String phase) {
     try {
-      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      String sid = AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID.get()
       if (sid != null && sid.toString().trim()) {
         String key = sid.toString().trim()
         if (phase != null && phase.toString().trim()) {
-          CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, phase.toString().trim())
+          AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, phase.toString().trim())
         } else {
-          CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, '')
+          AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(key, '')
         }
-        return
       }
     } catch (Throwable ignoredBind) {
-    }
-    try {
-      if (phase != null && phase.toString().trim()) {
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set(phase.toString().trim())
-      } else {
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
-      }
-    } catch (Throwable ignored) {
     }
   }
 
   /**
-   * @param sessionId when non-blank (same value passed to {@link #crafterQToolWorkerDiagSessionBind}), reads the
-   *                    phase for that stream; otherwise falls back to the global ref (legacy inner completions).
+   * @param sessionId when non-blank (same value passed to {@link #aiAssistantToolWorkerDiagSessionBind}), reads the
+   *                    phase for that stream.
    */
-  static String crafterQToolWorkerDiagPhaseGet(String sessionId = null) {
+  static String aiAssistantToolWorkerDiagPhaseGet(String sessionId = null) {
     try {
       String key = (sessionId ?: '')?.toString()?.trim()
       if (key) {
-        def v = CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.get(key)
+        def v = AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.get(key)
         return v != null ? v.toString() : ''
       }
     } catch (Throwable ignoredMap) {
     }
-    try {
-      def v = CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.get()
-      return v != null ? v.toString() : ''
-    } catch (Throwable ignored) {
-      return ''
-    }
+    return ''
   }
 
-  static void crafterQToolWorkerDiagPhaseClear() {
+  static void aiAssistantToolWorkerDiagPhaseClear() {
     try {
-      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      String sid = AIASSISTANT_TOOL_WORKER_DIAG_SESSION_ID.get()
       if (sid != null && sid.toString().trim()) {
-        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(sid.toString().trim(), '')
-        return
+        AIASSISTANT_TOOL_WORKER_DIAG_PHASE_BY_SESSION.put(sid.toString().trim(), '')
       }
     } catch (Throwable ignored) {
-    }
-    try {
-      CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
-    } catch (Throwable ignored2) {
     }
   }
 
   /**
    * Short author-facing hint for SSE heartbeats while the Tools-loop+tools worker is busy — derived from
-   * {@link #crafterQToolWorkerDiagPhaseGet(String)} (per-stream session on the servlet thread) so we do not imply the main chat POST is slow when
+   * {@link #aiAssistantToolWorkerDiagPhaseGet(String)} (per-stream session on the servlet thread) so we do not imply the main chat POST is slow when
    * {@link AiOrchestrationTools} is inside a bundled inner completion (e.g. {@code TransformContentSubgraph}).
    */
   private static String openAiPipelineWaitHintMarkdown(String workerPhase) {
-    int translateInnerInflight = CRAFTERQ_TRANSLATE_ITEM_INNER_INFLIGHT.get()
+    int translateInnerInflight = AIASSISTANT_TRANSLATE_ITEM_INNER_INFLIGHT.get()
     if (translateInnerInflight > 0) {
       return translateInnerInflight > 1
         ? 'Applying updates to **several** content files in parallel…'
@@ -367,7 +337,7 @@ class AiOrchestration {
 
   private static long resolveChatFluxAwaitMs() {
     try {
-      def p = System.getProperty('crafterq.chatFluxAwaitMs')
+      def p = System.getProperty('aiassistant.chatFluxAwaitMs')
       if (p != null && p.toString().trim()) {
         long n = Long.parseLong(p.toString().trim())
         if (n >= 120_000L && n <= 1_200_000L) {
@@ -380,11 +350,11 @@ class AiOrchestration {
 
   /**
    * While the servlet waits on the Tools-loop+tools worker, emit periodic SSE lines so authors are not silent for minutes.
-   * Override JVM {@code crafterq.openai.sseWaitHeartbeatMs} (3000–120000; default 12000).
+   * Override JVM {@code aiassistant.openai.sseWaitHeartbeatMs} (3000–120000; default 12000).
    */
   private static long resolveToolsLoopSseWaitHeartbeatMs() {
     try {
-      def p = System.getProperty('crafterq.openai.sseWaitHeartbeatMs')
+      def p = System.getProperty('aiassistant.openai.sseWaitHeartbeatMs')
       if (p != null && p.toString()?.trim()) {
         long n = Long.parseLong(p.toString().trim())
         if (n >= 3_000L && n <= 120_000L) {
@@ -401,11 +371,11 @@ class AiOrchestration {
    * HTTP read timeout for Spring {@link RestClient} POSTs to {@code /v1/chat/completions} (tools-on/off sync paths).
    * Defaults to {@link #CHAT_FLUX_AWAIT_MS} + 30s so the client does not hit {@link ResourceAccessException} read
    * timeouts (JDK default is often ~60s) before the outer pipeline budget cancels. Override
-   * {@code crafterq.openai.restReadTimeoutMs} (60_000–1_260_000).
+   * {@code aiassistant.openai.restReadTimeoutMs} (60_000–1_260_000).
    */
   private static int resolveOpenAiRestReadTimeoutMs() {
     try {
-      def p = System.getProperty('crafterq.openai.restReadTimeoutMs')
+      def p = System.getProperty('aiassistant.openai.restReadTimeoutMs')
       if (p != null && p.toString().trim()) {
         int n = Integer.parseInt(p.toString().trim())
         if (n >= 60_000 && n <= 1_260_000) {
@@ -456,12 +426,12 @@ class AiOrchestration {
 
   /**
    * Spring AI / WebClient / Netty: optional DEBUG in Studio logs (Log4j2). **Off by default.**
-   * Set JVM system property {@code crafterq.springAiHttpDebug=true} to enable once per JVM.
+   * Set JVM system property {@code aiassistant.springAiHttpDebug=true} to enable once per JVM.
    */
   private static final AtomicBoolean springAiVerboseHttpLoggingArmed = new AtomicBoolean(false)
 
   private static void ensureVerboseSpringAiHttpLogging() {
-    String raw = System.getProperty('crafterq.springAiHttpDebug', 'false')
+    String raw = System.getProperty('aiassistant.springAiHttpDebug', 'false')
     if (!Boolean.parseBoolean((raw != null ? raw.trim() : 'false') ?: 'false')) {
       return
     }
@@ -482,7 +452,7 @@ class AiOrchestration {
         'reactor.netty.http.client'
       ].each { String name -> setLevel.invoke(null, name, debug) }
       log.info(
-        'AI Assistant: Spring AI / WebClient / Reactor Netty HTTP loggers set to DEBUG (crafterq.springAiHttpDebug=true).'
+        'AI Assistant: Spring AI / WebClient / Reactor Netty HTTP loggers set to DEBUG (aiassistant.springAiHttpDebug=true).'
       )
     } catch (Throwable t) {
       log.warn('AI Assistant: failed to enable Spring AI HTTP debug loggers (Log4j2 Configurator): {}', t.message)
@@ -966,11 +936,11 @@ For **content XML** (pages/components): do not invent a new element tree — pre
 
   /**
    * Max completion tokens for {@code TranslateContentItem} inner {@code /v1/chat/completions} calls (smaller → faster stop).
-   * Default {@code 8192}; clamp {@code 1024–32768}. Override: {@code -Dcrafterq.translateContentItemMaxOutTokens=4096}.
+   * Default {@code 8192}; clamp {@code 1024–32768}. Override: {@code -Daiassistant.translateContentItemMaxOutTokens=4096}.
    */
   static int resolveTranslateContentItemMaxOutTokens() {
     try {
-      def p = System.getProperty('crafterq.translateContentItemMaxOutTokens')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.translateContentItemMaxOutTokens')?.toString()?.trim()
       if (p) {
         int v = Integer.parseInt(p)
         return Math.max(1024, Math.min(32_768, v))
@@ -1080,10 +1050,10 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     return normalizeOpenAiImagesApiModelId(canon)
   }
 
-  /** Per-request expert skill URLs from the client (see {@code aiassistant.expertSkills} request attribute; legacy {@code crafterq.expertSkills}). */
+  /** Per-request expert skill URLs from the client (see {@code aiassistant.expertSkills} request attribute). */
   List<Map> readExpertSkillSpecsFromRequest() {
     try {
-      def v = request?.getAttribute('aiassistant.expertSkills') ?: request?.getAttribute('crafterq.expertSkills')
+      def v = request?.getAttribute('aiassistant.expertSkills')
       if (v instanceof List) {
         List<Map> out = new ArrayList<>()
         for (Object o : (List) v) {
@@ -1128,7 +1098,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     String llmNorm = StudioAiLlmKind.normalize(llmRaw)
     Collection agentToolSubset = null
     try {
-      def raw = request?.getAttribute('aiassistant.agentEnabledBuiltInTools') ?: request?.getAttribute('crafterq.agentEnabledBuiltInTools')
+      def raw = request?.getAttribute('aiassistant.agentEnabledBuiltInTools')
       if (raw instanceof Collection && !((Collection) raw).isEmpty()) {
         agentToolSubset = (Collection) raw
       }
@@ -1137,7 +1107,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       orchestration: this,
       toolResultConverter: converter,
       studioOps: studioOps,
-      crafterQServletRequest: request,
+      studioServletRequest: request,
       agentId: agentId,
       chatId: chatId,
       llmNormalized: llmNorm,
@@ -1220,7 +1190,6 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     def site = ''
     try {
       site = request?.getAttribute('aiassistant.siteId')?.toString()?.trim() ?: ''
-      if (!site) site = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
       if (!site) site = request?.getParameter('siteId')?.toString()?.trim() ?: ''
       if (!site) site = request?.getParameter('crafterSite')?.toString()?.trim() ?: ''
       if (!site && params != null) {
@@ -1237,7 +1206,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     def utEarly = (userText ?: '').toString()
     List exList = []
     try {
-      def raw = request?.getAttribute('aiassistant.expertSkills') ?: request?.getAttribute('crafterq.expertSkills')
+      def raw = request?.getAttribute('aiassistant.expertSkills')
       if (raw instanceof List && !((List) raw).isEmpty()) {
         exList = (List) raw
       }
@@ -1828,7 +1797,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
         m.put(
           'content',
           s.substring(0, head) +
-            '\n\n[crafterq: content truncated for tools-loop request size; originalChars=' +
+            '\n\n[aiassistant: content truncated for tools-loop request size; originalChars=' +
             s.length() +
             ']\n'
         )
@@ -2256,7 +2225,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     boolean logFailuresAsWarn,
     String wireBaseUrl
   ) {
-    crafterQToolWorkerDiagPhase("native_tools_RestClient_POST_/v1/chat/completions stream=false jsonChars=${(jsonBody ?: '').toString().length()}")
+    aiAssistantToolWorkerDiagPhase("native_tools_RestClient_POST_/v1/chat/completions stream=false jsonChars=${(jsonBody ?: '').toString().length()}")
     openAiRestClientBuilder(apiKey, wireBaseUrl)
       .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
       .build()
@@ -2315,7 +2284,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
           }
           throw (RestClientResponseException) toThrow
         }
-        crafterQToolWorkerDiagPhase('native_tools_RestClient_POST_/v1/chat/completions response_ok')
+        aiAssistantToolWorkerDiagPhase('native_tools_RestClient_POST_/v1/chat/completions response_ok')
         bodyStr
       }
   }
@@ -2323,7 +2292,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
   /**
    * Single non-streaming chat completion (no tools) for server-side helpers (e.g. subgraph transform / translate item).
    * Uses {@link HttpURLConnection} with an extended read timeout so large translate/rephrase jobs can finish.
-   * @param workerPhasePrefix optional tag (e.g. {@code TranslateContentItem}) prefixed onto {@code crafterQToolWorkerDiagPhase}
+   * @param workerPhasePrefix optional tag (e.g. {@code TranslateContentItem}) prefixed onto {@code aiAssistantToolWorkerDiagPhase}
    *        strings so SSE heartbeats distinguish per-item inner calls from true bundled transforms.
    */
   static String openAiSimpleCompletionAssistantText(
@@ -2342,11 +2311,11 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       : ''
     boolean countTranslateItemInflight = 'TranslateContentItem'.equals((workerPhasePrefix ?: '').toString().trim())
     if (countTranslateItemInflight) {
-      CRAFTERQ_TRANSLATE_ITEM_INNER_INFLIGHT.incrementAndGet()
+      AIASSISTANT_TRANSLATE_ITEM_INNER_INFLIGHT.incrementAndGet()
     }
     try {
-    if (crafterQPipelineCancelEffective()) {
-      crafterQToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_pipeline_cancelled')
+    if (aiAssistantPipelineCancelEffective()) {
+      aiAssistantToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_pipeline_cancelled')
       throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
     }
     int effMaxOut = openAiClampMaxOutTokensForToolsLoopWire(model, maxOutTokens, toolsLoopSessionBundle)
@@ -2370,7 +2339,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     reqMap.putAll(openAiChatCompletionOutputLimitParams(model, effMaxOut, toolsLoopSessionBundle))
     String jsonBody = openAiChatCompletionsWireBodyApplyNeoTemperaturePolicy(JsonOutput.toJson(reqMap))
     String urlStr = resolveOpenAiSyncChatCompletionsUrl(wireBaseUrl)
-    crafterQToolWorkerDiagPhase(
+    aiAssistantToolWorkerDiagPhase(
       phasePfx +
         "simple_completion_HttpURLConnection_POST_/v1/chat/completions model=${model} wireJsonChars=${jsonBody.length()} userMsgChars=${(userText ?: '').toString().length()} readTimeoutMs=${readTimeoutMs}"
     )
@@ -2399,11 +2368,11 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       conn.setFixedLengthStreamingMode(bodyBytes.length)
       conn.outputStream.write(bodyBytes)
       conn.outputStream.flush()
-      if (crafterQPipelineCancelEffective()) {
-        crafterQToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_after_request_body_pipeline_cancelled')
+      if (aiAssistantPipelineCancelEffective()) {
+        aiAssistantToolWorkerDiagPhase(phasePfx + 'simple_completion_skipped_after_request_body_pipeline_cancelled')
         throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
-      crafterQToolWorkerDiagPhase(
+      aiAssistantToolWorkerDiagPhase(
         phasePfx +
           "simple_completion_awaiting_chat_upstream_response_body model=${model} httpURLConnection readTimeoutMs=${Math.max(60_000, readTimeoutMs)}"
       )
@@ -2447,7 +2416,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       if (!(message instanceof Map)) {
         throw new IllegalStateException('Tools-loop simple completion: missing message')
       }
-      crafterQToolWorkerDiagPhase(phasePfx + 'simple_completion_chat_upstream_response_parsed_ok')
+      aiAssistantToolWorkerDiagPhase(phasePfx + 'simple_completion_chat_upstream_response_parsed_ok')
       return openAiAssistantTextFromChoiceMessageMap((Map) message)
     } finally {
       try {
@@ -2456,7 +2425,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     }
     } finally {
       if (countTranslateItemInflight) {
-        CRAFTERQ_TRANSLATE_ITEM_INNER_INFLIGHT.decrementAndGet()
+        AIASSISTANT_TRANSLATE_ITEM_INNER_INFLIGHT.decrementAndGet()
       }
     }
   }
@@ -2489,7 +2458,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     if (!key) {
       return guard
     }
-    if (crafterQPipelineCancelEffective()) {
+    if (aiAssistantPipelineCancelEffective()) {
       return guard
     }
     def mdl = (model ?: '').toString().trim()
@@ -2711,8 +2680,8 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       return ''
     }
     int cap = 3200
-    String body = visible.length() <= cap ? visible : (visible.substring(0, cap) + '\n\n[crafterq: anchor truncated — full author message appeared earlier in this chat]')
-    return '''[crafterq: authoring goal anchor — placed immediately after FetchHttpUrl tool result(s)]
+    String body = visible.length() <= cap ? visible : (visible.substring(0, cap) + '\n\n[aiassistant: anchor truncated — full author message appeared earlier in this chat]')
+    return '''[aiassistant: authoring goal anchor — placed immediately after FetchHttpUrl tool result(s)]
 Use the reference response above together with **this** author request (including any expanded intent block below). Apply changes in the **author’s Crafter repository** only: follow paths from **GetContent** (page XML → `display-template`, `head.ftl`, linked CSS under `/static-assets/`). External `stylesheetHrefs` / asset URLs are hints, not guaranteed to exist in the author’s site tree.
 
 ---
@@ -2784,7 +2753,7 @@ Use the reference response above together with **this** author request (includin
     model = resolveOpenAiModel(model?.toString())
     int cap = 120_000
     try {
-      def p = System.getProperty('crafterq.openai.reviewMaxChars')?.toString()?.trim()
+      def p = System.getProperty('aiassistant.openai.reviewMaxChars')?.toString()?.trim()
       if (p) {
         cap = Math.max(8192, Integer.parseInt(p))
       }
@@ -3104,7 +3073,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       int cap = NATIVE_TOOLS_WIRE_JSON_MAX_CHARS
       String head = s.substring(0, cap)
       return head +
-        '\n\n[crafterq: output truncated for chat context limit; tool=GenerateImage originalChars=' + s.length() + ']' +
+        '\n\n[aiassistant: output truncated for chat context limit; tool=GenerateImage originalChars=' + s.length() + ']' +
         '\nHint: payload too large for wire; use a smaller image or save to /static-assets/.]'
     }
     if (s.length() <= NATIVE_TOOLS_WIRE_JSON_MAX_CHARS) {
@@ -3114,7 +3083,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     String head = s.substring(0, cap)
     String fn = (fnName ?: '').toString()
     return head +
-      '\n\n[crafterq: output truncated for chat context limit; tool=' + fn + ' originalChars=' + s.length() + ']' +
+      '\n\n[aiassistant: output truncated for chat context limit; tool=' + fn + ' originalChars=' + s.length() + ']' +
       '\nHint: use a smaller size, a path prefix filter, or GetContent on specific paths.]'
   }
 
@@ -3143,7 +3112,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
         Thread.currentThread().interrupt()
         throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
       }
-      crafterQToolWorkerDiagPhase("native_tool_loop_round_${round}_build_request wireMsgCount=${wireMessages.size()}")
+      aiAssistantToolWorkerDiagPhase("native_tool_loop_round_${round}_build_request wireMsgCount=${wireMessages.size()}")
       Object toolChoice = 'auto'
       if (round == 0 && openAiWireToolsIncludeGenerateImage(wireTools)) {
         Map lastUserRound0 = openAiLastUserWireMessage(wireMessages)
@@ -3324,7 +3293,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           }
           FunctionToolCallback tcb = fnName ? byName.get(fnName) : null
           String toolOut
-          crafterQToolWorkerDiagPhase(
+          aiAssistantToolWorkerDiagPhase(
             "native_tool_loop_round_${round}_repository_tool name=${fnName ?: '?'} argsChars=${(argsStr ?: '').length()}"
           )
           if (tcb == null) {
@@ -3341,7 +3310,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
               ChatCompletionsToolWire.nativeToolCallIdBindingClear()
             }
           }
-          crafterQToolWorkerDiagPhase(
+          aiAssistantToolWorkerDiagPhase(
             "native_tool_loop_round_${round}_repository_tool_done name=${fnName ?: '?'} outChars=${(toolOut ?: '').toString().length()}"
           )
           if (toolOut == null) {
@@ -3412,16 +3381,16 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
           round,
           agentId
         )
-        crafterQToolWorkerDiagPhase("native_tool_loop_round_${round}_missing_tool_calls_nudge")
+        aiAssistantToolWorkerDiagPhase("native_tool_loop_round_${round}_missing_tool_calls_nudge")
         wireMessages << [
           role   : 'user',
           content:
-            '''[crafterq: tools-required recovery — internal]
+            '''[aiassistant: tools-required recovery — internal]
 Your last assistant message had a **plan-style heading** (## Plan, ## Revised Plan, ## Next Steps, …) and described concrete CMS work, but the chat completion had **no `tool_calls`**, so the server ran **no** tools on that turn. **Reply again** for the same author request: keep or tighten the plan, then emit a **non-empty `tool_calls`** array and execute the next real step (e.g. **GetContent** on paths you already discovered, **FetchHttpUrl** for reference CSS URLs if needed, **update_template** + **WriteContent** for `.ftl` / **WriteContent** for CSS under `/static-assets/`). **Do not** end with prose-only, rhetorical questions, or “would you like a draft” while repository work remains; either call tools or state a **single** blocking error (e.g. missing path) with the exact tool result you saw.'''
         ]
         continue
       }
-      crafterQToolWorkerDiagPhase("native_tool_loop_round_${round}_final_assistant_message_no_more_tools")
+      aiAssistantToolWorkerDiagPhase("native_tool_loop_round_${round}_final_assistant_message_no_more_tools")
       assistantAccum = openAiAssistantTextFromChoiceMessageMap(msgCopy)
       finished = true
       break
@@ -3459,12 +3428,12 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     if (cancelRequested != null && cancelRequested.get()) {
       throw new InterruptedException(AIASSISTANT_PIPELINE_CANCELLED)
     }
-    crafterQPipelineCancelBindingSet(cancelRequested)
+    aiAssistantPipelineCancelBindingSet(cancelRequested)
     try {
     if (!apiKey) {
       throw new IllegalStateException('Tools-loop chat API key missing')
     }
-    crafterQToolWorkerDiagPhase("native_tools_session_prepare agentId=${agentId ?: ''} model=${model ?: ''}")
+    aiAssistantToolWorkerDiagPhase("native_tools_session_prepare agentId=${agentId ?: ''} model=${model ?: ''}")
     def wireTools = openAiBuildWireToolsFromCallbacks(tools)
     if (!wireTools) {
       throw new IllegalStateException('CMS tools: empty tool list')
@@ -3578,7 +3547,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       generateImageBacklogByToolCallId
     )
     } finally {
-      crafterQPipelineCancelBindingClear()
+      aiAssistantPipelineCancelBindingClear()
     }
   }
 
@@ -3643,7 +3612,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     Map toolsLoopSessionBundle = null,
     Map<String, String> generateImageBacklogByToolCallId = null
   ) {
-    crafterQToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
+    aiAssistantToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
     String text
     try {
       text = openAiExecuteNativeToolsViaRestClientReturnText(
@@ -3888,7 +3857,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     String imageGenerator = null
   ) {
     try {
-      crafterQPipelineCancelBindingClear()
+      aiAssistantPipelineCancelBindingClear()
       ensureVerboseSpringAiHttpLogging()
       def fullSuppress = false
       def protNorm = null
@@ -4519,7 +4488,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       out.write(': connected\n\n'.getBytes(StandardCharsets.UTF_8))
       out.flush()
       // New prompt / stream: ensure no stale native-tools cancel binding leaked onto this servlet thread.
-      crafterQPipelineCancelBindingClear()
+      aiAssistantPipelineCancelBindingClear()
 
       def genImgBacklogByToolCallId = new ConcurrentHashMap<String, String>()
       def toolTimingCtx = createToolTimingContext()
@@ -4898,7 +4867,7 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
           String toolDiagSessionId = 'td-' + java.util.UUID.randomUUID().toString()
           try {
             def fut = pool.submit({
-              crafterQToolWorkerDiagSessionBind(toolDiagSessionId)
+              aiAssistantToolWorkerDiagSessionBind(toolDiagSessionId)
               try {
                 writeOpenAiToolsOnViaRestClientToolLoop(
                   out,
@@ -4916,7 +4885,7 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
                 )
                 null
               } finally {
-                crafterQToolWorkerDiagSessionEnd()
+                aiAssistantToolWorkerDiagSessionEnd()
               }
             } as Callable)
             long deadline = System.currentTimeMillis() + CHAT_FLUX_AWAIT_MS
@@ -4968,7 +4937,7 @@ If this is unexpected: verify outbound HTTPS from Studio to your configured chat
                   if (nowHb - lastSseHeartbeatMs >= TOOLS_LOOP_SSE_WAIT_HEARTBEAT_MS) {
                     lastSseHeartbeatMs = nowHb
                     long elapsedSec = (nowHb - pipelineWaitStartMs) / 1000L
-                    def workerPhase = crafterQToolWorkerDiagPhaseGet(toolDiagSessionId)
+                    def workerPhase = aiAssistantToolWorkerDiagPhaseGet(toolDiagSessionId)
                     log.debug(
                       'Studio AI Assistant SSE heartbeat: waiting on Tools-loop+tools worker elapsedSec={} agentId={} model={} workerPhase={}',
                       elapsedSec,

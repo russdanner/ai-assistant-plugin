@@ -3,7 +3,7 @@
  *
  * Form engine data source: import an image from a remote https URL into the repository (same idea as
  * img-desktop-upload, but the server downloads the URL). Use for image-picker / RTE after adding this
- * datasource in the content type. CrafterQ chat drag-and-drop uses the same REST endpoint from React.
+ * datasource in the content type. The authoring chat drag-and-drop path uses the same REST endpoint from React.
  */
 /* global CStudioForms, YAHOO, CStudioAuthoring, CMgs, CStudioAuthoringContext, CrafterCMSNext */
 
@@ -40,8 +40,8 @@ function aiAssistantImportImageFromUrl(site, imageUrl, repoPath, fileName, objec
   });
 }
 
-CStudioForms.Datasources.CrafterqImgFromUrl =
-  CStudioForms.Datasources.CrafterqImgFromUrl ||
+CStudioForms.Datasources.AiAssistantImgFromUrl =
+  CStudioForms.Datasources.AiAssistantImgFromUrl ||
   function (id, form, properties, constraints) {
     this.id = id;
     this.form = form;
@@ -56,9 +56,9 @@ CStudioForms.Datasources.CrafterqImgFromUrl =
     return this;
   };
 
-YAHOO.extend(CStudioForms.Datasources.CrafterqImgFromUrl, CStudioForms.CStudioFormDatasource, {
+YAHOO.extend(CStudioForms.Datasources.AiAssistantImgFromUrl, CStudioForms.CStudioFormDatasource, {
   getLabel: function () {
-    return 'CrafterQ — Image from URL';
+    return 'AI Assistant — Image from URL';
   },
 
   insertImageAction: function (insertCb, file) {
@@ -193,4 +193,4 @@ YAHOO.extend(CStudioForms.Datasources.CrafterqImgFromUrl, CStudioForms.CStudioFo
 });
 
 // Must match getName(); Studio resolves this key after loading the script (content type builder, form engine).
-CStudioAuthoring.Module.moduleLoaded('aiassistant-img-from-url', CStudioForms.Datasources.CrafterqImgFromUrl);
+CStudioAuthoring.Module.moduleLoaded('aiassistant-img-from-url', CStudioForms.Datasources.AiAssistantImgFromUrl);

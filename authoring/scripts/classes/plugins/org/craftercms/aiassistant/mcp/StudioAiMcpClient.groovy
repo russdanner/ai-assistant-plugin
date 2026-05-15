@@ -34,9 +34,6 @@ final class StudioAiMcpClient {
     int cap = 500_000
     try {
       def p = System.getProperty('aiassistant.mcp.maxResponseChars')?.toString()?.trim()
-      if (!p) {
-        p = System.getProperty('crafterq.mcp.maxResponseChars')?.toString()?.trim()
-      }
       if (p) {
         cap = Integer.parseInt(p)
       }
@@ -118,7 +115,7 @@ final class StudioAiMcpClient {
         http.setDoOutput(true)
         http.setRequestProperty('Content-Type', 'application/json')
         http.setRequestProperty('Accept', 'application/json, text/event-stream')
-        http.setRequestProperty('User-Agent', 'CrafterQ-Studio-Plugin-MCP/1.0 (+https://craftercms.org)')
+        http.setRequestProperty('User-Agent', 'CrafterCMS-AI-Assistant-Studio-Plugin-MCP/1.0 (+https://craftercms.org)')
         String pv = (protocolVersion ?: '2024-11-05').toString().trim()
         http.setRequestProperty('MCP-Protocol-Version', pv ?: '2024-11-05')
         String sidHdr = sessionId?.toString()?.trim()

@@ -61,7 +61,7 @@ export interface StreamChatArgs {
   authoringSurface?: 'preview' | 'formEngine';
   /**
    * Only with `authoringSurface: 'formEngine'`. When true, server appends instructions for **`aiassistantFormFieldUpdates`** JSON
-   * so the browser can apply edits (legacy model output may use **`crafterqFormFieldUpdates`**; the form assistant still parses it).
+   * so the browser can apply edits.
    * **Never set for XB/ICE** — omit so preview uses tools + `contentPath` only.
    */
   formEngineClientJsonApply?: boolean;

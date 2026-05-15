@@ -6,7 +6,7 @@ import groovy.json.JsonOutput
 import org.slf4j.LoggerFactory
 import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.http.AiHttpProxy
-import plugins.org.craftercms.aiassistant.http.CrafterQBearerUiXmlMerge
+import plugins.org.craftercms.aiassistant.http.AiAssistantBearerUiXmlMerge
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 import plugins.org.craftercms.aiassistant.prompt.ToolPromptsSiteContext
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -73,7 +73,6 @@ try {
   if (siteIdBody) {
     try {
       request.setAttribute('aiassistant.siteId', siteIdBody)
-      request.setAttribute('crafterq.siteId', siteIdBody)
     } catch (Throwable ignored) {
       // non-mutable request in some contexts
     }
@@ -82,13 +81,11 @@ try {
   if (previewTokenBody) {
     try {
       request.setAttribute('aiassistant.previewToken', previewTokenBody)
-      request.setAttribute('crafterq.previewToken', previewTokenBody)
     } catch (Throwable ignored) {}
   }
   def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
   try {
     request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
-    request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
   } catch (Throwable ignored) {}
   def agentToolsRaw = body?.enabledBuiltInTools
   if (agentToolsRaw instanceof List && !((List) agentToolsRaw).isEmpty()) {
@@ -102,14 +99,13 @@ try {
     if (!wl.isEmpty()) {
       try {
         request.setAttribute('aiassistant.agentEnabledBuiltInTools', wl)
-        request.setAttribute('crafterq.agentEnabledBuiltInTools', wl)
       } catch (Throwable ignoredWl) {}
     }
   }
   def siteForBearer = siteIdBody ?: params?.siteId?.toString()?.trim()
   if (body instanceof Map && siteForBearer && agentId) {
     try {
-      CrafterQBearerUiXmlMerge.mergeStreamAgentFieldsFromSiteUiXmlIfMissing(applicationContext, (Map) body, siteForBearer, agentId)
+      AiAssistantBearerUiXmlMerge.mergeStreamAgentFieldsFromSiteUiXmlIfMissing(applicationContext, (Map) body, siteForBearer, agentId)
     } catch (Throwable mergeEx) {
       log.debug('Agent ui.xml merge skipped: {}', mergeEx.message ?: mergeEx.toString())
     }
@@ -149,7 +145,6 @@ try {
       tbc = Math.max(1, Math.min(64, tbc))
       try {
         request.setAttribute('aiassistant.translateBatchConcurrency', Integer.valueOf(tbc))
-        request.setAttribute('crafterq.translateBatchConcurrency', Integer.valueOf(tbc))
       } catch (Throwable ignored2) {}
     } catch (Throwable ignored) {}
   }
@@ -261,7 +256,7 @@ try {
     response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
     response.setContentType('application/json')
     response.getOutputStream().withWriter('UTF-8') {
-      it.write(JsonOutput.toJson([message: "CrafterQ stream failed: ${outer.message ?: outer.class.simpleName}".toString()]))
+      it.write(JsonOutput.toJson([message: "AI Assistant stream failed: ${outer.message ?: outer.class.simpleName}".toString()]))
     }
   } catch (Throwable ignored) {
   }

@@ -17,10 +17,10 @@ import java.util.Map
  * Stream/chat POST bodies often omit fields that exist on the matching {@code <agent>} in site {@code /ui.xml}.
  * Merges missing {@code imageModel}, {@code llmModel}, {@code llm}, and {@code imageGenerator} from that row onto the POST body.
  */
-final class CrafterQBearerUiXmlMerge {
-  private static final Logger log = LoggerFactory.getLogger(CrafterQBearerUiXmlMerge)
+final class AiAssistantBearerUiXmlMerge {
+  private static final Logger log = LoggerFactory.getLogger(AiAssistantBearerUiXmlMerge)
 
-  private CrafterQBearerUiXmlMerge() {}
+  private AiAssistantBearerUiXmlMerge() {}
 
   private static SAXReader newHardenedSaxReader() {
     SAXReader reader = new SAXReader()
@@ -65,13 +65,13 @@ final class CrafterQBearerUiXmlMerge {
     }
   }
 
-  private static Map extractAgentStreamOverlayFromUiXml(String uiXmlUtf8, String crafterQApiAgentId) {
+  private static Map extractAgentStreamOverlayFromUiXml(String uiXmlUtf8, String agentId) {
     Map out = new LinkedHashMap()
     out.put('imageModel', '')
     out.put('llmModel', '')
     out.put('imageGenerator', '')
     out.put('llm', '')
-    String wanted = (crafterQApiAgentId ?: '').toString().trim()
+    String wanted = (agentId ?: '').toString().trim()
     if (!wanted || uiXmlUtf8 == null || !uiXmlUtf8.toString().trim()) {
       return out
     }
@@ -157,7 +157,7 @@ final class CrafterQBearerUiXmlMerge {
   /**
    * Fills missing {@code imageModel}, {@code llmModel}, {@code llm}, and/or {@code imageGenerator} on {@code body} from site {@code /ui.xml} for {@code crafterQAgentId}.
    */
-  static void mergeStreamAgentFieldsFromSiteUiXmlIfMissing(Object applicationContext, Map body, String siteId, String crafterQApiAgentId) {
+  static void mergeStreamAgentFieldsFromSiteUiXmlIfMissing(Object applicationContext, Map body, String siteId, String agentId) {
     if (!(body instanceof Map) || body == null) {
       return
     }
@@ -170,7 +170,7 @@ final class CrafterQBearerUiXmlMerge {
       return
     }
     String site = (siteId ?: '').toString().trim()
-    String agent = (crafterQApiAgentId ?: '').toString().trim()
+    String agent = (agentId ?: '').toString().trim()
     if (!site || !agent) {
       return
     }

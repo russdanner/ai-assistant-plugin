@@ -13,7 +13,7 @@ final class StudioAiProviderCredentials {
 
   private StudioAiProviderCredentials() {}
 
-  /** Spring {@link OpenAiApi} + CrafterQ RestClient loop: host-only style base (no trailing {@code /v1}). */
+  /** Spring {@link OpenAiApi} + native RestClient tools loop: host-only style base (no trailing {@code /v1}). */
   static String wireOpenAiRestBaseUrl(String llmNormalized) {
     String n = (llmNormalized ?: '').toString()
     if (StudioAiLlmKind.OPENAI_NATIVE == n) {

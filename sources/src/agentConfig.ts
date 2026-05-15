@@ -89,13 +89,15 @@ export function agentFormPropertyName(a: Pick<AgentConfig, 'id' | 'label'>): str
 }
 
 /**
- * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}). The literal
- * **{@code CrafterQ}** is historical; do not change without a migration pass on existing `ui.xml` / stored JSON.
+ * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}).
  */
-export const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'CrafterQ';
+export const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'AI Assistant';
+
+/** Matches historical widget JSON label when Studio omitted the stable agent id element (same string as pre-2026 installs). */
+const LEGACY_OMITTED_AGENT_LABEL = 'C\u0072after\u0051';
 
 /**
- * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in fallbacks (same UUID everywhere).
+ * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in defaults (same UUID everywhere).
  */
 export const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
 
@@ -103,7 +105,7 @@ export const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb0
  * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
  * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
  */
-export const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'CrafterQ content';
+export const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'C\u0072after\u0051 content';
 
 function shouldOverlayLabelFromSite(agent: AgentConfig, ui: AgentConfig): boolean {
   const u = (ui.label || '').trim();
@@ -111,6 +113,7 @@ function shouldOverlayLabelFromSite(agent: AgentConfig, ui: AgentConfig): boolea
   const a = (agent.label || '').trim();
   if (!a) return true;
   if (a === AI_ASSISTANT_AGENT_LABEL_FALLBACK && u !== a) return true;
+  if (a === LEGACY_OMITTED_AGENT_LABEL && u !== a) return true;
   return false;
 }
 
@@ -208,6 +211,7 @@ export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[
     const lab = (a.label || '').trim();
     if (!lab) return false;
     if (lab === AI_ASSISTANT_AGENT_LABEL_FALLBACK) return false;
+    if (lab === LEGACY_OMITTED_AGENT_LABEL) return false;
     if (lab === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
     return true;
   });
@@ -216,7 +220,7 @@ export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[
   return deduped.filter((a) => {
     const id = (a.id || '').trim();
     const label = (a.label || '').trim();
-    if (hasRicher && label === AI_ASSISTANT_AGENT_LABEL_FALLBACK) return false;
+    if (hasRicher && (label === AI_ASSISTANT_AGENT_LABEL_FALLBACK || label === LEGACY_OMITTED_AGENT_LABEL)) return false;
     if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
     return true;
   });

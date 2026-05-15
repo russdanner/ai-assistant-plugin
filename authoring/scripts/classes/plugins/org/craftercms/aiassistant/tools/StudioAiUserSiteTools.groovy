@@ -146,7 +146,7 @@ final class StudioAiUserSiteTools {
     binding.setVariable('log', LOG)
     ClassLoader parent = null
     try {
-      Object ctx = ops.crafterqStudioApplicationContext()
+      Object ctx = ops.studioApplicationContext()
       parent = ctx?.getClassLoader()
     } catch (Throwable ignored) {
       parent = Thread.currentThread().getContextClassLoader()

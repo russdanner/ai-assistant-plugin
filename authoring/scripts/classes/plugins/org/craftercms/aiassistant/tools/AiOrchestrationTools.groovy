@@ -227,7 +227,7 @@ class AiOrchestrationTools {
   private static final String SCHEMA_GET_PREVIEW_HTML =
     '{"type":"object","properties":{"url":{"type":"string","description":"Absolute http(s) URL of the preview page to fetch (e.g. current preview URL from authoring context)."},"previewUrl":{"type":"string","description":"Alias for url."},"previewToken":{"type":"string","description":"Value of the Studio crafterPreview cookie (often starts with CCE-V1). Omit if the chat request already sent previewToken from the UI."},"siteId":{"type":"string","description":"Optional — when the URL has no crafterSite= query param, it is appended from this value or the active site."}},"required":[]}'
   private static final String SCHEMA_FETCH_HTTP_URL =
-    '{"type":"object","properties":{"url":{"type":"string","description":"Absolute http(s) URL to GET (reference HTML/CSS/JSON/text). Private IPs, loopback, and metadata endpoints are blocked; each redirect target is re-validated."},"maxChars":{"type":"integer","description":"Optional cap on returned body size; still bounded by Studio JVM crafterq.httpFetch.maxChars (default 400000)."}},"required":["url"]}'
+    '{"type":"object","properties":{"url":{"type":"string","description":"Absolute http(s) URL to GET (reference HTML/CSS/JSON/text). Private IPs, loopback, and metadata endpoints are blocked; each redirect target is re-validated."},"maxChars":{"type":"integer","description":"Optional cap on returned body size; still bounded by Studio JVM aiassistant.httpFetch.maxChars (default 400000)."}},"required":["url"]}'
   private static final String SCHEMA_QUERY_EXPERT_GUIDANCE =
     '{"type":"object","properties":{"skillId":{"type":"string","description":"Expert skill id from the system message expert skills table (es_ prefix)."},"query":{"type":"string","description":"Question to retrieve relevant markdown chunks for."},"topK":{"type":"integer","description":"Max chunks (1–20, default 8)."}},"required":["skillId","query"]}'
   private static final String SCHEMA_WRITE_CONTENT =
@@ -503,7 +503,7 @@ class AiOrchestrationTools {
       sys,
       userBody
     )
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -513,7 +513,7 @@ class AiOrchestrationTools {
         paths    : [contentPath],
       ]
     }
-    AiOrchestration.crafterQToolWorkerDiagPhase("${diag}_await_inner_openai_raw_item chars=${itemXml.length()}")
+    AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_await_inner_openai_raw_item chars=${itemXml.length()}")
     long tOpenAi = System.nanoTime()
     String assistantXml =
       AiOrchestration.openAiSimpleCompletionAssistantText(
@@ -531,7 +531,7 @@ class AiOrchestrationTools {
       (System.nanoTime() - tOpenAi) / 1_000_000L,
       (assistantXml ?: '').length()
     )
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -588,7 +588,7 @@ class AiOrchestrationTools {
       out.nextStep = 'Set writeResults:true to persist.'
       return out
     }
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -624,7 +624,7 @@ class AiOrchestrationTools {
   /**
    * Loads subgraph via {@link ContentSubgraphAggregator#build}, one non-streaming OpenAI completion (bundle + instructions only), optional {@link ContentSubgraphAggregator#apply}.
    * Inner completion model when {@code llmModel}/{@code model} omitted: {@link AiOrchestration#openAiTransformSubgraphDefaultInnerModel(String)} (smaller model in same family as main chat).
-   * @param toolDiagKey prefix for {@link AiOrchestration#crafterQToolWorkerDiagPhase} and logs ({@code TransformContentSubgraph} vs {@code TranslateContentItem})
+   * @param toolDiagKey prefix for {@link AiOrchestration#aiAssistantToolWorkerDiagPhase} and logs ({@code TransformContentSubgraph} vs {@code TranslateContentItem})
    * @param resultAction {@code action} field in returned maps
    */
   static Map runTransformContentSubgraph(
@@ -715,7 +715,7 @@ class AiOrchestrationTools {
         message: 'OpenAI API key not configured for this agent',
       ]
     }
-    AiOrchestration.crafterQToolWorkerDiagPhase(
+    AiOrchestration.aiAssistantToolWorkerDiagPhase(
       "${diag}_ContentSubgraphAggregator_build site=${siteId} path=${contentPath}"
     )
     Map built = ContentSubgraphAggregator.build(ops, siteId, contentPath, maxItems, maxDepth) as Map
@@ -728,7 +728,7 @@ class AiOrchestrationTools {
         built?.truncated
       )
     }
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -743,7 +743,7 @@ class AiOrchestrationTools {
       throw new IllegalStateException('ContentSubgraphAggregator.build returned empty subgraphXml')
     }
     if (subgraphXml.length() > TRANSFORM_SUBGRAPH_MAX_CHARS) {
-      AiOrchestration.crafterQToolWorkerDiagPhase(
+      AiOrchestration.aiAssistantToolWorkerDiagPhase(
         "${diag}_exit_bundle_too_large chars=${subgraphXml.length()}"
       )
       return [
@@ -821,7 +821,7 @@ class AiOrchestrationTools {
       sys,
       userBody
     )
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -831,7 +831,7 @@ class AiOrchestrationTools {
         paths    : built?.paths,
       ]
     }
-    AiOrchestration.crafterQToolWorkerDiagPhase(
+    AiOrchestration.aiAssistantToolWorkerDiagPhase(
       "${diag}_await_inner_openai_completion model=${llmModel} bundleChars=${subgraphXml.length()}"
     )
     long tOpenAi = System.nanoTime()
@@ -852,7 +852,7 @@ class AiOrchestrationTools {
       (assistantXml ?: '').length(),
       innerMaxOutTokens
     )
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -862,7 +862,7 @@ class AiOrchestrationTools {
         paths    : origPaths,
       ]
     }
-    AiOrchestration.crafterQToolWorkerDiagPhase(
+    AiOrchestration.aiAssistantToolWorkerDiagPhase(
       "${diag}_parsing_validating_bundle assistantXmlChars=${(assistantXml ?: '').length()}"
     )
     String cleaned = stripOptionalMarkdownFences(assistantXml)
@@ -895,12 +895,12 @@ class AiOrchestrationTools {
       }
     }
     if (!origSet.equals(newSet)) {
-      AiOrchestration.crafterQToolWorkerDiagPhase("${diag}_exit_path_mismatch")
+      AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_exit_path_mismatch")
       return [
         error           : true,
         action          : actionTag,
         message         :
-          'LLM output `<document path="...">` set does not match the input bundle (need the **same** path string(s) as input, **one** `<document>` each, non-empty CDATA). Common causes: markdown fences, extra/missing `<document>` blocks, or renamed `path=` attributes. **Copy `path=` and `content-type=` from the input `<document>` tags exactly**; return only the `<crafterq-content-subgraph>` XML tree.',
+          'LLM output `<document path="...">` set does not match the input bundle (need the **same** path string(s) as input, **one** `<document>` each, non-empty CDATA). Common causes: markdown fences, extra/missing `<document>` blocks, or renamed `path=` attributes. **Copy `path=` and `content-type=` from the input `<document>` tags exactly**; return only the `<aiassistant-content-subgraph>` XML tree.',
         expectedPaths   : new ArrayList<>(origSet),
         returnedPaths : new ArrayList<>(newSet),
         assistantPreview: AiHttpProxy.elideForLog(cleaned, 4000),
@@ -917,7 +917,7 @@ class AiOrchestrationTools {
         }
       }
       if (!bodyCheck.trim()) {
-        AiOrchestration.crafterQToolWorkerDiagPhase("${diag}_exit_empty_body")
+        AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_exit_empty_body")
         return [
           error           : true,
           action          : actionTag,
@@ -941,12 +941,12 @@ class AiOrchestrationTools {
       maxDepthReachedWalk : built?.maxDepthReached,
     ]
     if (!writeResults) {
-      AiOrchestration.crafterQToolWorkerDiagPhase("${diag}_preview_only_no_apply")
+      AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_preview_only_no_apply")
       out.transformedSubgraphPreview = AiHttpProxy.elideForLog(cleaned, 12_000)
       out.nextStep = 'Set writeResults:true to persist, or use WriteContent per path from the preview bundle.'
       return out
     }
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
       return [
         error    : true,
         action   : actionTag,
@@ -956,7 +956,7 @@ class AiOrchestrationTools {
         paths    : origPaths,
       ]
     }
-    AiOrchestration.crafterQToolWorkerDiagPhase(
+    AiOrchestration.aiAssistantToolWorkerDiagPhase(
       "${diag}_apply_writes_running paths=${origPaths.size()}"
     )
     long tApply = System.nanoTime()
@@ -969,7 +969,7 @@ class AiOrchestrationTools {
       applyRes?.writtenCount,
       applyRes?.ok
     )
-    AiOrchestration.crafterQToolWorkerDiagPhase("${diag}_apply_writes_done")
+    AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_apply_writes_done")
     out.putAll(applyRes)
     out.action = actionTag
     return out
@@ -1102,7 +1102,7 @@ class AiOrchestrationTools {
     translateGate.acquire()
     try {
       long t0 = System.nanoTime()
-      if (AiOrchestration.crafterQPipelineCancelEffective()) {
+      if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
         Map cancelled = [
           path     : pathFinal,
           cancelled: true,
@@ -1515,10 +1515,10 @@ class AiOrchestrationTools {
    */
   static Map runWithToolProgress(String toolName, Map rawInput, Closure listener, Closure work) {
     def input = (rawInput != null) ? rawInput : [:]
-    if (AiOrchestration.crafterQPipelineCancelEffective()) {
-      AiOrchestration.crafterQToolWorkerDiagPhase("tool_skipped_pipeline_cancelled name=${toolName}")
+    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
+      AiOrchestration.aiAssistantToolWorkerDiagPhase("tool_skipped_pipeline_cancelled name=${toolName}")
       log.warn(
-        'CrafterQ tool skipped (author Stop / SSE disconnect / pipeline cancel or worker interrupt): tool={}',
+        'AI Assistant tool skipped (author Stop / SSE disconnect / pipeline cancel or worker interrupt): tool={}',
         toolName
       )
       return [
