@@ -1,0 +1,46 @@
+{
+  "description": "Four-turn chat matrix for POST …/ai/stream (form + preview). Copy to chat-scenarios.json and set agentId + paths for your site. See chat-scenarios.schema-hint.txt.",
+  "defaults": {
+    "siteId": "aiat-2",
+    "agentId": "019c7237-478b-7f98-9a5c-87144c3fb010",
+    "llm": "openAI",
+    "llmModel": "gpt-4o-mini",
+    "authoringSurface": "formEngine",
+    "formEngineClientJsonApply": true,
+    "formEngineItemPath": "/site/website/index.xml",
+    "contentTypeId": "/page/home",
+    "contentTypeLabel": "Home"
+  },
+  "turns": [
+    {
+      "id": "hello",
+      "summary": "Warm-up: no tools, checks stream + latency baseline.",
+      "prompt": "Say hello in one short sentence."
+    },
+    {
+      "id": "field-edit",
+      "summary": "Form assistant: asks model to propose a field change (client JSON apply path).",
+      "prompt": "Update the page title field (title_t) to the exact string: Chat harness QA title. Reply with what you changed or the JSON snippet you would apply."
+    },
+    {
+      "id": "translate-page",
+      "summary": "Preview surface: translation tools need repo path + preview token in real Studio.",
+      "prompt": "Translate the main textual content of this page to French. Use translation batch tools if they are available; if not, list which fields you would translate.",
+      "request": {
+        "authoringSurface": "preview",
+        "formEngineClientJsonApply": false,
+        "contentPath": "/site/website/index.xml",
+        "contentTypeId": "/page/home",
+        "contentTypeLabel": "Home"
+      }
+    },
+    {
+      "id": "generate-image",
+      "summary": "Image tool path: requires agent/site policy that enables GenerateImage + keys on the server.",
+      "prompt": "Generate a simple 256x256 abstract placeholder image for automated testing and describe where you would save it in the repo.",
+      "request": {
+        "omitTools": false
+      }
+    }
+  ]
+}

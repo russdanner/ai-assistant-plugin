@@ -1,0 +1,5 @@
+chat-scenarios JSON (informal contract)
+- defaults: merged into every POST body; must include siteId for your run. agentId optional (runner resolves from ui.xml or default UUID).
+- turns[].prompt: user message (required).
+- turns[].request: optional object merged on top of defaults for that turn only (e.g. switch authoringSurface to preview for translate).
+- Runner adds chatId (same UUID for all turns in one session) unless you add chatId per turn later.

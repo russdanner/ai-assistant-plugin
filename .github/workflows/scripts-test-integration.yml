@@ -1,0 +1,31 @@
+# Validates maintainer shell under scripts/ (including scripts/test — not shipped in the plugin zip).
+name: Test scripts (bash syntax)
+on:
+  push:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/scripts-test-integration.yml'
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/scripts-test-integration.yml'
+
+jobs:
+  bash-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on shell scripts
+        run: |
+          set -e
+          bash -n scripts/studio-api.sh
+          bash -n scripts/install-plugin.sh
+          bash -n scripts/test/integration/smoke.sh
+          bash -n scripts/test/functional/rest-contracts.sh
+          bash -n scripts/test/integration/e2e-site-lifecycle.sh
+          bash -n scripts/test/integration/include/plugin-stream-probe.inc.sh
+          bash -n scripts/test/integration/include/reporting.inc.sh
+          bash -n scripts/lib/studio-auth.sh
+          bash -n scripts/lib/emoji.inc.sh
+          bash -n scripts/test/run-all.sh
+          node --check scripts/test/functional/run-chat-scenarios.mjs

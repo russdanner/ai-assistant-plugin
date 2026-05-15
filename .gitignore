@@ -4,3 +4,8 @@ chatgpt-plugin.iml
 # Local Studio auth (never commit)
 scripts/.studio-token
 .env.local
+
+# Local integration payloads (copy from create-site.json.example)
+scripts/test/integration/create-site.json
+# Local chat scenario overrides (copy from scenarios/chat-scenarios.example.json)
+scripts/test/scenarios/chat-scenarios.json

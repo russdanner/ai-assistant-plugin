@@ -1,0 +1,7 @@
+This file marks the whole scripts/test/ tree as maintainer-only integration tests.
+
+- Not included in the Crafter Studio site plugin zip from craftercms-plugin.yaml / Rollup.
+- Does not register services inside Studio; scripts call Studio over HTTP with a JWT.
+- Safe to delete from a fork if you only care about production authoring assets.
+
+See README.md in this folder and ../README.md at scripts/ root.
