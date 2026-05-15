@@ -28838,7 +28838,9 @@ function pushStreamLog(logRef, line) {
 }
 /** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
 function redactSessionLogLineForCopy(s) {
-    return s.replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"');
+    return s
+        .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
+        .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
 }
 function safeCopySessionLog(lines) {
     return lines.map(redactSessionLogLineForCopy).join('\n');
@@ -30048,23 +30050,24 @@ function AiAssistantChat(props) {
             saveDebounceRef.current = null;
         }, 600);
         return () => {
-            const hadTimer = saveDebounceRef.current != null;
             if (saveDebounceRef.current) {
                 window.clearTimeout(saveDebounceRef.current);
                 saveDebounceRef.current = null;
             }
-            if (hadTimer) {
-                const p = pendingPersistRef.current;
-                if (p && typeof localStorage !== 'undefined' && !p.messages.some((m) => m.isStreaming)) {
-                    saveConversation(p.siteId, p.agentId, {
-                        version: 1,
-                        chatId: p.chatId,
-                        messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
-                    });
-                }
-            }
         };
     }, [siteId, agentId, chatId, messages]);
+    useEffect(() => {
+        return () => {
+            const p = pendingPersistRef.current;
+            if (p && typeof localStorage !== 'undefined' && !p.messages.some((m) => m.isStreaming)) {
+                saveConversation(p.siteId, p.agentId, {
+                    version: 1,
+                    chatId: p.chatId,
+                    messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
+                });
+            }
+        };
+    }, [siteId, agentId]);
     const quickMessagesToShow = useMemo(() => {
         if (configPrompts && configPrompts.length > 0) {
             return configPrompts

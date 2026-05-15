@@ -2842,7 +2842,7 @@ class StudioToolOperations {
       return null
     }
     String q = java.util.regex.Pattern.quote(name.toString())
-    def m = (attrs =~ /(?is)\b${q}\s*=\s*["']([^"']*)["']/)
+    def m = (attrs =~ /(?is)(?<![\w-])${q}\s*=\s*["']([^"']*)["']/)
     return m.find() ? m.group(1)?.toString()?.trim() : null
   }
 

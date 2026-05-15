@@ -3210,33 +3210,44 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
   }
 
   /**
-   * When {@code tool_call_id} keys are missing from the compacted wire map (e.g. Spring-AI internal tool execution),
-   * maps placeholder ids in {@code text} order to URLs from {@code backlog} (FIFO — one entry per completed
-   * {@code GenerateImage} tool result).
+   * Merges {@code toolCallId → imageUrl} entries from {@code backlogByToolCallId} into {@code eff} for placeholders in
+   * {@code text}. When the flux path only captured a URL (no tool call id), applies that URL only if there is exactly
+   * one unresolved placeholder and one orphan URL.
    */
   private static void openAiAugmentEffMapWithGenerateImageBacklog(
     String text,
     Map<String, String> eff,
-    Collection<String> backlog
+    Map<String, String> backlogByToolCallId,
+    Collection<String> imageUrlsWithoutToolCallId = null
   ) {
-    if (text == null || eff == null || backlog == null || backlog.isEmpty()) {
+    if (eff == null) {
       return
     }
-    Iterator<String> it = backlog.iterator()
+    if (backlogByToolCallId != null && !backlogByToolCallId.isEmpty()) {
+      for (Map.Entry<String, String> e : backlogByToolCallId.entrySet()) {
+        String id = e.getKey() != null ? e.getKey().toString().trim() : ''
+        String u = e.getValue() != null ? e.getValue().toString().trim() : ''
+        if (id && u && !eff.containsKey(id)) {
+          eff.put(id, u)
+        }
+      }
+    }
+    if (text == null || imageUrlsWithoutToolCallId == null || imageUrlsWithoutToolCallId.isEmpty()) {
+      return
+    }
     Pattern pat = Pattern.compile(Pattern.quote(STUDIO_AI_INLINE_IMAGE_REF_PREFIX) + '([A-Za-z0-9_-]+)')
     Matcher scan = pat.matcher(text.toString())
+    List<String> unresolved = new ArrayList<>()
     while (scan.find()) {
       String id = scan.group(1)
-      if (eff.containsKey(id)) {
-        continue
+      if (id && !eff.containsKey(id)) {
+        unresolved.add(id)
       }
-      if (!it.hasNext()) {
-        break
-      }
-      def nx = it.next()
-      String u = nx != null ? nx.toString().trim() : ''
+    }
+    if (unresolved.size() == 1 && imageUrlsWithoutToolCallId.size() == 1) {
+      String u = imageUrlsWithoutToolCallId.iterator().next()?.toString()?.trim()
       if (u) {
-        eff.put(id, u)
+        eff.put(unresolved.get(0), u)
       }
     }
   }
@@ -3244,13 +3255,16 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
   /**
    * Replaces {@code studio-ai-inline-image://<toolCallId>} with stored image URLs for author-visible output.
    *
-   * @param generateImageUrlBacklog optional FIFO of image URLs from {@code GenerateImage} completions (tool-progress),
-   *        used when the compacted RestClient map is empty or missing ids (Spring-AI {@code chatResponse()} flux path).
+   * @param generateImageBacklogByToolCallId optional {@code toolCallId → url} from {@code GenerateImage} tool-progress
+   *        when the compacted RestClient map is empty (Spring-AI {@code chatResponse()} flux path).
+   * @param generateImageUrlsWithoutToolCallId optional URLs captured without a tool call id; used only when there is
+   *        exactly one unresolved {@link #STUDIO_AI_INLINE_IMAGE_REF_PREFIX} placeholder.
    */
   private static String openAiExpandInlineImageRefs(
     String text,
     Map<String, String> generateImageDataUrlByToolCallId,
-    Collection<String> generateImageUrlBacklog = null
+    Map<String, String> generateImageBacklogByToolCallId = null,
+    Collection<String> generateImageUrlsWithoutToolCallId = null
   ) {
     if (text == null) {
       return ''
@@ -3260,7 +3274,7 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     if (generateImageDataUrlByToolCallId != null && !generateImageDataUrlByToolCallId.isEmpty()) {
       eff.putAll(generateImageDataUrlByToolCallId)
     }
-    openAiAugmentEffMapWithGenerateImageBacklog(out, eff, generateImageUrlBacklog)
+    openAiAugmentEffMapWithGenerateImageBacklog(out, eff, generateImageBacklogByToolCallId, generateImageUrlsWithoutToolCallId)
     if (eff.isEmpty()) {
       if (out.contains(STUDIO_AI_INLINE_IMAGE_REF_PREFIX)) {
         log.warn(
@@ -3325,6 +3339,28 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       return text + tail.toString()
     }
     return text
+  }
+
+  /**
+   * When {@code GenerateImage} completed on the flux path with a URL but no {@code tool_call_id}, append one markdown
+   * image line if the assistant text has no image yet (single orphan URL only).
+   */
+  private static String openAiEnsureOrphanGenerateImageUrlMarkdown(
+    String assistantText,
+    Collection<String> imageUrlsWithoutToolCallId
+  ) {
+    if (imageUrlsWithoutToolCallId == null || imageUrlsWithoutToolCallId.size() != 1) {
+      return assistantText != null ? assistantText.toString() : ''
+    }
+    String url = imageUrlsWithoutToolCallId.iterator().next()?.toString()?.trim()
+    if (!url) {
+      return assistantText != null ? assistantText.toString() : ''
+    }
+    String text = (assistantText != null ? assistantText.toString() : '')
+    if (text.contains(url) || Pattern.compile('!\\[[^\\]]*\\]\\([^)]+\\)').matcher(text).find()) {
+      return text
+    }
+    return text + '\n\n![](' + url + ')'
   }
 
   /**
@@ -3735,7 +3771,8 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     AtomicBoolean cancelRequested = null,
     String wireBaseUrl = null,
     Map toolsLoopSessionBundle = null,
-    Collection<String> generateImageUrlBacklog = null
+    Map<String, String> generateImageBacklogByToolCallId = null,
+    Collection<String> generateImageUrlsWithoutToolCallId = null
   ) {
     markPipelineWallStart(toolTimingCtx)
     if (cancelRequested != null && cancelRequested.get()) {
@@ -3844,7 +3881,12 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       }
     }
     String stitched = openAiEnsureGenerateImageMarkdownLinesPresent((assistantAccum ?: '').toString(), cqGenerateImageDataUrlByToolCallId)
-    return openAiExpandInlineImageRefs(stitched, cqGenerateImageDataUrlByToolCallId, generateImageUrlBacklog)
+    return openAiExpandInlineImageRefs(
+      stitched,
+      cqGenerateImageDataUrlByToolCallId,
+      generateImageBacklogByToolCallId,
+      generateImageUrlsWithoutToolCallId
+    )
     } finally {
       crafterQPipelineCancelBindingClear()
     }
@@ -3890,7 +3932,8 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     AtomicBoolean terminalEmitted = null,
     String wireBaseUrl = null,
     Map toolsLoopSessionBundle = null,
-    Collection<String> generateImageUrlBacklog = null
+    Map<String, String> generateImageBacklogByToolCallId = null,
+    Collection<String> generateImageUrlsWithoutToolCallId = null
   ) {
     crafterQToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
     String text
@@ -3906,7 +3949,8 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
         cancelRequested,
         wireBaseUrl,
         toolsLoopSessionBundle,
-        generateImageUrlBacklog
+        generateImageBacklogByToolCallId,
+        generateImageUrlsWithoutToolCallId
       )
     } catch (InterruptedException ie) {
       log.warn(
@@ -4762,7 +4806,8 @@ Technical detail: ''' + msg
       // New prompt / stream: ensure no stale native-tools cancel binding leaked onto this servlet thread.
       crafterQPipelineCancelBindingClear()
 
-      def genImgBacklog = new ConcurrentLinkedQueue<String>()
+      def genImgBacklogByToolCallId = new ConcurrentHashMap<String, String>()
+      def genImgUrlsWithoutToolCallId = new ConcurrentLinkedQueue<String>()
       def toolTimingCtx = createToolTimingContext()
       def toolProgressListener = { String tn, String ph, Map inp, Throwable er = null, Object tres = null, Long taskDurMs = null ->
         if ('GenerateImage'.equals(tn) && tres instanceof Map && ('done'.equals(ph) || 'warn'.equals(ph))) {
@@ -4774,7 +4819,12 @@ Technical detail: ''' + msg
                 boolean okData = url.startsWith('data:image') && url.toLowerCase(Locale.ROOT).contains(';base64,')
                 boolean okHttp = url.startsWith('https://') || url.startsWith('http://')
                 if (okData || okHttp) {
-                  genImgBacklog.add(url)
+                  String tid = gm.inlineImageRef?.toString()?.trim() ?: gm.toolCallId?.toString()?.trim()
+                  if (tid) {
+                    genImgBacklogByToolCallId.put(tid, url)
+                  } else {
+                    genImgUrlsWithoutToolCallId.add(url)
+                  }
                 }
               }
             }
@@ -4982,8 +5032,18 @@ Technical detail: ''' + msg
               }
             }
             String fullRaw = fluxAssistRawAcc.toString()
+            if (streamFinished) {
+              Map<String, String> fluxImgMap = new LinkedHashMap<>(genImgBacklogByToolCallId)
+              fullRaw = openAiStripForbiddenMetaPlanFromAssistantText(fullRaw)
+              fullRaw = openAiEnsureGenerateImageMarkdownLinesPresent(fullRaw, fluxImgMap)
+              fullRaw = openAiEnsureOrphanGenerateImageUrlMarkdown(fullRaw, genImgUrlsWithoutToolCallId)
+              fluxAssistRawAcc.setLength(0)
+              fluxAssistRawAcc.append(fullRaw)
+            } else {
+              fullRaw = openAiStripForbiddenMetaPlanFromAssistantText(fullRaw)
+            }
             String expandedFull =
-              openAiExpandInlineImageRefs(openAiStripForbiddenMetaPlanFromAssistantText(fullRaw), null, genImgBacklog)
+              openAiExpandInlineImageRefs(fullRaw, null, genImgBacklogByToolCallId, genImgUrlsWithoutToolCallId)
             int sent = fluxAssistExpandedSentLen.get()
             int expLen = expandedFull.length()
             String fluxChunkText = sent < expLen ? expandedFull.substring(sent) : ''
@@ -5123,7 +5183,8 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
                   openAiToolsTerminalEmitted,
                   StudioAiLlmKind.toolsLoopChatBaseUrlFromBundle(springAi),
                   springAi,
-                  genImgBacklog
+                  genImgBacklogByToolCallId,
+                  genImgUrlsWithoutToolCallId
                 )
                 null
               } finally {

@@ -38,6 +38,31 @@ final class AutonomousAssistantSupervisor {
 
   private AutonomousAssistantSupervisor() {}
 
+  /**
+   * Carries {@link #agentId} so a saturated pool reject handler can {@link ConcurrentHashMap#remove(Object)} from
+   * {@link #RUNNING} — otherwise {@link #tick()} would leak RUNNING and the agent would never reschedule.
+   */
+  private static final class AutonomousAgentRunRunnable implements Runnable {
+    final String siteId
+    final String agentId
+    final Map agentDef
+
+    AutonomousAgentRunRunnable(String siteId, String agentId, Map agentDef) {
+      this.siteId = siteId
+      this.agentId = agentId
+      this.agentDef = agentDef
+    }
+
+    @Override
+    void run() {
+      try {
+        AutonomousAssistantWorker.runStep(siteId, agentId, agentDef)
+      } finally {
+        RUNNING.remove(agentId)
+      }
+    }
+  }
+
   static synchronized void ensureStarted() {
     if (supervisorExec == null || supervisorExec.isShutdown()) {
       supervisorExec = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
@@ -90,6 +115,9 @@ final class AutonomousAssistantSupervisor {
       RejectedExecutionHandler saturated = new RejectedExecutionHandler() {
         @Override
         void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+          if (r instanceof AutonomousAgentRunRunnable) {
+            RUNNING.remove(((AutonomousAgentRunRunnable) r).agentId)
+          }
           log.warn(
             'Autonomous worker pool saturated; task rejected (not run on supervisor thread). active={} poolSize={} queue={}',
             executor.activeCount,
@@ -258,13 +286,7 @@ final class AutonomousAssistantSupervisor {
           if (RUNNING.putIfAbsent(agentId, Boolean.TRUE) != null) {
             continue
           }
-          workerPool.submit({
-            try {
-              AutonomousAssistantWorker.runStep(siteId, agentId, agentDef)
-            } finally {
-              RUNNING.remove(agentId)
-            }
-          } as Runnable)
+          workerPool.submit(new AutonomousAgentRunRunnable(siteId, agentId, agentDef))
         }
       }
     } catch (Throwable t) {
