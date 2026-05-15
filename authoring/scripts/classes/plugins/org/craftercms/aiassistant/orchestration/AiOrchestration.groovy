@@ -3510,11 +3510,15 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
         agentId,
         ie.message
       )
-      writeSseErrorFrame(out, new InterruptedException('Request was cancelled or stopped before the assistant finished.'))
-      markOpenAiToolsTerminalEmitted(terminalEmitted)
+      if (tryClaimOpenAiToolsTerminalEmit(terminalEmitted)) {
+        writeSseErrorFrame(out, new InterruptedException('Request was cancelled or stopped before the assistant finished.'))
+      }
       return
     }
     try {
+      if (!tryClaimOpenAiToolsTerminalEmit(terminalEmitted)) {
+        return
+      }
       synchronized (out) {
         String finalChunk = openAiStripForbiddenMetaPlanFromAssistantText((text ?: '').toString())
         out.write(("data: ${JsonOutput.toJson([text: finalChunk, metadata: [:]])}\n\n").getBytes(StandardCharsets.UTF_8))
@@ -3524,7 +3528,6 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
         out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
         out.flush()
       }
-      markOpenAiToolsTerminalEmitted(terminalEmitted)
     } catch (Throwable io) {
       if (isSseClientDisconnected(io)) {
         log.warn(
@@ -4279,13 +4282,11 @@ Technical detail: ''' + msg
   }
 
   /**
-   * If the OpenAI tools worker exits without writing {@code metadata.completed}, the Studio UI stays on **Working…**
-   * until fetch timeout. Call this from the servlet thread when joining the worker or on cancel paths.
+   * Exactly-once terminal SSE for the native-tools worker vs servlet recovery paths: compare-and-set so only one
+   * thread emits completed/error-with-completed (avoids duplicate terminal events if both race on cancel/timeout).
    */
-  private static void markOpenAiToolsTerminalEmitted(AtomicBoolean emittedFlag) {
-    if (emittedFlag != null) {
-      emittedFlag.set(true)
-    }
+  private static boolean tryClaimOpenAiToolsTerminalEmit(AtomicBoolean emittedFlag) {
+    return emittedFlag == null || emittedFlag.compareAndSet(false, true)
   }
 
   private void ensureSseTerminalCompletedIfNeeded(
@@ -4297,7 +4298,7 @@ Technical detail: ''' + msg
     if (out == null) {
       return
     }
-    if (emittedFlag != null && emittedFlag.get()) {
+    if (!tryClaimOpenAiToolsTerminalEmit(emittedFlag)) {
       return
     }
     try {
@@ -4309,7 +4310,6 @@ Technical detail: ''' + msg
         out.write(("data: ${JsonOutput.toJson([text: '', metadata: doneMeta])}\n\n").getBytes(StandardCharsets.UTF_8))
         out.flush()
       }
-      markOpenAiToolsTerminalEmitted(emittedFlag)
     } catch (Throwable t) {
       if (!isSseClientDisconnected(t)) {
         log.warn('ensureSseTerminalCompletedIfNeeded failed: {}', t.message)
@@ -4686,8 +4686,9 @@ Check Studio logs for Spring AI / WebClient / reactor.netty lines emitted for th
                   def msg = """Tools-loop chat did not finish within ${(CHAT_FLUX_AWAIT_MS / 1000) as int} seconds (server-side limit); the request was cancelled.
 
 If this is unexpected: verify outbound HTTPS from Studio to your configured chat host, API key and account status, and the model id (${modelForLog})."""
-                  writeSseErrorFrame(out, new TimeoutException(msg))
-                  markOpenAiToolsTerminalEmitted(openAiToolsTerminalEmitted)
+                  if (tryClaimOpenAiToolsTerminalEmit(openAiToolsTerminalEmitted)) {
+                    writeSseErrorFrame(out, new TimeoutException(msg))
+                  }
                   pool.shutdownNow()
                   return null
                 }
@@ -4772,8 +4773,9 @@ If this is unexpected: verify outbound HTTPS from Studio to your configured chat
                 }
                 if (c instanceof IllegalStateException) {
                   log.error('chatStreamWithSpringAi: Tools-loop tool worker failed', c)
-                  writeSseErrorFrame(out, c)
-                  ensureSseTerminalCompletedIfNeeded(out, toolTimingCtx, openAiToolsTerminalEmitted, 'Tools-loop tool worker failed')
+                  if (tryClaimOpenAiToolsTerminalEmit(openAiToolsTerminalEmitted)) {
+                    writeSseErrorFrame(out, c)
+                  }
                   return null
                 }
                 throw ee

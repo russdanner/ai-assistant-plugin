@@ -570,47 +570,55 @@ class AiHttpProxy {
    * property {@code crafterq.maxJsonBodyChars}.</p>
    */
   static Map parseJsonBody(def request) {
-    def reader = request?.getReader()
-    if (!reader) {
-      return [:]
-    }
-    int maxChars = 1_048_576
     try {
-      Integer prop = Integer.getInteger('crafterq.maxJsonBodyChars')
-      if (prop != null && prop > 4096) {
-        maxChars = prop
+      def reader = request?.getReader()
+      if (!reader) {
+        return [:]
       }
-    } catch (Throwable ignoredProp) {
-    }
-    StringBuilder sb = new StringBuilder(Math.min(maxChars, 131072))
-    char[] buf = new char[8192]
-    int total = 0
-    int n
-    while ((n = reader.read(buf)) != -1) {
-      if (total + n > maxChars) {
-        try {
-          while (reader.read(buf) != -1) {
-            // drain connection so client sees full upload accepted; we discard
-          }
-        } catch (Throwable ignoredDrain) {
+      int maxChars = 1_048_576
+      try {
+        Integer prop = Integer.getInteger('crafterq.maxJsonBodyChars')
+        if (prop != null && prop > 4096) {
+          maxChars = prop
         }
+      } catch (Throwable ignoredProp) {
+      }
+      StringBuilder sb = new StringBuilder(Math.min(maxChars, 131072))
+      char[] buf = new char[8192]
+      int total = 0
+      int n
+      while ((n = reader.read(buf)) != -1) {
+        if (total + n > maxChars) {
+          try {
+            while (reader.read(buf) != -1) {
+              // drain connection so client sees full upload accepted; we discard
+            }
+          } catch (Throwable ignoredDrain) {
+          }
+          return [
+            __crafterqInvalidJson      : true,
+            __crafterqInvalidJsonDetail: "Request body too large (>${maxChars} chars); raise crafterq.maxJsonBodyChars if needed."
+          ]
+        }
+        sb.append(buf, 0, n)
+        total += n
+      }
+      String text = sb.toString()
+      if (!text?.trim()) {
+        return [:]
+      }
+      try {
+        def parsed = new JsonSlurper().parseText(text)
+        return (parsed instanceof Map) ? (Map) parsed : [value: parsed]
+      } catch (Throwable t) {
+        logger.warn('parseJsonBody: invalid JSON ({} chars): {}', total, t.message)
         return [
           __crafterqInvalidJson      : true,
-          __crafterqInvalidJsonDetail: "Request body too large (>${maxChars} chars); raise crafterq.maxJsonBodyChars if needed."
+          __crafterqInvalidJsonDetail: (t.message ?: t.toString())
         ]
       }
-      sb.append(buf, 0, n)
-      total += n
-    }
-    String text = sb.toString()
-    if (!text?.trim()) {
-      return [:]
-    }
-    try {
-      def parsed = new JsonSlurper().parseText(text)
-      return (parsed instanceof Map) ? (Map) parsed : [value: parsed]
     } catch (Throwable t) {
-      logger.warn('parseJsonBody: invalid JSON ({} chars): {}', total, t.message)
+      logger.warn('parseJsonBody: I/O or unexpected read failure: {}', t.message)
       return [
         __crafterqInvalidJson      : true,
         __crafterqInvalidJsonDetail: (t.message ?: t.toString())

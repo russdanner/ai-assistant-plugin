@@ -4,6 +4,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ThreadFactory
@@ -74,12 +75,27 @@ final class AutonomousAssistantSupervisor {
         }
       } catch (Throwable ignoredQ) {
       }
+      maxPool = Math.max(1, maxPool)
+      corePool = Math.min(Math.max(1, corePool), maxPool)
       ThreadFactory tf = new ThreadFactory() {
         @Override
         Thread newThread(Runnable r) {
           Thread t = new Thread(r, 'aiassistant-autonomous-worker-' + Long.toHexString(System.nanoTime()))
           t.setDaemon(true)
           t
+        }
+      }
+      // Do not use CallerRunsPolicy: {@link #tick()} submits from the single supervisor thread; saturation would
+      // run agent work inline on that thread and stall all ticks. Log and drop when saturated instead.
+      RejectedExecutionHandler saturated = new RejectedExecutionHandler() {
+        @Override
+        void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+          log.warn(
+            'Autonomous worker pool saturated; task rejected (not run on supervisor thread). active={} poolSize={} queue={}',
+            executor.activeCount,
+            executor.poolSize,
+            executor.queue?.size()
+          )
         }
       }
       workerPool = new ThreadPoolExecutor(
@@ -89,7 +105,7 @@ final class AutonomousAssistantSupervisor {
         TimeUnit.SECONDS,
         new LinkedBlockingQueue<Runnable>(queueCap),
         tf,
-        new ThreadPoolExecutor.CallerRunsPolicy()
+        saturated
       )
       log.info(
         'Autonomous worker pool: core={} max={} queueCap={} (override crafterq.autonomous.worker.core/max/queue)',
