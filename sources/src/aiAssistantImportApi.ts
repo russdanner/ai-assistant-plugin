@@ -71,6 +71,7 @@ export async function importRemoteImageToRepo(
       }
       const rel = data.relativeUrl?.trim();
       if (!rel) throw new Error('Import response missing relativeUrl');
+      importPromises.delete(key);
       return rel;
     } catch (e) {
       importPromises.delete(key);

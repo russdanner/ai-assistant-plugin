@@ -11,7 +11,7 @@
 | **Product / review** — mandatory outcomes for authors, admins, and integrators | [Product requirements](using-and-extending/product-requirements.md) |
 | **LLM & image backends** — wire ids, secrets, **`script:`** LLM, **pluggable `GenerateImage`** | [LLM configuration](using-and-extending/llm-configuration.md) · [Script LLM — BYO backend](using-and-extending/script-llm-bring-your-own-backend.md) · Groq script sample: `docs/examples/aiassistant-llm/groq/runtime.groovy` · [Image generation](using-and-extending/image-generation.md) · JVM tuning: [studio-aiassistant-jvm-parameters.md](using-and-extending/studio-aiassistant-jvm-parameters.md) |
 | **Extension developers** — Rollup, descriptor, classpath, sandbox script layout | [Studio plugins guide](using-and-extending/studio-plugins-guide.md) · [Using & extending index](using-and-extending/README.md) |
-| **Maintainers** — **`spec.md`** (requirements & mechanics), streaming, tools runtime | [Internals](internals/README.md) |
+| **Maintainers** — **`spec.md`** (requirements & mechanics), streaming, tools runtime, review-style invariants | [Internals](internals/README.md) · [Maintainer review checklist](internals/maintainer-review-checklist.md) |
 | **Plugin repo contributors** — clone, `yarn package`, policy, spec | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ## Topic → Document
@@ -32,5 +32,6 @@
 | MCP client (`mcpEnabled` + `mcpServers` in `tools.json`, Streamable HTTP) | [chat-and-tools-runtime.md](internals/chat-and-tools-runtime.md#mcp-client-tools-streamable-http) |
 | REST/stream body, tools, CrafterQ auth | [chat-and-tools-runtime.md](internals/chat-and-tools-runtime.md) |
 | Engineering contracts (`ui.xml` / stream / form / REST) | [internals/spec.md](internals/spec.md) |
+| Review-style invariants (perf, memory, SSE, Groovy pitfalls) | [internals/maintainer-review-checklist.md](internals/maintainer-review-checklist.md) |
 
 **Examples:** [`examples/`](examples/).

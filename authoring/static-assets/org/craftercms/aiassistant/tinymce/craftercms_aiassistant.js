@@ -1224,7 +1224,10 @@
                 craftercms.services.plugin
                     .importPlugin(site, 'aiassistant', 'components', 'index.js', 'org.craftercms.aiassistant.studio')
                     .then((plugin) => {
-                    const userName = "dave"; //createUsername(craftercms.getStore().getState().user);
+                    const store = craftercms?.getStore?.();
+                    const st = store?.getState?.();
+                    const rawUser = st?.user?.username;
+                    const userName = (typeof rawUser === 'string' && rawUser.trim()) || (rawUser != null && String(rawUser).trim()) || 'anonymous';
                     const container = document.createElement('div');
                     const root = craftercms.libs.ReactDOMClient.createRoot(container);
                     const AiAssistantPopover = plugin.widgets[popoverWidgetId]; // Same as craftercms.utils.constants.components.get('...');

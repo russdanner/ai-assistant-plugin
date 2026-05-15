@@ -29,7 +29,7 @@ Use this skill when editing **this repo**: `plugin-studio-crafterq` — Studio p
 - **`docs/using-and-extending/product-requirements.md`** — Product obligations (authors, admins, integrators); wire and build contracts live in **`spec.md`** and linked guides.
 - **`docs/internals/spec.md`** — **Official** product requirements & mechanics; update when behavior or contracts change. **Studio UI flags:** anchor **`#studio-ui-flags-studio-uijson`** (`studio-ui.json`, Project Tools).
 - **`docs/using-and-extending/`** — **`llm-configuration.md`**, **`studio-plugins-guide.md`**, **`README.md`** (`user-tools/`, script LLM paths, other guides).
-- **`docs/internals/`** — Maintainers: **`docs/internals/README.md`**, **`docs/internals/spec.md`**, **`docs/internals/stream-endpoint-design.md`**, MCP client notes in **`chat-and-tools-runtime.md`**.
+- **`docs/internals/`** — Maintainers: **`docs/internals/README.md`**, **`docs/internals/spec.md`**, **`docs/internals/stream-endpoint-design.md`**, MCP client notes in **`chat-and-tools-runtime.md`**, recurring hardening themes in **`docs/internals/maintainer-review-checklist.md`**.
 
 ## Mechanical checklist (non-UI changes)
 

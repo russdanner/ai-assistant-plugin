@@ -278,6 +278,10 @@ function CodeBlock(props: { language?: string; value: string }) {
             </Tabs>
             {htmlMode === 'preview' ? (
               <Box sx={{ p: 1 }}>
+                {/*
+                  Intentionally empty sandbox: no allow-scripts / allow-same-origin — assistant HTML is untrusted;
+                  this is an isolated document preview only (not live site or Studio preview).
+                */}
                 <Box
                   component="iframe"
                   sandbox=""

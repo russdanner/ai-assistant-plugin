@@ -325,6 +325,7 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
         }}
         src={displaySrc}
         alt={alt ?? ''}
+        loading="lazy"
         draggable={canDrag}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}

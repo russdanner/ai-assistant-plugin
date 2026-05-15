@@ -52,6 +52,25 @@ function isFormEngineAuthoringChat(getAuthoringFormContext: unknown): boolean {
   return typeof getAuthoringFormContext === 'function';
 }
 
+const MAX_SESSION_STREAM_LOG_LINES = 4000;
+
+function pushStreamLog(logRef: React.MutableRefObject<string[]>, line: string) {
+  const arr = logRef.current;
+  arr.push(line);
+  if (arr.length > MAX_SESSION_STREAM_LOG_LINES) {
+    arr.splice(0, arr.length - MAX_SESSION_STREAM_LOG_LINES);
+  }
+}
+
+/** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
+function redactSessionLogLineForCopy(s: string): string {
+  return s.replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"');
+}
+
+function safeCopySessionLog(lines: string[]): string {
+  return lines.map(redactSessionLogLineForCopy).join('\n');
+}
+
 /** Nearest ancestor that scrolls (e.g. ICE `ResizeableDrawer` drawerBody uses overflow-y: auto). */
 function getScrollParent(node: HTMLElement | null): HTMLElement | null {
   let el: HTMLElement | null = node?.parentElement ?? null;
@@ -1395,6 +1414,9 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
   /** True when the user clicked Stop (vs timeout / navigation) — shapes catch handling. */
   const userStopRequestedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** Focus target after send so screen readers pick up the new assistant row / heartbeat region. */
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const saveDebounceRef = useRef<number | null>(null);
   const iceRootRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenAssistantIdRef = useRef<string | null>(null);
   /** Raw SSE JSON lines + client send markers — full transcript for support / debugging (see Copy log). */
@@ -1421,13 +1443,29 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     setMessages(base);
   }, [siteId, agentId, initialMessages]);
 
-  // Persist per-agent conversation state.
+  // Persist per-agent conversation: avoid writing on every SSE chunk (localStorage jank + quota).
   useEffect(() => {
-    saveConversation(siteId, agentId, {
-      version: 1,
-      chatId,
-      messages: messages.map((m) => ({ ...m, isStreaming: false }))
-    });
+    const hasStreaming = messages.some((m) => m.isStreaming);
+    if (hasStreaming) {
+      return;
+    }
+    if (saveDebounceRef.current) {
+      window.clearTimeout(saveDebounceRef.current);
+    }
+    saveDebounceRef.current = window.setTimeout(() => {
+      saveConversation(siteId, agentId, {
+        version: 1,
+        chatId,
+        messages: messages.map((m) => ({ ...m, isStreaming: false }))
+      });
+      saveDebounceRef.current = null;
+    }, 600);
+    return () => {
+      if (saveDebounceRef.current) {
+        window.clearTimeout(saveDebounceRef.current);
+        saveDebounceRef.current = null;
+      }
+    };
   }, [siteId, agentId, chatId, messages]);
 
   const quickMessagesToShow = useMemo(() => {
@@ -1732,8 +1770,12 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
       { id: userId, role: 'user', text: userBubbleText },
       { id: assistantId, role: 'assistant', text: '', isStreaming: true }
     ]);
+    queueMicrotask(() => {
+      transcriptRef.current?.focus({ preventScroll: true });
+    });
     try {
-      sessionStreamLogRef.current.push(
+      pushStreamLog(
+        sessionStreamLogRef,
         JSON.stringify({
           kind: 'client.userSend',
           ts: new Date().toISOString(),
@@ -1797,7 +1839,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         ...(crafterQBearerToken?.trim() ? { crafterQBearerToken: crafterQBearerToken.trim() } : {}),
         signal: ac.signal,
         onRawSseDataLine: (jsonLine) => {
-          sessionStreamLogRef.current.push(`${new Date().toISOString()}\t${jsonLine}`);
+          pushStreamLog(sessionStreamLogRef, `${new Date().toISOString()}\t${jsonLine}`);
         },
         onMessage: (evt) => {
           const evtChatId = evt.metadata?.chatId;
@@ -2045,7 +2087,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
 
       // OpenAI + multi-step tools can exceed several minutes; cap aligns with server crafterq.chatFluxAwaitMs default.
       const CHAT_STREAM_TIMEOUT_MS = 600000;
-      let streamTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      let streamTimeoutId: number | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
         streamTimeoutId = window.setTimeout(() => {
           streamHitTimeout = true;
@@ -2515,7 +2557,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
                   onClick={() =>
                     void copyToClipboard(
                       sessionStreamLogRef.current.length
-                        ? sessionStreamLogRef.current.join('\n')
+                        ? safeCopySessionLog(sessionStreamLogRef.current)
                         : '(Session log is empty — send a message first.)'
                     )
                   }
@@ -2737,7 +2779,13 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         {!isIcePanel ? quickPromptsRow : null}
         {!isIcePanel && quickPromptsRow ? <Divider sx={{ flexShrink: 0 }} /> : null}
         <Box sx={{ bgcolor: chatSurfaceBg }}>
-          <Stack spacing={1.25} sx={{ px: 2, pt: 2, pb: 1 }}>
+          <Stack
+            ref={transcriptRef}
+            tabIndex={-1}
+            aria-label="Conversation"
+            spacing={1.25}
+            sx={{ px: 2, pt: 2, pb: 1, outline: 'none' }}
+          >
             {messageBubbles}
           </Stack>
         </Box>
@@ -2775,7 +2823,13 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
           background: chatSurfaceBg
         }}
       >
-        <Stack spacing={1.25} sx={{ px: 2, pt: 2, pb: 1 }}>
+        <Stack
+          ref={transcriptRef}
+          tabIndex={-1}
+          aria-label="Conversation"
+          spacing={1.25}
+          sx={{ px: 2, pt: 2, pb: 1, outline: 'none' }}
+        >
           {messageBubbles}
         </Stack>
       </Box>
