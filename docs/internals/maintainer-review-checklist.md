@@ -8,6 +8,7 @@ This document captures **recurring review themes** (performance, correctness, me
 
 - **Do not write `localStorage` on every `messages` change during SSE.** High-frequency updates (token deltas, tool progress) cause UI jank and can exhaust quota quickly.
 - **Pattern we use:** persist only when **no message is streaming** (`isStreaming`), and **debounce** idle saves (e.g. a few hundred ms) so burst edits still coalesce.
+- **Teardown:** if cleanup **only** `clearTimeout`s the debounce, the last idle conversation can be lost on unmount or fast navigation—**flush one save** when canceling a pending timer, using a **snapshot ref** (`siteId` / `agentId` / `chatId` / `messages` captured when the timer was scheduled) so agent switches do not write the wrong site’s blob.
 
 ### In-memory debug / support buffers
 
@@ -39,8 +40,8 @@ This document captures **recurring review themes** (performance, correctness, me
 
 ### Accessibility
 
-- After sending a message, **move focus** to a sensible region of the transcript (e.g. a `Stack` with `tabIndex={-1}` and `aria-label="Conversation"`) so screen readers pick up streaming / heartbeat updates where `aria-live` is used.
-- Use **`queueMicrotask` / `requestAnimationFrame`** if focus must run after React commits `setState`.
+- Prefer **`aria-live`** (and existing heartbeat / tool-progress regions) for streaming updates so screen readers announce progress **without** moving focus out of the prompt field—automatically focusing the transcript after send hurts keyboard users who expect to type the next prompt.
+- If you add a “jump to transcript” behavior, keep it **explicit** (author-triggered), not automatic on every send.
 
 ### TypeScript and timers
 
@@ -56,6 +57,7 @@ Patterns that have bitten us in review or production:
 - **Thread pool construction:** if JVM overrides can shrink **`maximumPoolSize`** below the default **`corePoolSize`**, **clamp core ≤ max** before `new ThreadPoolExecutor(…)`.
 - **`CallerRunsPolicy` on pools fed from a single scheduler thread:** under saturation, work can run **on the caller** and stall ticks. Prefer a policy that **does not** inline work on that thread (e.g. log-and-drop, `DiscardOldestPolicy`, or explicit queue + bounded behavior), and document the trade-off.
 - **SSE terminal events:** multiple threads (worker vs servlet) can race to emit **completed / error** frames. Use a **single-winner** pattern (`AtomicBoolean.compareAndSet(false, true)`) before writing terminal SSE.
+- **Tools-loop diag session vs legacy global phase:** when a worker thread **binds** a per-stream session id, **`crafterQToolWorkerDiagSessionEnd`** must **not** clear the global legacy `CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF`—only unbound / fallback workers own that slot; clearing it from a bound worker can erase another thread’s advertised phase.
 - **Defensive copies of nested state:** `new LinkedHashMap(existing)` is **shallow**; nested lists/maps (e.g. `humanTasks`, `executionHistory`) stay **aliased**. For in-memory stores returned to callers, use **deep copy** helpers for get/put/merge/snapshot paths when mutation safety matters.
 
 ---

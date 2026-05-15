@@ -1414,9 +1414,14 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
   /** True when the user clicked Stop (vs timeout / navigation) — shapes catch handling. */
   const userStopRequestedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  /** Focus target after send so screen readers pick up the new assistant row / heartbeat region. */
-  const transcriptRef = useRef<HTMLDivElement | null>(null);
   const saveDebounceRef = useRef<number | null>(null);
+  /** Snapshot for the debounced localStorage write; teardown flush uses this so agent switches do not save the wrong row. */
+  const pendingPersistRef = useRef<{
+    siteId: string;
+    agentId: string;
+    chatId: string | undefined;
+    messages: UiMessage[];
+  } | null>(null);
   const iceRootRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenAssistantIdRef = useRef<string | null>(null);
   /** Raw SSE JSON lines + client send markers — full transcript for support / debugging (see Copy log). */
@@ -1449,21 +1454,36 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     if (hasStreaming) {
       return;
     }
+    pendingPersistRef.current = { siteId, agentId, chatId, messages };
     if (saveDebounceRef.current) {
       window.clearTimeout(saveDebounceRef.current);
     }
     saveDebounceRef.current = window.setTimeout(() => {
-      saveConversation(siteId, agentId, {
-        version: 1,
-        chatId,
-        messages: messages.map((m) => ({ ...m, isStreaming: false }))
-      });
+      const p = pendingPersistRef.current;
+      if (p && typeof localStorage !== 'undefined') {
+        saveConversation(p.siteId, p.agentId, {
+          version: 1,
+          chatId: p.chatId,
+          messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
+        });
+      }
       saveDebounceRef.current = null;
     }, 600);
     return () => {
+      const hadTimer = saveDebounceRef.current != null;
       if (saveDebounceRef.current) {
         window.clearTimeout(saveDebounceRef.current);
         saveDebounceRef.current = null;
+      }
+      if (hadTimer) {
+        const p = pendingPersistRef.current;
+        if (p && typeof localStorage !== 'undefined' && !p.messages.some((m) => m.isStreaming)) {
+          saveConversation(p.siteId, p.agentId, {
+            version: 1,
+            chatId: p.chatId,
+            messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
+          });
+        }
       }
     };
   }, [siteId, agentId, chatId, messages]);
@@ -1770,9 +1790,6 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
       { id: userId, role: 'user', text: userBubbleText },
       { id: assistantId, role: 'assistant', text: '', isStreaming: true }
     ]);
-    queueMicrotask(() => {
-      transcriptRef.current?.focus({ preventScroll: true });
-    });
     try {
       pushStreamLog(
         sessionStreamLogRef,
@@ -2779,13 +2796,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         {!isIcePanel ? quickPromptsRow : null}
         {!isIcePanel && quickPromptsRow ? <Divider sx={{ flexShrink: 0 }} /> : null}
         <Box sx={{ bgcolor: chatSurfaceBg }}>
-          <Stack
-            ref={transcriptRef}
-            tabIndex={-1}
-            aria-label="Conversation"
-            spacing={1.25}
-            sx={{ px: 2, pt: 2, pb: 1, outline: 'none' }}
-          >
+          <Stack spacing={1.25} sx={{ px: 2, pt: 2, pb: 1 }}>
             {messageBubbles}
           </Stack>
         </Box>
@@ -2823,13 +2834,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
           background: chatSurfaceBg
         }}
       >
-        <Stack
-          ref={transcriptRef}
-          tabIndex={-1}
-          aria-label="Conversation"
-          spacing={1.25}
-          sx={{ px: 2, pt: 2, pb: 1, outline: 'none' }}
-        >
+        <Stack spacing={1.25} sx={{ px: 2, pt: 2, pb: 1 }}>
           {messageBubbles}
         </Stack>
       </Box>

@@ -29735,9 +29735,9 @@ function AiAssistantChat(props) {
     /** True when the user clicked Stop (vs timeout / navigation) — shapes catch handling. */
     const userStopRequestedRef = useRef(false);
     const scrollRef = useRef(null);
-    /** Focus target after send so screen readers pick up the new assistant row / heartbeat region. */
-    const transcriptRef = useRef(null);
     const saveDebounceRef = useRef(null);
+    /** Snapshot for the debounced localStorage write; teardown flush uses this so agent switches do not save the wrong row. */
+    const pendingPersistRef = useRef(null);
     const iceRootRef = useRef(null);
     const lastSpokenAssistantIdRef = useRef(null);
     /** Raw SSE JSON lines + client send markers — full transcript for support / debugging (see Copy log). */
@@ -29768,21 +29768,36 @@ function AiAssistantChat(props) {
         if (hasStreaming) {
             return;
         }
+        pendingPersistRef.current = { siteId, agentId, chatId, messages };
         if (saveDebounceRef.current) {
             window.clearTimeout(saveDebounceRef.current);
         }
         saveDebounceRef.current = window.setTimeout(() => {
-            saveConversation(siteId, agentId, {
-                version: 1,
-                chatId,
-                messages: messages.map((m) => ({ ...m, isStreaming: false }))
-            });
+            const p = pendingPersistRef.current;
+            if (p && typeof localStorage !== 'undefined') {
+                saveConversation(p.siteId, p.agentId, {
+                    version: 1,
+                    chatId: p.chatId,
+                    messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
+                });
+            }
             saveDebounceRef.current = null;
         }, 600);
         return () => {
+            const hadTimer = saveDebounceRef.current != null;
             if (saveDebounceRef.current) {
                 window.clearTimeout(saveDebounceRef.current);
                 saveDebounceRef.current = null;
+            }
+            if (hadTimer) {
+                const p = pendingPersistRef.current;
+                if (p && typeof localStorage !== 'undefined' && !p.messages.some((m) => m.isStreaming)) {
+                    saveConversation(p.siteId, p.agentId, {
+                        version: 1,
+                        chatId: p.chatId,
+                        messages: p.messages.map((m) => ({ ...m, isStreaming: false }))
+                    });
+                }
             }
         };
     }, [siteId, agentId, chatId, messages]);
@@ -30063,9 +30078,6 @@ function AiAssistantChat(props) {
             { id: userId, role: 'user', text: userBubbleText },
             { id: assistantId, role: 'assistant', text: '', isStreaming: true }
         ]);
-        queueMicrotask(() => {
-            transcriptRef.current?.focus({ preventScroll: true });
-        });
         try {
             pushStreamLog(sessionStreamLogRef, JSON.stringify({
                 kind: 'client.userSend',
@@ -30642,7 +30654,7 @@ function AiAssistantChat(props) {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'visible'
-            }, children: [iceStickyQuickPrompts, !isIcePanel ? quickPromptsRow : null, !isIcePanel && quickPromptsRow ? jsx$1(Divider, { sx: { flexShrink: 0 } }) : null, jsx$1(Box, { sx: { bgcolor: chatSurfaceBg }, children: jsx$1(Stack$1, { ref: transcriptRef, tabIndex: -1, "aria-label": "Conversation", spacing: 1.25, sx: { px: 2, pt: 2, pb: 1, outline: 'none' }, children: messageBubbles }) }), composerSection] }));
+            }, children: [iceStickyQuickPrompts, !isIcePanel ? quickPromptsRow : null, !isIcePanel && quickPromptsRow ? jsx$1(Divider, { sx: { flexShrink: 0 } }) : null, jsx$1(Box, { sx: { bgcolor: chatSurfaceBg }, children: jsx$1(Stack$1, { spacing: 1.25, sx: { px: 2, pt: 2, pb: 1 }, children: messageBubbles }) }), composerSection] }));
     }
     return (jsxs(Box, { sx: {
             display: 'flex',
@@ -30663,7 +30675,7 @@ function AiAssistantChat(props) {
                     overflowX: 'hidden',
                     WebkitOverflowScrolling: 'touch',
                     background: chatSurfaceBg
-                }, children: jsx$1(Stack$1, { ref: transcriptRef, tabIndex: -1, "aria-label": "Conversation", spacing: 1.25, sx: { px: 2, pt: 2, pb: 1, outline: 'none' }, children: messageBubbles }) }), jsx$1(Divider, { sx: { flexShrink: 0 } }), composerSection] }));
+                }, children: jsx$1(Stack$1, { spacing: 1.25, sx: { px: 2, pt: 2, pb: 1 }, children: messageBubbles }) }), jsx$1(Divider, { sx: { flexShrink: 0 } }), composerSection] }));
 }
 
 function AiAssistantPopover(props) {

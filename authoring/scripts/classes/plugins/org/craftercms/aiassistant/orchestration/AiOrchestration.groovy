@@ -199,8 +199,9 @@ class AiOrchestration {
   }
 
   static void crafterQToolWorkerDiagSessionEnd() {
+    String sid = null
     try {
-      String sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
+      sid = CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.get()
       if (sid != null && sid.toString().trim()) {
         CRAFTERQ_TOOL_WORKER_DIAG_PHASE_BY_SESSION.remove(sid.toString().trim())
       }
@@ -210,9 +211,12 @@ class AiOrchestration {
       CRAFTERQ_TOOL_WORKER_DIAG_SESSION_ID.remove()
     } catch (Throwable ignored2) {
     }
-    try {
-      CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
-    } catch (Throwable ignored3) {
+    // Only reset the legacy global slot if this thread did not bind a session id (it owned the global ref).
+    if (sid == null || !sid.toString().trim()) {
+      try {
+        CRAFTERQ_TOOL_WORKER_DIAG_PHASE_REF.set('')
+      } catch (Throwable ignored3) {
+      }
     }
   }
 
