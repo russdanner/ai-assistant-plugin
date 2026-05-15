@@ -42,8 +42,9 @@ try {
     response.setContentType('application/json')
     response.getOutputStream().withWriter('UTF-8') {
       it.write(JsonOutput.toJson([
+        ok     : false,
         message: 'Invalid JSON request body',
-        detail   : body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: ''
+        detail : body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: ''
       ]))
     }
     return null
@@ -72,6 +73,7 @@ try {
   if (siteIdBody) {
     try {
       request.setAttribute('aiassistant.siteId', siteIdBody)
+      request.setAttribute('crafterq.siteId', siteIdBody)
     } catch (Throwable ignored) {
       // non-mutable request in some contexts
     }
@@ -80,11 +82,13 @@ try {
   if (previewTokenBody) {
     try {
       request.setAttribute('aiassistant.previewToken', previewTokenBody)
+      request.setAttribute('crafterq.previewToken', previewTokenBody)
     } catch (Throwable ignored) {}
   }
   def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
   try {
     request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
+    request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
   } catch (Throwable ignored) {}
   def agentToolsRaw = body?.enabledBuiltInTools
   if (agentToolsRaw instanceof List && !((List) agentToolsRaw).isEmpty()) {
@@ -98,6 +102,7 @@ try {
     if (!wl.isEmpty()) {
       try {
         request.setAttribute('aiassistant.agentEnabledBuiltInTools', wl)
+        request.setAttribute('crafterq.agentEnabledBuiltInTools', wl)
       } catch (Throwable ignoredWl) {}
     }
   }
@@ -116,7 +121,7 @@ try {
     response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
     response.setContentType('application/json')
     response.getOutputStream().withWriter('UTF-8') {
-      it.write(JsonOutput.toJson([message: (iae.message ?: 'Invalid llm').toString()]))
+      it.write(JsonOutput.toJson([ok: false, message: (iae.message ?: 'Invalid llm').toString()]))
     }
     return null
   }
@@ -144,6 +149,7 @@ try {
       tbc = Math.max(1, Math.min(64, tbc))
       try {
         request.setAttribute('aiassistant.translateBatchConcurrency', Integer.valueOf(tbc))
+        request.setAttribute('crafterq.translateBatchConcurrency', Integer.valueOf(tbc))
       } catch (Throwable ignored2) {}
     } catch (Throwable ignored) {}
   }

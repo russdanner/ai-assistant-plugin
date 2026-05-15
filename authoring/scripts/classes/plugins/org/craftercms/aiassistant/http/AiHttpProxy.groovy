@@ -52,12 +52,7 @@ class AiHttpProxy {
       int n
       while ((n = reader.read(buf)) != -1) {
         if (total + n > maxChars) {
-          try {
-            while (reader.read(buf) != -1) {
-              // drain connection so client sees full upload accepted; we discard
-            }
-          } catch (Throwable ignoredDrain) {
-          }
+          // Do not drain to EOF on the request thread (large uploads = DoS / thread starvation).
           return [
             __aiassistantInvalidJson      : true,
             __aiassistantInvalidJsonDetail: "Request body too large (>${maxChars} chars); raise aiassistant.maxJsonBodyChars if needed."

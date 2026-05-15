@@ -21,7 +21,8 @@
 ### Terminology (Product vs Integrations)
 
 - **Studio AI assistant** — The authoring-facing assistant in Crafter Studio that this plugin provides: the form-engine control, the Helper widget on the Tools Panel or preview toolbar, optional autonomous scheduled runs, and **TinyMCE** when sites wire the RTE integration. Use this name for the product experience authors see.
-- **Legacy wiring names** — Some constants and XML tags retain **`crafterQ`** / **`CrafterQ`** prefixes (`openCrafterQMessageId`, **`crafterQAgentId`** in **`ui.xml`**, **`crafterqFormFieldUpdates`** for form-engine JSON). They identify stable ids or message topics — **not** a hosted CrafterQ SaaS dependency (hosted chat was removed).
+- **Optional CrafterQ integration (tools)** — A **separate** CrafterQ deployment can be wired in as **optional** LLM function tools (for example: list agents, list conversations, ask an expert agent). Sites enable them only when they add those tools to the agent catalog / MCP policy; they are **not** required for core authoring chat (CMS tools, scripts, HTTP fetch, etc.) and are **not** the product story of this plugin.
+- **Stable Studio `ui.xml` ids** — Per-agent stable **`agentId`** is still declared with the XML element **`crafterQAgentId`** (unchanged Studio schema token). Form-engine replies that apply field updates use the JSON object key **`aiassistantFormFieldUpdates`** (see § Content-type form assistant).
 
 ### Overview
 
@@ -56,10 +57,8 @@ The UI uses a combination of:
   - either an `IconButton` whose glyph is the first agent’s `icon` from `ui.xml` (mapped in `agentIcon.tsx`), falling back to the bundled assistant mark when unset, or
   - a `ToolsPanelListItemButton` (sidebar) with the bundled logo widget id (`logoWidgetId` in `consts.ts`)
   - With **one** configured agent, the toolbar click opens that agent directly (no menu). With **multiple** agents, a `Menu` lists each row.
-- Agent rows are merged with site `/ui.xml` when Studio’s widget JSON omits label/icon/prompts (placeholder label `CrafterQ` is reconciled); duplicates are deduped after merge. When any agent has a **real** label, extra rows with the JSON-only placeholder label `CrafterQ` are removed (even if Studio assigns an id). When a **non-sample** agent exists, the plugin-install **default sample agent** row from **`craftercms-plugin.yaml`** (`019c7237-…`) is also dropped so the Helper menu is not doubled.
+- Agent rows are merged with site `/ui.xml` when Studio’s widget JSON omits label/icon/prompts; merge uses the sentinel label constant **`AI_ASSISTANT_AGENT_LABEL_FALLBACK`** in **`agentConfig.ts`** for dedupe. When any agent has a distinct label, rows that only repeat that sentinel are removed. When a **non-sample** agent exists, the plugin-install **default sample agent** row from **`craftercms-plugin.yaml`** (`019c7237-…`, label **`AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL`**) is also dropped so the Helper menu is not doubled.
 - Otherwise opens the Experience Builder ICE tools panel (or a floating dialog when `openAsPopup` is set on the agent).
-
-Note: Message-bus wiring to open the assistant via `openCrafterQMessageId` is present but currently commented out in `AiAssistantHelper.tsx`.
 
 #### Autonomous Assistants Widget (Tools Panel)
 
@@ -166,8 +165,8 @@ If the worker throws or the model response cannot be parsed as JSON, **`state.la
 - **TinyMCE plugin name**: `craftercms_aiassistant`
 - **Registered toolbar controls**:
   - `aiAssistantOpen` (button)
-  - `crafterqshortcuts` (menu button)
-  - `crafterq` (split button)
+  - `aiassistantShortcuts` (menu button; **`crafterqshortcuts`** still registered for older `studio-ui.json` toolbar strings)
+  - `aiassistant` (split button)
 
 ##### Behavior
 
@@ -183,7 +182,7 @@ When invoked, the plugin:
 
 The TinyMCE integration detects Experience Builder:
 
-- **XB**: Uses `xb.post(openCrafterQMessageId, props)` to request opening the assistant in Studio via a message topic.
+- **XB**: Uses `xb.post(openAiAssistantMessageId, props)` (`craftercms.aiassistant.OpenPanel` in **`consts.ts`**) to request opening the assistant in Studio via a message topic.
 - **Non-XB**: Dynamically imports the plugin widgets bundle using:
   - `craftercms.services.plugin.importPlugin(site, 'aiassistant', 'components', 'index.js', 'org.craftercms.aiassistant.studio')`
   - then mounts the `AiAssistantPopover` widget inside the Studio React bridge (`CrafterCMSNextBridge`)
@@ -206,8 +205,8 @@ Defined in `sources/src/consts.ts`:
   - `projectToolsAiAssistantConfigWidgetId` (`craftercms.components.aiassistant.ProjectToolsConfiguration`) — **Project Tools** single entry (**UI** / **Agents** / **Tools and MCP** / **Scripts** / **Prompts and Context** tabs); the bundle opens this shell in a **large modal dialog** for space and focus (legacy widget ids use the same dialog shell with a different default tab).
   - `projectToolsCentralAgentsWidgetId`, `projectToolsScriptsSandboxWidgetId`, `projectToolsStudioUiSettingsWidgetId` — **legacy** widget ids; bundle still registers them and maps each to the same tabbed shell with the matching default tab (**ScriptsSandboxConfiguration** opens the **Tools and MCP** tab — `tools.json`, registry, and user Groovy — for sites that still have three merged tools until admins remove duplicates)
 - **XB message topics**
-  - `openCrafterQMessageId`
-  - `CrafterQClosedMessageId`
+  - `openAiAssistantMessageId` (`craftercms.aiassistant.OpenPanel`)
+  - `aiAssistantClosedMessageId` (`craftercms.aiassistant.PanelClosed`)
 
 ### Plugin ID and Studio File URL
 
@@ -328,7 +327,7 @@ When the plugin’s **REST** chat or stream endpoints are used (`ai/agent/chat` 
 - **OpenAI — conversation continuity and tool omission (all surfaces):** **`AiAssistantChat`** prepends an abbreviated **prior user/assistant turns** block to the wire prompt on every send (XB/ICE sidebar, floating dialog, and form-engine assistant). Optional POST **`omitTools: true`** or quick prompt **`&lt;omitTools&gt;true&lt;/omitTools&gt;`** drops CMS tools for that single request on **any** surface; otherwise **`enableTools`** / agent defaults apply.
 
 - **Experience Builder / ICE (`embedTarget=icePanel`)** — Chat uses Studio **preview** hooks. The stream request may include **`contentPath`** / **`contentTypeId`**; the server appends **repository** authoring context so tools align with **saved** content in git.
-- **Content-type form assistant** (`getAuthoringFormContext` from `control/ai-assistant`) — Authoritative item state is the browser **`form.model`** until the author clicks **Save**. The UI sends **`authoringSurface: "formEngine"`** and **omits** preview `contentPath` / `contentTypeId` so the server does not imply repo == open form. Each send appends a form appendix: **form-definition.xml**, **`CStudioForms.Util.serializeModelToXml(form, false)`** (Save-shaped live XML), optional **model JSON**, plus instructions for a fenced JSON object **`crafterqFormFieldUpdates`** (legacy key name; maps field ids to string values). When the stream completes, the client parses that block and applies updates via **`form.updateModel`**, control **`setValue`**, **`renderValidation`**, and section **`notifyValidation`**. **`AuthoringPreviewContext.appendFormEngineAuthoringNotice`** (only when `authoringSurface: formEngine`) adds a **short** note that tools read/write the repo, not the open form. **Strong** “return `crafterqFormFieldUpdates` JSON for the browser to apply” instructions are appended **only** when the client sends **`formEngineClientJsonApply: true`** (`appendFormEngineClientJsonApplyInstructions`). **Experience Builder / ICE** must **not** send `authoringSurface: formEngine` or that flag — they use **`contentPath`** / **`contentTypeId`** and the normal preview block so Spring AI tools can update the repository.
+- **Content-type form assistant** (`getAuthoringFormContext` from `control/ai-assistant`) — Authoritative item state is the browser **`form.model`** until the author clicks **Save**. The UI sends **`authoringSurface: "formEngine"`** and **omits** preview `contentPath` / `contentTypeId` so the server does not imply repo == open form. Each send appends a form appendix: **form-definition.xml**, **`CStudioForms.Util.serializeModelToXml(form, false)`** (Save-shaped live XML), optional **model JSON**, plus instructions for a fenced JSON object **`aiassistantFormFieldUpdates`** (maps field ids to string values; legacy **`crafterqFormFieldUpdates`** is still parsed from model replies). When the stream completes, the client parses that block and applies updates via **`form.updateModel`**, control **`setValue`**, **`renderValidation`**, and section **`notifyValidation`**. **`AuthoringPreviewContext.appendFormEngineAuthoringNotice`** (only when `authoringSurface: formEngine`) adds a **short** note that tools read/write the repo, not the open form. **Strong** “return `aiassistantFormFieldUpdates` JSON for the browser to apply” instructions are appended **only** when the client sends **`formEngineClientJsonApply: true`** (`appendFormEngineClientJsonApplyInstructions`). **Experience Builder / ICE** must **not** send `authoringSurface: formEngine` or that flag — they use **`contentPath`** / **`contentTypeId`** and the normal preview block so Spring AI tools can update the repository.
 
 - **Non-streaming** (`ai/agent/chat`): `AiOrchestration.chatProxy()`.
 - **Streaming** (`ai/stream`): `AiOrchestration.chatStreamWithSpringAi()` — SSE shape unchanged for the UI.
@@ -418,8 +417,8 @@ Defined in `sources/package.json`:
 
 ### Current Known Gaps / Limitations (As-Is)
 
-- **Helper message bus open**: The code to open the assistant via `openCrafterQMessageId` in `AiAssistantHelper.tsx` is commented out, so “open from message” is not active.
-- **Legacy wire names**: Constants and XML still use **`crafterQ*`** prefixes in a few places (`openCrafterQMessageId`, **`crafterQAgentId`**, **`crafterqFormFieldUpdates`**). They do **not** imply a hosted CrafterQ SaaS integration.
+- **`crafterQAgentId` in `ui.xml`**: The per-agent stable id element name is historical; it is **not** tied to whether optional CrafterQ remote tools are enabled.
+- **Optional CrafterQ tools**: Documented under **Terminology** above — integration-only; core plugin behavior does not depend on them.
 - **Studio AI assistant — autonomous**: Prototype only — in-memory state, no persistence across JVM restarts; not a replacement for scheduled jobs in production. See § Autonomous assistants above.
 
 ### AI Streaming Endpoint (Server-side)

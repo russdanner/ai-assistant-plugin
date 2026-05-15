@@ -73,19 +73,27 @@ function cloneCatalog(f: CentralAgentsFile): CentralAgentsFile {
   return { version: f.version ?? 1, agents: f.agents.map((a) => ({ ...a })) };
 }
 
+/** Obsolete hosted/plugin `<llm>` spellings → `openAI` for catalog UI + save (matches server `StudioAiLlmKind.normalize` rejections). */
+function normalizeLegacyHostedLlmToOpenAi(low: string): boolean {
+  return (
+    low === 'ai-assistant' ||
+    low === 'ai_assistant' ||
+    low === 'ai assistant' ||
+    low === 'aiassistant' ||
+    low === 'hostedchat' ||
+    low === 'hosted-chat' ||
+    low === 'crafterq' ||
+    low === 'crafter-q'
+  );
+}
+
 function parseLlmVendorAndScript(llm: unknown): { vendor: string; scriptId: string } {
   const s = String(llm ?? 'openAI').trim();
   const low = s.toLowerCase();
   if (low === 'script' || low.startsWith('script:')) {
     return { vendor: 'script', scriptId: low.startsWith('script:') ? s.slice('script:'.length).trim() : '' };
   }
-  if (
-    low === 'aiassistant' ||
-    low === 'hostedchat' ||
-    low === 'hosted-chat' ||
-    low === 'crafterq' ||
-    low === 'crafter-q'
-  ) {
+  if (normalizeLegacyHostedLlmToOpenAi(low)) {
     return { vendor: 'openAI', scriptId: '' };
   }
   return { vendor: s || 'openAI', scriptId: '' };
@@ -207,7 +215,9 @@ function normalizeCatalogForSave(f: CentralAgentsFile): CentralAgentsFile {
       } as CentralAgentFileEntry;
       const outRec = out as Record<string, unknown>;
       const lzAuto = String(out.llm ?? '').trim().toLowerCase();
-      if (lzAuto === 'crafterq' || lzAuto === 'crafter-q') outRec.llm = 'openAI';
+      if (normalizeLegacyHostedLlmToOpenAi(lzAuto)) {
+        outRec.llm = 'openAI';
+      }
       delete outRec.prompts;
       const llmS = String(out.llm ?? '').toLowerCase();
       const scriptish = llmS === 'script' || llmS.startsWith('script:');
@@ -230,7 +240,9 @@ function normalizeCatalogForSave(f: CentralAgentsFile): CentralAgentsFile {
     } as CentralAgentFileEntry;
     const recChat = outChat as Record<string, unknown>;
     const lzChat = String(outChat.llm ?? '').trim().toLowerCase();
-    if (lzChat === 'crafterq' || lzChat === 'crafter-q') recChat.llm = 'openAI';
+    if (normalizeLegacyHostedLlmToOpenAi(lzChat)) {
+      recChat.llm = 'openAI';
+    }
     delete recChat.prompt;
     delete recChat.schedule;
     delete recChat.scope;

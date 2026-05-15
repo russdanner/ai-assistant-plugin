@@ -39,7 +39,7 @@ def log = LoggerFactory.getLogger('plugins.org.craftercms.aiassistant.chat')
 def body = AiHttpProxy.parseJsonBody(request)
 if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
+  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
 def agentId = body.agentId != null ? body.agentId.toString().trim() : ''
 def prompt = body.prompt?.toString()
@@ -60,17 +60,20 @@ def openAiApiKey = body.openAiApiKey?.toString()
 if (siteIdBody) {
   try {
     request.setAttribute('aiassistant.siteId', siteIdBody)
+    request.setAttribute('crafterq.siteId', siteIdBody)
   } catch (Throwable ignored) {}
 }
 def previewTokenBody = body?.previewToken?.toString()?.trim()
 if (previewTokenBody) {
   try {
     request.setAttribute('aiassistant.previewToken', previewTokenBody)
+    request.setAttribute('crafterq.previewToken', previewTokenBody)
   } catch (Throwable ignored) {}
 }
 def expertSkillsNorm = ExpertSkillVectorRegistry.normalizeRequestExpertSkills(body?.expertSkills)
 try {
   request.setAttribute('aiassistant.expertSkills', expertSkillsNorm)
+  request.setAttribute('crafterq.expertSkills', expertSkillsNorm)
 } catch (Throwable ignored) {}
 def siteForBearer = siteIdBody ?: params?.siteId?.toString()?.trim()
 if (body instanceof Map && siteForBearer && agentId) {
@@ -105,7 +108,7 @@ try {
 
 if (!prompt) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [message: 'Missing required fields: prompt']
+  return [ok: false, message: 'Missing required fields: prompt']
 }
 
 try {
@@ -127,5 +130,5 @@ try {
   return [ok: false, message: ise.message ?: 'Configuration error']
 } catch (Throwable e) {
   response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
-  return [message: "Chat request failed: ${e.message ?: e.class.simpleName}"]
+  return [ok: false, message: "Chat request failed: ${e.message ?: e.class.simpleName}"]
 }

@@ -6,7 +6,7 @@ import AlertDialog from '@craftercms/studio-ui/components/AlertDialog';
 import PrimaryButton from '@craftercms/studio-ui/components/PrimaryButton/PrimaryButton';
 import SecondaryButton from '@craftercms/studio-ui/components/SecondaryButton/SecondaryButton';
 import AiAssistantChat from './AiAssistantChat';
-import type { ExpertSkillConfig } from './agentConfig';
+import { AI_ASSISTANT_DEFAULT_AGENT_ID, type ExpertSkillConfig } from './agentConfig';
 
 export interface AiAssistantPopoverProps extends PopoverProps {
   appBarTitle?: string;
@@ -48,7 +48,7 @@ function AiAssistantPopover(props: Readonly<AiAssistantPopoverProps>) {
     height = 595,
     hideBackdrop,
     enableCustomModel = true,
-    agentId = '019c7237-478b-7f98-9a5c-87144c3fb010',
+    agentId = AI_ASSISTANT_DEFAULT_AGENT_ID,
     llm,
     llmModel,
     imageModel,

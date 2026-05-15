@@ -713,18 +713,21 @@ function buildAuthoringFormAppendix(
 }
 
 /**
- * Parse assistant reply for `aiassistantFormFieldUpdates` inside a ```json fenced block.
+ * Parse assistant reply for **`aiassistantFormFieldUpdates`** (or legacy **`crafterqFormFieldUpdates`**) inside a ```json fenced block.
  */
 function tryExtractAiassistantFormFieldUpdates(assistantText: string): Record<string, string> | null {
-  const marker = 'aiassistantFormFieldUpdates';
-  if (!assistantText.includes(marker)) return null;
+  const markerNew = 'aiassistantFormFieldUpdates';
+  const markerLegacy = 'crafterqFormFieldUpdates';
+  if (!assistantText.includes(markerNew) && !assistantText.includes(markerLegacy)) return null;
   const re = /```(?:json)?\s*([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(assistantText)) !== null) {
     try {
       const obj = JSON.parse(m[1].trim()) as unknown;
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
-      const raw = (obj as { aiassistantFormFieldUpdates?: unknown }).aiassistantFormFieldUpdates;
+      const raw =
+        (obj as { aiassistantFormFieldUpdates?: unknown }).aiassistantFormFieldUpdates ??
+        (obj as { crafterqFormFieldUpdates?: unknown }).crafterqFormFieldUpdates;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw)) {
@@ -1301,7 +1304,7 @@ function buildPriorTurnsContextBlock(prior: UiMessage[]): string {
 
 export interface AiAssistantChatProps {
   agentId: string;
-  /** Widget agent `<llm>` when set in ui.xml. Omitted from POST if unset—server then normalizes to hosted CrafterQ; set explicitly for predictable routing. */
+  /** Widget agent `<llm>` when set in ui.xml. Omitted from POST if unset—server merges from `/ui.xml`; if still missing after merge, stream returns **400**. Set explicitly for predictable routing. */
   llm?: string;
   llmModel?: string;
   /** OpenAI Images API model for GenerateImage; from agent ui.xml **imageModel** or request body only (no default). */

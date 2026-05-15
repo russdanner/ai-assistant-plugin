@@ -96,7 +96,8 @@ class CrafterizingPlaybookLoader {
       if (loc != null) {
         def file = new File(loc.toURI())
         if (file.isDirectory()) {
-          def candidate = new File(file, PLAYBOOK_FILE_NAME)
+          def inPlaybook = new File(new File(file, 'playbook'), PLAYBOOK_FILE_NAME)
+          def candidate = inPlaybook.isFile() ? inPlaybook : new File(file, PLAYBOOK_FILE_NAME)
           if (candidate.isFile()) {
             log.debug('Crafterizing playbook loaded from code source directory: {}', candidate.absolutePath)
             return candidate.getText('UTF-8')
@@ -117,7 +118,7 @@ class CrafterizingPlaybookLoader {
 
 The editable file `CrafterizingPlaybook.md` was not found next to the AI Assistant plugin classes.
 
-- Ensure `authoring/scripts/classes/plugins/org/craftercms/aiassistant/CrafterizingPlaybook.md` is deployed (e.g. copied to `config/studio/scripts/classes/plugins/org/craftercms/aiassistant/`).
+- Ensure `authoring/scripts/classes/plugins/org/craftercms/aiassistant/playbook/CrafterizingPlaybook.md` is deployed (e.g. copied to `config/studio/scripts/classes/plugins/org/craftercms/aiassistant/playbook/`).
 - Or set JVM system property `aiassistant.crafterizingPlaybook.path` to an absolute path of a markdown file.
 
 See plugin docs for full crafterization phases: content types under `/config/studio/content-types/`, pages under `/site/website/`, components under `/site/components/`, templates under `/templates/web/`, populate `sections_o`, use CDATA for `*_html`, and use studio tools (GetContent, WriteContent, GetContentTypeFormDefinition) for edits.

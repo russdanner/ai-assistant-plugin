@@ -1,0 +1,11 @@
+---
+description: CrafterQ is optional remote-tool integration only, not product branding
+alwaysApply: true
+---
+
+# CrafterQ naming vs product
+
+- **Studio AI assistant** (this plugin) is the authoring chat, form control, Helper, TinyMCE hook, optional autonomous widget, CMS tools, scripts, MCP, etc.
+- **CrafterQ** in product terms means **optional integration tools** only: e.g. list agents, list conversations, ask an expert agent — wired when a site exposes those tools to the LLM. It is **not** central to the plugin and must not be framed as the main product or “legacy core.”
+- **Unavoidable wire tokens** (do not rename casually): Studio **`ui.xml`** still uses the element **`crafterQAgentId`** for stable **`agentId`**; JVM tuning may still use **`crafterq.*`** property prefixes. Treat these as **opaque compatibility ids**, not as “the product is CrafterQ.”
+- **Docs and copy:** Prefer **AI Assistant** / **Studio AI assistant** for user-facing and high-level architecture. When documenting CrafterQ, describe it only as the **optional tools integration** surface above.

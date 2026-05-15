@@ -12,7 +12,7 @@ Defines **`<llm>`** identifiers, env/XML keys, merge rules, and the provider cap
 
 ## Summary Table
 
-Rows list **supported** backends. **Hosted-only** SaaS adapters (**`crafterQ`**, **`aiassistant`**, **`hostedchat`**, …) are **not** supported — **`StudioAiLlmKind.normalize`** throws (**HTTP 400**).
+Rows list **supported** backends. **Hosted-only** SaaS adapters (**`crafterQ`**, **`aiassistant`**, **`hostedchat`**, …) are **not** supported — **`StudioAiLlmKind.normalize`** throws (**HTTP 400**). **`ai-assistant`** is **not** a valid `<llm>` value either (that string names the Studio plugin / form control path, not a model provider); use **`openAI`**, **`claude`**, etc.
 
 | `<llm>` wire value | Aliases (normalized) | Required configuration | Optional `ui.xml` / env | What you get |
 |--------------------|----------------------|-------------------------|-------------------------|--------------|
@@ -167,7 +167,7 @@ When **`siteId`** + **`agentId`** are present and the matching **`<agent>`** def
 
 | Field | Applies to | Purpose |
 |-------|------------|---------|
-| **`<llm>`** | All | Selects backend; see summary table. Legacy hosted ids (**`crafterQ`**, **`aiassistant`**, …) **fail normalize**. |
+| **`<llm>`** | All | Selects backend; see summary table. Legacy hosted ids (**`crafterQ`**, **`aiassistant`**, …) **fail normalize**. **`ai-assistant`** is invalid (plugin name, not a provider). |
 | **`<llmModel>`** | Tool-capable rows | Provider chat model id when the provider uses it. |
 | **`<imageGenerator>`** | **GenerateImage** | Blank = default wire when configured; **`none`**/**`off`**/**`disabled`**; **`script:{id}`** for site Groovy under **`/scripts/aiassistant/imagegen/{id}/`**. |
 | **`<imageModel>`** | **GenerateImage** (wire path) | Required when the model should call **GenerateImage** on the default wire. |

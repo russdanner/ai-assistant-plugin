@@ -45,7 +45,7 @@ function writeLastOpenAgentKey(key: string): void {
  * do not expose Accordion on craftercms.libs.MaterialUI, which previously broke the panel entirely.
  *
  * Contract: one row per enabled agent; exactly one expanded; AiAssistantChat only inside the expanded section.
- * Legacy passes visibleAgents only (see control/ai-assistant/main.js).
+ * Form control may pass **visibleAgents** only (pre-filtered list; see `control/ai-assistant/main.js`).
  *
  * Do not remove or redesign this pattern without explicit written approval from the project maintainer.
  */

@@ -11,7 +11,7 @@ Documentation here is aimed at **maintainers**, **integrators**, and anyone debu
 | [**chat-and-tools-runtime.md**](chat-and-tools-runtime.md) | CMS tool wiring, MCP Streamable HTTP client, expert skills, SSE/stream behavior, REST body fields, troubleshooting |
 | [**studio-aiassistant-jvm-parameters.md**](../using-and-extending/studio-aiassistant-jvm-parameters.md) | JVM **`-D`** / `System.getProperty` tuning (timeouts, HTTP/MCP caps, optional key/model defaults) |
 | [**reference-spring-ai-completions-with-tools.md**](reference-spring-ai-completions-with-tools.md) | Archived Spring AI pattern reference (may diverge from current wiring) |
-| [**maintainer-review-checklist.md**](maintainer-review-checklist.md) | **Lessons learned** — React/TS (localStorage + SSE, bounded logs, Studio user identity, import caches, markdown/sandbox, a11y) and Groovy (try/finally, thread pools, SSE terminal CAS, deep state copies) |
+| [**maintainer-review-checklist.md**](maintainer-review-checklist.md) | **Lessons learned** — capture **anti-pattern → preferred pattern** when reviews surface systemic issues; React/TS (localStorage + SSE, bounded logs, Studio user identity, caches, markdown/sandbox, a11y) and Groovy (try/finally, thread pools, SSE terminal CAS, deep state copies) |
 
 ## Debug Logging
 

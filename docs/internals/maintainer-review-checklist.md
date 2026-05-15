@@ -2,6 +2,15 @@
 
 This document captures **recurring review themes** (performance, correctness, memory, security, accessibility) that have come up during automated and human review of this plugin. Use it as a **pre-merge mental model** when touching the areas below—not as a substitute for reading `spec.md` or product constraints.
 
+## When to add a new entry (anti-pattern → preferred pattern)
+
+Whenever **any** review (human, bot, or local audit) surfaces a **systemic** issue—not a one-off typo—capture it here so the same mistake is not reintroduced:
+
+1. **Anti-pattern** — What we were doing wrong (symptoms, why it hurts: perf, security, correctness, a11y, etc.).
+2. **Preferred pattern** — What we do instead (concrete enough to apply in new code; link types/files when helpful).
+
+Put new bullets in the **right section** (React/TS vs Groovy) or add a small `###` subsection if the topic is new. Keep entries **short**; if the lesson becomes a **product or wire contract**, also mirror it in **`spec.md`** (or the relevant user-facing doc) in the same change set.
+
 ## React / TypeScript (`sources/src`)
 
 ### Persistence and streaming
@@ -70,4 +79,4 @@ Patterns that have bitten us in review or production:
 | Form control / `yarn package` verify | [studio-plugins-guide.md](../using-and-extending/studio-plugins-guide.md), repo `.cursor/rules/crafterq-form-panel-contract.mdc` |
 | TinyMCE wiring (admin) | [tinymce-integration.md](../using-and-extending/tinymce-integration.md) |
 
-When a review item becomes a **stable invariant** of the product (author-visible or contractual), mirror the requirement in **`spec.md`** (or the relevant user-facing doc) in the same change set where appropriate.
+When a review item becomes a **stable invariant** of the product (author-visible or contractual), mirror the requirement in **`spec.md`** (or the relevant user-facing doc) in the same change set where appropriate. **Style-only or one-off nits** usually do not need a new checklist row.

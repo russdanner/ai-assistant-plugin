@@ -30050,11 +30050,12 @@ function buildAuthoringFormAppendix(ctx, options) {
     return '\n\n' + lines.join('\n');
 }
 /**
- * Parse assistant reply for `aiassistantFormFieldUpdates` inside a ```json fenced block.
+ * Parse assistant reply for **`aiassistantFormFieldUpdates`** (or legacy **`crafterqFormFieldUpdates`**) inside a ```json fenced block.
  */
 function tryExtractAiassistantFormFieldUpdates(assistantText) {
-    const marker = 'aiassistantFormFieldUpdates';
-    if (!assistantText.includes(marker))
+    const markerNew = 'aiassistantFormFieldUpdates';
+    const markerLegacy = 'crafterqFormFieldUpdates';
+    if (!assistantText.includes(markerNew) && !assistantText.includes(markerLegacy))
         return null;
     const re = /```(?:json)?\s*([\s\S]*?)```/gi;
     let m;
@@ -30063,7 +30064,8 @@ function tryExtractAiassistantFormFieldUpdates(assistantText) {
             const obj = JSON.parse(m[1].trim());
             if (!obj || typeof obj !== 'object' || Array.isArray(obj))
                 continue;
-            const raw = obj.aiassistantFormFieldUpdates;
+            const raw = obj.aiassistantFormFieldUpdates ??
+                obj.crafterqFormFieldUpdates;
             if (!raw || typeof raw !== 'object' || Array.isArray(raw))
                 continue;
             const out = {};
@@ -31627,9 +31629,548 @@ function AiAssistantChat(props) {
                 }, children: jsx$1(Stack$1, { spacing: 1.25, sx: { px: 2, pt: 2, pb: 1 }, children: messageBubbles }) }), jsx$1(Divider, { sx: { flexShrink: 0 } }), composerSection] }));
 }
 
+/**
+ * Stable key for matching agents between ui.xml, form field properties, and the form-control UI.
+ * When both `id` and `label` are set, uses a composite key so multiple `<agent>` rows with the **same**
+ * backend `id` (e.g. same UUID, different labels) stay distinct — otherwise merging collapses them.
+ */
+function agentStableKey(a) {
+    const id = (a.id || '').trim();
+    const label = (a.label || '').trim();
+    if (id && label)
+        return `${id}\u001e${label}`;
+    if (id)
+        return id;
+    return label || 'agent';
+}
+/**
+ * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}). The literal
+ * **{@code CrafterQ}** is historical; do not change without a migration pass on existing `ui.xml` / stored JSON.
+ */
+const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'CrafterQ';
+/**
+ * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in fallbacks (same UUID everywhere).
+ */
+const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+/**
+ * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
+ * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
+ */
+const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'CrafterQ content';
+function shouldOverlayLabelFromSite(agent, ui) {
+    const u = (ui.label || '').trim();
+    if (!u)
+        return false;
+    const a = (agent.label || '').trim();
+    if (!a)
+        return true;
+    if (a === AI_ASSISTANT_AGENT_LABEL_FALLBACK && u !== a)
+        return true;
+    return false;
+}
+function shouldOverlayIconFromSite(agent, ui) {
+    return Boolean((ui.icon || '').trim() && !(agent.icon || '').trim());
+}
+function shouldOverlayPromptsFromSite(agent, ui) {
+    return Boolean(Array.isArray(ui.prompts) && ui.prompts.length > 0 && (!agent.prompts || agent.prompts.length === 0));
+}
+/**
+ * Merge site `ui.xml` agents onto widget JSON agents.
+ * When the widget row has no **{@code <crafterQAgentId>}**, Studio often omits label/icon/prompts so {@link normalizeAgent}
+ * fills a placeholder label — stable keys then diverge from `/ui.xml` and the Helper menu shows duplicates.
+ * Match: stable key, then id; when id is empty and site lists exactly one agent, treat that row as the overlay.
+ */
+function mergeAgentsWithSiteUiXmlOverlay(fromWidget, fromUiXml) {
+    if (!fromUiXml.length || !fromWidget.length)
+        return fromWidget;
+    return fromWidget.map((agent) => {
+        const key = agentStableKey(agent);
+        const byKey = fromUiXml.find((u) => agentStableKey(u) === key);
+        const idTrim = (agent.id || '').trim();
+        let ui = byKey;
+        if (!ui && idTrim) {
+            ui = fromUiXml.find((u) => (u.id || '').trim() === idTrim);
+        }
+        if (!ui && !idTrim && fromUiXml.length === 1) {
+            ui = fromUiXml[0];
+        }
+        if (!ui)
+            return agent;
+        return {
+            ...agent,
+            ...(shouldOverlayLabelFromSite(agent, ui) ? { label: (ui.label || '').trim() } : {}),
+            ...(shouldOverlayIconFromSite(agent, ui) ? { icon: ui.icon } : {}),
+            ...(shouldOverlayPromptsFromSite(agent, ui) ? { prompts: ui.prompts } : {}),
+            ...(ui.id?.trim() && !(agent.id || '').trim() ? { id: ui.id.trim() } : {}),
+            ...(ui.enableTools !== undefined ? { enableTools: ui.enableTools } : {}),
+            ...(ui.llm !== undefined && agent.llm === undefined ? { llm: ui.llm } : {}),
+            ...(typeof ui.llmModel === 'string' &&
+                ui.llmModel.trim() &&
+                !(agent.llmModel || '').trim()
+                ? { llmModel: ui.llmModel.trim() }
+                : {}),
+            ...(typeof ui.imageModel === 'string' &&
+                ui.imageModel.trim() &&
+                !(agent.imageModel || '').trim()
+                ? { imageModel: ui.imageModel.trim() }
+                : {}),
+            ...(typeof ui.imageGenerator === 'string' &&
+                ui.imageGenerator.trim() &&
+                !(agent.imageGenerator || '').trim()
+                ? { imageGenerator: ui.imageGenerator.trim() }
+                : {}),
+            ...(ui.openAiApiKey !== undefined && agent.openAiApiKey === undefined ? { openAiApiKey: ui.openAiApiKey } : {}),
+            ...(ui.openAsPopup !== undefined && agent.openAsPopup === undefined ? { openAsPopup: ui.openAsPopup } : {}),
+            ...(Array.isArray(ui.expertSkills) &&
+                ui.expertSkills.length > 0 &&
+                (!agent.expertSkills || agent.expertSkills.length === 0)
+                ? { expertSkills: ui.expertSkills }
+                : {}),
+            ...(ui.translateBatchConcurrency != null && Number.isFinite(ui.translateBatchConcurrency)
+                ? { translateBatchConcurrency: ui.translateBatchConcurrency }
+                : {}),
+            ...(Array.isArray(ui.enabledBuiltInTools) &&
+                ui.enabledBuiltInTools.length > 0 &&
+                (!agent.enabledBuiltInTools || agent.enabledBuiltInTools.length === 0)
+                ? { enabledBuiltInTools: [...ui.enabledBuiltInTools] }
+                : {})
+        };
+    });
+}
+/** Keep first occurrence per {@link agentStableKey} (order preserved). */
+function dedupeAgentsByStableKey(agents) {
+    const m = new Map();
+    for (const a of agents) {
+        const k = agentStableKey(a);
+        if (!m.has(k))
+            m.set(k, a);
+    }
+    return Array.from(m.values());
+}
+/**
+ * Remove (a) JSON placeholder rows (label exactly {@link AI_ASSISTANT_AGENT_LABEL_FALLBACK}) whenever another agent
+ * has a non-placeholder label (Studio may still attach a non-sample id to the fallback row), and
+ * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_DEFAULT_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
+ * when at least one other row looks author-defined — typical duplicate Helper menu (Studio merges blueprint + site `ui.xml`).
+ */
+function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
+    const deduped = dedupeAgentsByStableKey(agents);
+    if (deduped.length <= 1)
+        return deduped;
+    const hasRicher = deduped.some((a) => {
+        const lab = (a.label || '').trim();
+        if (!lab)
+            return false;
+        if (lab === AI_ASSISTANT_AGENT_LABEL_FALLBACK)
+            return false;
+        if (lab === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
+            return false;
+        return true;
+    });
+    if (!hasRicher)
+        return deduped;
+    return deduped.filter((a) => {
+        const id = (a.id || '').trim();
+        const label = (a.label || '').trim();
+        if (hasRicher && label === AI_ASSISTANT_AGENT_LABEL_FALLBACK)
+            return false;
+        if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
+            return false;
+        return true;
+    });
+}
+const DEFAULT_AGENT_ID = '';
+/** Fallback when no config or parsing fails — one toolbar/menu row so click always has a target. */
+const DEFAULT_AGENT = {
+    id: AI_ASSISTANT_DEFAULT_AGENT_ID,
+    label: 'Studio AI Assistant',
+    llm: 'openAI',
+    llmModel: 'gpt-4o-mini',
+    prompts: []
+};
+/** Fallback list so Helper click / agent menus always have at least one entry (see {@link getAgentsFromConfiguration}). */
+const DEFAULT_AGENTS = [DEFAULT_AGENT];
+/**
+ * Normalize agents from widget configuration.
+ * Falls back to DEFAULT_AGENTS when no config or no agents found so the UI always works.
+ */
+function getAgentsFromConfiguration(configuration) {
+    const config = configuration != null && typeof configuration === 'object' ? configuration : null;
+    if (!config)
+        return DEFAULT_AGENTS;
+    // Prefer nested configuration.agents; fallback to top-level agents (e.g. if config is spread onto props)
+    let agentsRaw = config.agents;
+    if (agentsRaw == null && config.configuration != null && typeof config.configuration === 'object') {
+        const inner = config.configuration;
+        agentsRaw = inner.agents ?? (inner.configuration != null && typeof inner.configuration === 'object' ? inner.configuration.agents : undefined);
+    }
+    if (agentsRaw == null && config.configuration != null && typeof config.configuration === 'object') {
+        const inner = config.configuration;
+        if (inner.configuration != null && typeof inner.configuration === 'object') {
+            const deep = inner.configuration.agents;
+            if (deep != null)
+                agentsRaw = deep;
+        }
+    }
+    if (agentsRaw == null) {
+        const singleAgent = config.agent ?? (config.configuration && typeof config.configuration === 'object' ? config.configuration.agent : undefined);
+        if (singleAgent != null) {
+            const one = normalizeAgentOrWrapped(singleAgent);
+            if (one)
+                return [one];
+        }
+        return DEFAULT_AGENTS;
+    }
+    // Direct array
+    if (Array.isArray(agentsRaw)) {
+        const list = agentsRaw.map((a) => normalizeAgentOrWrapped(a)).filter(Boolean);
+        return list.length > 0 ? list : DEFAULT_AGENTS;
+    }
+    // Nested: { agent: [ {...}, {...} ] } or { agent: { "0": {...}, "1": {...} } } — same pattern as uigoodies CopyCurrentPageUrl (Object.keys(environments.label))
+    if (typeof agentsRaw === 'object' && agentsRaw !== null) {
+        const obj = agentsRaw;
+        const listOrSingle = obj.agent;
+        if (listOrSingle != null) {
+            const arr = Array.isArray(listOrSingle)
+                ? listOrSingle
+                : typeof listOrSingle === 'object' && listOrSingle !== null
+                    ? Object.values(listOrSingle)
+                    : [];
+            const list = arr.map((a) => normalizeAgentOrWrapped(a)).filter(Boolean);
+            if (list.length > 0)
+                return list;
+        }
+    }
+    return DEFAULT_AGENTS;
+}
+/** Normalize one item that might be `{ agent: { crafterQAgentId, label, ... } }` or plain `{ crafterQAgentId, label, ... }`. */
+function normalizeAgentOrWrapped(a) {
+    if (!a || typeof a !== 'object')
+        return null;
+    const o = a;
+    const agent = o.agent && typeof o.agent === 'object' ? o.agent : o;
+    return normalizeAgent(agent);
+}
+/**
+ * Normalize one agent from config: **crafterQAgentId**, **label**, optional **icon**, **prompts**, etc.
+ */
+function normalizeExpertSkillsRaw(raw) {
+    if (raw == null)
+        return undefined;
+    const rows = [];
+    const pushFromRecord = (r) => {
+        const url = extractString(r.url) ?? extractString(r.href);
+        if (!url?.trim())
+            return;
+        rows.push({
+            name: extractString(r.name) ?? 'Expert guidance',
+            url: url.trim(),
+            description: extractString(r.description) ?? ''
+        });
+    };
+    if (Array.isArray(raw)) {
+        for (const item of raw) {
+            if (!item || typeof item !== 'object')
+                continue;
+            pushFromRecord(item);
+        }
+    }
+    else if (typeof raw === 'object') {
+        const o = raw;
+        const nested = o.expertSkill;
+        if (Array.isArray(nested)) {
+            for (const item of nested) {
+                if (!item || typeof item !== 'object')
+                    continue;
+                pushFromRecord(item);
+            }
+        }
+        else if (nested && typeof nested === 'object') {
+            pushFromRecord(nested);
+        }
+    }
+    return rows.length ? rows : undefined;
+}
+function normalizeEnabledBuiltInToolsRaw(raw) {
+    if (!Array.isArray(raw) || raw.length === 0)
+        return undefined;
+    const out = [];
+    for (const x of raw) {
+        const s = String(x ?? '').trim();
+        if (s)
+            out.push(s);
+    }
+    return out.length ? out : undefined;
+}
+function normalizeAgent(a) {
+    if (!a || typeof a !== 'object')
+        return null;
+    const o = a;
+    const id = extractString(o.crafterQAgentId) ?? DEFAULT_AGENT_ID;
+    const label = extractString(o.label) ?? AI_ASSISTANT_AGENT_LABEL_FALLBACK;
+    if (!label.trim())
+        return null;
+    let icon;
+    const iconVal = o.icon;
+    if (typeof iconVal === 'string')
+        icon = iconVal;
+    else if (iconVal && typeof iconVal === 'object') {
+        const iconObj = iconVal;
+        icon = typeof iconObj.id === 'string' ? iconObj.id : typeof iconObj['@_id'] === 'string' ? iconObj['@_id'] : undefined;
+    }
+    const prompts = normalizePrompts(o.prompts);
+    const llmStr = extractString(o.llm)?.trim();
+    let llm;
+    if (llmStr) {
+        const low = llmStr.toLowerCase();
+        if (low === 'openai' || low === 'open-ai')
+            llm = 'openAI';
+        else
+            llm = llmStr;
+    }
+    const llmModel = extractString(o.llmModel);
+    const imageModel = extractString(o.imageModel);
+    const imageGenerator = extractString(o.imageGenerator) ??
+        extractString(o['image-generator']) ??
+        extractString(o.image_generator);
+    const openAiApiKey = extractString(o.openAiApiKey) ??
+        extractString(o['open-ai-api-key']) ??
+        extractString(o.open_ai_api_key);
+    const out = { id: id.trim(), label, icon, prompts };
+    if (llm)
+        out.llm = llm;
+    if (llmModel)
+        out.llmModel = llmModel;
+    if (imageModel)
+        out.imageModel = imageModel;
+    if (imageGenerator)
+        out.imageGenerator = imageGenerator;
+    if (openAiApiKey?.trim())
+        out.openAiApiKey = openAiApiKey.trim();
+    const openAsPopup = extractBooleanFromRecord(o, 'openAsPopup', 'open_as_popup', 'OpenAsPopup');
+    if (openAsPopup !== undefined)
+        out.openAsPopup = openAsPopup;
+    const enableTools = extractBooleanFromRecord(o, 'enableTools', 'enable_tools');
+    if (enableTools !== undefined)
+        out.enableTools = enableTools;
+    const expertSkills = normalizeExpertSkillsRaw(o.expertSkills) ?? normalizeExpertSkillsRaw(o.expertSkill);
+    if (expertSkills)
+        out.expertSkills = expertSkills;
+    const translateBatchConcurrency = extractPositiveInt(o, 1, 64, 'translateBatchConcurrency', 'translate_batch_concurrency', 'TranslateBatchConcurrency');
+    if (translateBatchConcurrency != null)
+        out.translateBatchConcurrency = translateBatchConcurrency;
+    const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(o.enabledBuiltInTools ?? o.enabled_built_in_tools);
+    if (enabledBuiltIn?.length)
+        out.enabledBuiltInTools = enabledBuiltIn;
+    return out;
+}
+/** Integer in inclusive range; undefined if missing or invalid. */
+function extractPositiveInt(o, min, max, ...keys) {
+    for (const k of keys) {
+        const v = o[k];
+        if (v == null)
+            continue;
+        let n;
+        if (typeof v === 'number' && Number.isFinite(v))
+            n = Math.floor(v);
+        else {
+            const s = extractString(v);
+            if (!s)
+                continue;
+            n = parseInt(s, 10);
+        }
+        if (!Number.isFinite(n))
+            continue;
+        if (n < min || n > max)
+            continue;
+        return n;
+    }
+    return undefined;
+}
+function extractBooleanFromRecord(o, ...keys) {
+    for (const k of keys) {
+        const v = o[k];
+        if (v === true)
+            return true;
+        if (v === false)
+            return false;
+        const s = extractString(v)?.toLowerCase();
+        if (s === 'true' || s === '1' || s === 'yes')
+            return true;
+        if (s === 'false' || s === '0' || s === 'no')
+            return false;
+    }
+    return undefined;
+}
+/** First matching optional boolean on a Studio widget/configuration object (JSON props). */
+function readOptionalBooleanFromConfiguration(o, ...keys) {
+    if (o == null || typeof o !== 'object')
+        return undefined;
+    return extractBooleanFromRecord(o, ...keys);
+}
+function extractString(v) {
+    if (v == null)
+        return undefined;
+    if (typeof v === 'string')
+        return v.trim() || undefined;
+    if (Array.isArray(v)) {
+        const first = v[0];
+        if (first != null)
+            return extractString(first);
+        return undefined;
+    }
+    if (typeof v === 'object') {
+        const o = v;
+        const candidates = [
+            o.$text,
+            o.value,
+            o['#text'],
+            o.__text,
+            o._,
+            o['@_id'],
+            o.text,
+            o.content
+        ];
+        for (const c of candidates) {
+            if (typeof c === 'string')
+                return c.trim() || undefined;
+        }
+        for (const c of candidates) {
+            if (c != null && typeof c === 'object') {
+                const s = extractString(c);
+                if (s)
+                    return s;
+            }
+        }
+        const values = Object.values(o);
+        if (values.length > 0) {
+            const first = extractString(values[0]);
+            if (first)
+                return first;
+        }
+    }
+    return undefined;
+}
+function extractAdditionalContextField(o) {
+    const ctx = extractString(o.additionalContext) ??
+        extractString(o['additional-context']) ??
+        extractString(o.context) ??
+        extractString(o.AdditionalContext) ??
+        extractString(o.additional_context);
+    return ctx?.trim() ? ctx.trim() : undefined;
+}
+/** Quick-action chips should be short labels; long / multiline "userText" is almost always mis-parsed additional context. */
+const MAX_QUICK_PROMPT_LABEL_CHARS = 100;
+const MIN_MULTILINE_QUICK_PROMPT_CHARS = 48;
+function isLikelyMisplacedContextPrompt(p) {
+    const t = (p.userText || '').trim();
+    if (!t)
+        return false;
+    if (t.length > MAX_QUICK_PROMPT_LABEL_CHARS)
+        return true;
+    if (t.includes('\n') && t.length >= MIN_MULTILINE_QUICK_PROMPT_CHARS)
+        return true;
+    return false;
+}
+/**
+ * When Studio/XML produces two <prompt> entries (or flattens context into #text), the second
+ * entry often becomes a second "button" with the full context as userText. Fold those into the
+ * previous prompt's additionalContext instead.
+ */
+function mergeMisplacedContextPrompts(prompts) {
+    if (prompts.length <= 1)
+        return prompts;
+    const out = [];
+    for (const p of prompts) {
+        if (isLikelyMisplacedContextPrompt(p) && out.length > 0) {
+            const prev = out[out.length - 1];
+            const body = (p.userText || '').trim();
+            const extra = (p.additionalContext || '').trim();
+            const chunk = [body, extra].filter(Boolean).join('\n\n');
+            prev.additionalContext = prev.additionalContext ? `${prev.additionalContext}\n\n${chunk}` : chunk;
+            continue;
+        }
+        out.push({ ...p });
+    }
+    return out;
+}
+function normalizePrompts(prompts) {
+    const normalizeOne = (p) => {
+        if (p == null)
+            return null;
+        // Back-compat: <prompt>Text</prompt>
+        if (typeof p === 'string')
+            return { userText: p };
+        if (typeof p !== 'object') {
+            const s = extractString(p);
+            return s ? { userText: s } : null;
+        }
+        const o = p;
+        // New structure:
+        // <prompt><userText>...</userText><additionalContext>...</additionalContext></prompt>
+        const userText = extractString(o.userText) ??
+            extractString(o['user-text']) ??
+            extractString(o.text) ??
+            extractString(o.UserText) ??
+            extractString(o.user_text);
+        const additionalContext = extractAdditionalContextField(o);
+        if (userText && userText.trim()) {
+            const pc = { userText: userText.trim() };
+            if (additionalContext)
+                pc.additionalContext = additionalContext;
+            const omitTools = extractBooleanFromRecord(o, 'omitTools', 'omit_tools');
+            if (omitTools === true)
+                pc.omitTools = true;
+            return pc;
+        }
+        // Studio/XML parsers sometimes emit sibling nodes as two array entries: one { userText }, one { additionalContext }.
+        // Never promote additionalContext alone to userText (that created a second "quick" button). Merge in processPromptList instead.
+        if (additionalContext)
+            return null;
+        // Some parsers might flatten the inner text into #text/value
+        const fallback = extractString(o);
+        return fallback ? { userText: fallback } : null;
+    };
+    const coerceList = (raw) => {
+        if (raw == null)
+            return [];
+        if (Array.isArray(raw))
+            return raw;
+        if (typeof raw === 'object')
+            return Object.values(raw);
+        return [raw];
+    };
+    /** Preserve order; merge orphan context-only fragments into the previous prompt. */
+    const processPromptList = (arr) => {
+        const out = [];
+        for (const item of arr) {
+            const normalized = normalizeOne(item);
+            if (normalized) {
+                out.push(normalized);
+                continue;
+            }
+            if (item != null && typeof item === 'object') {
+                const ctx = extractAdditionalContextField(item);
+                if (ctx && out.length > 0) {
+                    const prev = out[out.length - 1];
+                    prev.additionalContext = prev.additionalContext ? `${prev.additionalContext}\n\n${ctx}` : ctx;
+                }
+            }
+        }
+        return out;
+    };
+    const finalize = (arr) => mergeMisplacedContextPrompts(processPromptList(arr));
+    if (prompts && typeof prompts === 'object') {
+        const p = prompts;
+        const raw = p.prompt;
+        return finalize(coerceList(raw));
+    }
+    return finalize(coerceList(prompts));
+}
+
 function AiAssistantPopover(props) {
     const theme = useTheme();
-    const { open, onClose, isMinimized = false, onMinimize, onMaximize, appBarTitle, agentLabel, width = 492, height = 595, hideBackdrop, enableCustomModel = true, agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, anchorPosition: anchorPositionProp, ...popoverProps } = props;
+    const { open, onClose, isMinimized = false, onMinimize, onMaximize, appBarTitle, agentLabel, width = 492, height = 595, hideBackdrop, enableCustomModel = true, agentId = AI_ASSISTANT_DEFAULT_AGENT_ID, llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency, anchorPosition: anchorPositionProp, ...popoverProps } = props;
     const title = agentLabel ?? appBarTitle ?? 'Studio AI Assistant';
     const anchorPosition = anchorPositionProp ?? { top: 100, left: 100 };
     const [openAlertDialog, setOpenAlertDialog] = useState(false);
@@ -31722,7 +32263,7 @@ function AiAssistantIceChatShell(props) {
  * Used when opening the AI Assistant via dispatch(showWidgetDialog(...)).
  */
 function AiAssistantDialogContent(props) {
-    const { agentId = '019c7237-478b-7f98-9a5c-87144c3fb010', llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
+    const { agentId = AI_ASSISTANT_DEFAULT_AGENT_ID, llm, llmModel, imageModel, imageGenerator, openAiApiKey, prompts, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
     return (jsx$1(AiAssistantChat, { agentId: agentId, llm: llm, llmModel: llmModel, imageModel: imageModel, imageGenerator: imageGenerator, openAiApiKey: openAiApiKey, enableTools: enableTools, enabledBuiltInTools: enabledBuiltInTools, expertSkills: expertSkills, configPrompts: prompts, ...(translateBatchConcurrency != null ? { translateBatchConcurrency } : {}) }));
 }
 
@@ -32113,547 +32654,6 @@ const AutonomousAgentsMarkIcon = createSvgIcon$1(jsxs("svg", { viewBox: "0 0 48 
 const batchActions = /*#__PURE__*/ createAction('BATCH_ACTIONS');
 // endregion
 
-/**
- * Stable key for matching agents between ui.xml, form field properties, and the form-control UI.
- * When both `id` and `label` are set, uses a composite key so multiple `<agent>` rows with the **same**
- * backend `id` (e.g. same CrafterQ UUID, different labels) stay distinct — otherwise merging collapses them.
- */
-function agentStableKey(a) {
-    const id = (a.id || '').trim();
-    const label = (a.label || '').trim();
-    if (id && label)
-        return `${id}\u001e${label}`;
-    if (id)
-        return id;
-    return label || 'agent';
-}
-/** Label used when Studio JSON omits `<label>` (see {@link normalizeAgent}); not a real product name. */
-const CRAFTERQ_AGENT_LABEL_PLACEHOLDER = 'CrafterQ';
-/** Default **`<crafterQAgentId>`** / label pair from `craftercms-plugin.yaml` sample Helper `<agent>` (CrafterQ cloud). */
-const CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
-const CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL = 'CrafterQ content';
-function shouldOverlayLabelFromSite(agent, ui) {
-    const u = (ui.label || '').trim();
-    if (!u)
-        return false;
-    const a = (agent.label || '').trim();
-    if (!a)
-        return true;
-    if (a === CRAFTERQ_AGENT_LABEL_PLACEHOLDER && u !== a)
-        return true;
-    return false;
-}
-function shouldOverlayIconFromSite(agent, ui) {
-    return Boolean((ui.icon || '').trim() && !(agent.icon || '').trim());
-}
-function shouldOverlayPromptsFromSite(agent, ui) {
-    return Boolean(Array.isArray(ui.prompts) && ui.prompts.length > 0 && (!agent.prompts || agent.prompts.length === 0));
-}
-/**
- * Merge site `ui.xml` agents onto widget JSON agents.
- * When the widget row has no **{@code <crafterQAgentId>}**, Studio often omits label/icon/prompts so {@link normalizeAgent}
- * fills a placeholder label — stable keys then diverge from `/ui.xml` and the Helper menu shows duplicates.
- * Match: stable key, then id; when id is empty and site lists exactly one agent, treat that row as the overlay.
- */
-function mergeAgentsWithSiteUiXmlOverlay(fromWidget, fromUiXml) {
-    if (!fromUiXml.length || !fromWidget.length)
-        return fromWidget;
-    return fromWidget.map((agent) => {
-        const key = agentStableKey(agent);
-        const byKey = fromUiXml.find((u) => agentStableKey(u) === key);
-        const idTrim = (agent.id || '').trim();
-        let ui = byKey;
-        if (!ui && idTrim) {
-            ui = fromUiXml.find((u) => (u.id || '').trim() === idTrim);
-        }
-        if (!ui && !idTrim && fromUiXml.length === 1) {
-            ui = fromUiXml[0];
-        }
-        if (!ui)
-            return agent;
-        return {
-            ...agent,
-            ...(shouldOverlayLabelFromSite(agent, ui) ? { label: (ui.label || '').trim() } : {}),
-            ...(shouldOverlayIconFromSite(agent, ui) ? { icon: ui.icon } : {}),
-            ...(shouldOverlayPromptsFromSite(agent, ui) ? { prompts: ui.prompts } : {}),
-            ...(ui.id?.trim() && !(agent.id || '').trim() ? { id: ui.id.trim() } : {}),
-            ...(ui.enableTools !== undefined ? { enableTools: ui.enableTools } : {}),
-            ...(ui.llm !== undefined && agent.llm === undefined ? { llm: ui.llm } : {}),
-            ...(typeof ui.llmModel === 'string' &&
-                ui.llmModel.trim() &&
-                !(agent.llmModel || '').trim()
-                ? { llmModel: ui.llmModel.trim() }
-                : {}),
-            ...(typeof ui.imageModel === 'string' &&
-                ui.imageModel.trim() &&
-                !(agent.imageModel || '').trim()
-                ? { imageModel: ui.imageModel.trim() }
-                : {}),
-            ...(typeof ui.imageGenerator === 'string' &&
-                ui.imageGenerator.trim() &&
-                !(agent.imageGenerator || '').trim()
-                ? { imageGenerator: ui.imageGenerator.trim() }
-                : {}),
-            ...(ui.openAiApiKey !== undefined && agent.openAiApiKey === undefined ? { openAiApiKey: ui.openAiApiKey } : {}),
-            ...(ui.openAsPopup !== undefined && agent.openAsPopup === undefined ? { openAsPopup: ui.openAsPopup } : {}),
-            ...(Array.isArray(ui.expertSkills) &&
-                ui.expertSkills.length > 0 &&
-                (!agent.expertSkills || agent.expertSkills.length === 0)
-                ? { expertSkills: ui.expertSkills }
-                : {}),
-            ...(ui.translateBatchConcurrency != null && Number.isFinite(ui.translateBatchConcurrency)
-                ? { translateBatchConcurrency: ui.translateBatchConcurrency }
-                : {}),
-            ...(Array.isArray(ui.enabledBuiltInTools) &&
-                ui.enabledBuiltInTools.length > 0 &&
-                (!agent.enabledBuiltInTools || agent.enabledBuiltInTools.length === 0)
-                ? { enabledBuiltInTools: [...ui.enabledBuiltInTools] }
-                : {})
-        };
-    });
-}
-/** Keep first occurrence per {@link agentStableKey} (order preserved). */
-function dedupeAgentsByStableKey(agents) {
-    const m = new Map();
-    for (const a of agents) {
-        const k = agentStableKey(a);
-        if (!m.has(k))
-            m.set(k, a);
-    }
-    return Array.from(m.values());
-}
-/**
- * Remove (a) JSON placeholder rows (label exactly {@link CRAFTERQ_AGENT_LABEL_PLACEHOLDER}) whenever another agent
- * has a non-placeholder label (Studio may still attach a non-sample id to the fallback row), and
- * (b) the plugin-install sample agent (`{@link CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID}` + {@link CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL}})
- * when at least one other row looks author-defined — typical duplicate Helper menu (Studio merges blueprint + site `ui.xml`).
- */
-function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
-    const deduped = dedupeAgentsByStableKey(agents);
-    if (deduped.length <= 1)
-        return deduped;
-    const hasRicher = deduped.some((a) => {
-        const lab = (a.label || '').trim();
-        if (!lab)
-            return false;
-        if (lab === CRAFTERQ_AGENT_LABEL_PLACEHOLDER)
-            return false;
-        if (lab === CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL)
-            return false;
-        return true;
-    });
-    if (!hasRicher)
-        return deduped;
-    return deduped.filter((a) => {
-        const id = (a.id || '').trim();
-        const label = (a.label || '').trim();
-        if (hasRicher && label === CRAFTERQ_AGENT_LABEL_PLACEHOLDER)
-            return false;
-        if (id === CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID && label === CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL)
-            return false;
-        return true;
-    });
-}
-const DEFAULT_AGENT_ID = '';
-/** Fallback when no config or parsing fails — one toolbar/menu row so click always has a target. */
-const DEFAULT_AGENT = {
-    id: CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID,
-    label: 'Studio AI Assistant',
-    llm: 'openAI',
-    llmModel: 'gpt-4o-mini',
-    prompts: []
-};
-/** Fallback list so Helper click / agent menus always have at least one entry (see {@link getAgentsFromConfiguration}). */
-const DEFAULT_AGENTS = [DEFAULT_AGENT];
-/**
- * Normalize agents from widget configuration.
- * Falls back to DEFAULT_AGENTS when no config or no agents found so the UI always works.
- */
-function getAgentsFromConfiguration(configuration) {
-    const config = configuration != null && typeof configuration === 'object' ? configuration : null;
-    if (!config)
-        return DEFAULT_AGENTS;
-    // Prefer nested configuration.agents; fallback to top-level agents (e.g. if config is spread onto props)
-    let agentsRaw = config.agents;
-    if (agentsRaw == null && config.configuration != null && typeof config.configuration === 'object') {
-        const inner = config.configuration;
-        agentsRaw = inner.agents ?? (inner.configuration != null && typeof inner.configuration === 'object' ? inner.configuration.agents : undefined);
-    }
-    if (agentsRaw == null && config.configuration != null && typeof config.configuration === 'object') {
-        const inner = config.configuration;
-        if (inner.configuration != null && typeof inner.configuration === 'object') {
-            const deep = inner.configuration.agents;
-            if (deep != null)
-                agentsRaw = deep;
-        }
-    }
-    if (agentsRaw == null) {
-        const singleAgent = config.agent ?? (config.configuration && typeof config.configuration === 'object' ? config.configuration.agent : undefined);
-        if (singleAgent != null) {
-            const one = normalizeAgentOrWrapped(singleAgent);
-            if (one)
-                return [one];
-        }
-        return DEFAULT_AGENTS;
-    }
-    // Direct array
-    if (Array.isArray(agentsRaw)) {
-        const list = agentsRaw.map((a) => normalizeAgentOrWrapped(a)).filter(Boolean);
-        return list.length > 0 ? list : DEFAULT_AGENTS;
-    }
-    // Nested: { agent: [ {...}, {...} ] } or { agent: { "0": {...}, "1": {...} } } — same pattern as uigoodies CopyCurrentPageUrl (Object.keys(environments.label))
-    if (typeof agentsRaw === 'object' && agentsRaw !== null) {
-        const obj = agentsRaw;
-        const listOrSingle = obj.agent;
-        if (listOrSingle != null) {
-            const arr = Array.isArray(listOrSingle)
-                ? listOrSingle
-                : typeof listOrSingle === 'object' && listOrSingle !== null
-                    ? Object.values(listOrSingle)
-                    : [];
-            const list = arr.map((a) => normalizeAgentOrWrapped(a)).filter(Boolean);
-            if (list.length > 0)
-                return list;
-        }
-    }
-    return DEFAULT_AGENTS;
-}
-/** Normalize one item that might be `{ agent: { crafterQAgentId, label, ... } }` or plain `{ crafterQAgentId, label, ... }`. */
-function normalizeAgentOrWrapped(a) {
-    if (!a || typeof a !== 'object')
-        return null;
-    const o = a;
-    const agent = o.agent && typeof o.agent === 'object' ? o.agent : o;
-    return normalizeAgent(agent);
-}
-/**
- * Normalize one agent from config: **crafterQAgentId**, **label**, optional **icon**, **prompts**, etc.
- */
-function normalizeExpertSkillsRaw(raw) {
-    if (raw == null)
-        return undefined;
-    const rows = [];
-    const pushFromRecord = (r) => {
-        const url = extractString(r.url) ?? extractString(r.href);
-        if (!url?.trim())
-            return;
-        rows.push({
-            name: extractString(r.name) ?? 'Expert guidance',
-            url: url.trim(),
-            description: extractString(r.description) ?? ''
-        });
-    };
-    if (Array.isArray(raw)) {
-        for (const item of raw) {
-            if (!item || typeof item !== 'object')
-                continue;
-            pushFromRecord(item);
-        }
-    }
-    else if (typeof raw === 'object') {
-        const o = raw;
-        const nested = o.expertSkill;
-        if (Array.isArray(nested)) {
-            for (const item of nested) {
-                if (!item || typeof item !== 'object')
-                    continue;
-                pushFromRecord(item);
-            }
-        }
-        else if (nested && typeof nested === 'object') {
-            pushFromRecord(nested);
-        }
-    }
-    return rows.length ? rows : undefined;
-}
-function normalizeEnabledBuiltInToolsRaw(raw) {
-    if (!Array.isArray(raw) || raw.length === 0)
-        return undefined;
-    const out = [];
-    for (const x of raw) {
-        const s = String(x ?? '').trim();
-        if (s)
-            out.push(s);
-    }
-    return out.length ? out : undefined;
-}
-function normalizeAgent(a) {
-    if (!a || typeof a !== 'object')
-        return null;
-    const o = a;
-    const id = extractString(o.crafterQAgentId) ?? DEFAULT_AGENT_ID;
-    const label = extractString(o.label) ?? CRAFTERQ_AGENT_LABEL_PLACEHOLDER;
-    if (!label.trim())
-        return null;
-    let icon;
-    const iconVal = o.icon;
-    if (typeof iconVal === 'string')
-        icon = iconVal;
-    else if (iconVal && typeof iconVal === 'object') {
-        const iconObj = iconVal;
-        icon = typeof iconObj.id === 'string' ? iconObj.id : typeof iconObj['@_id'] === 'string' ? iconObj['@_id'] : undefined;
-    }
-    const prompts = normalizePrompts(o.prompts);
-    const llmStr = extractString(o.llm)?.trim();
-    let llm;
-    let legacyHostedLlm = false;
-    if (llmStr) {
-        const low = llmStr.toLowerCase();
-        if (low === 'openai' || low === 'open-ai')
-            llm = 'openAI';
-        else if (low === 'aiassistant' ||
-            low === 'hostedchat' ||
-            low === 'hosted-chat' ||
-            low === 'crafterq' ||
-            low === 'crafter-q') {
-            llm = 'openAI';
-            legacyHostedLlm = true;
-        }
-        else
-            llm = llmStr;
-    }
-    const llmModel = extractString(o.llmModel);
-    const imageModel = extractString(o.imageModel);
-    const imageGenerator = extractString(o.imageGenerator) ??
-        extractString(o['image-generator']) ??
-        extractString(o.image_generator);
-    const openAiApiKey = extractString(o.openAiApiKey) ??
-        extractString(o['open-ai-api-key']) ??
-        extractString(o.open_ai_api_key);
-    const out = { id: id.trim(), label, icon, prompts };
-    if (llm)
-        out.llm = llm;
-    if (llmModel)
-        out.llmModel = llmModel;
-    else if (legacyHostedLlm && out.llm === 'openAI')
-        out.llmModel = 'gpt-4o-mini';
-    if (imageModel)
-        out.imageModel = imageModel;
-    if (imageGenerator)
-        out.imageGenerator = imageGenerator;
-    if (openAiApiKey?.trim())
-        out.openAiApiKey = openAiApiKey.trim();
-    const openAsPopup = extractBooleanFromRecord(o, 'openAsPopup', 'open_as_popup', 'OpenAsPopup');
-    if (openAsPopup !== undefined)
-        out.openAsPopup = openAsPopup;
-    const enableTools = extractBooleanFromRecord(o, 'enableTools', 'enable_tools');
-    if (enableTools !== undefined)
-        out.enableTools = enableTools;
-    const expertSkills = normalizeExpertSkillsRaw(o.expertSkills) ?? normalizeExpertSkillsRaw(o.expertSkill);
-    if (expertSkills)
-        out.expertSkills = expertSkills;
-    const translateBatchConcurrency = extractPositiveInt(o, 1, 64, 'translateBatchConcurrency', 'translate_batch_concurrency', 'TranslateBatchConcurrency');
-    if (translateBatchConcurrency != null)
-        out.translateBatchConcurrency = translateBatchConcurrency;
-    const enabledBuiltIn = normalizeEnabledBuiltInToolsRaw(o.enabledBuiltInTools ?? o.enabled_built_in_tools);
-    if (enabledBuiltIn?.length)
-        out.enabledBuiltInTools = enabledBuiltIn;
-    return out;
-}
-/** Integer in inclusive range; undefined if missing or invalid. */
-function extractPositiveInt(o, min, max, ...keys) {
-    for (const k of keys) {
-        const v = o[k];
-        if (v == null)
-            continue;
-        let n;
-        if (typeof v === 'number' && Number.isFinite(v))
-            n = Math.floor(v);
-        else {
-            const s = extractString(v);
-            if (!s)
-                continue;
-            n = parseInt(s, 10);
-        }
-        if (!Number.isFinite(n))
-            continue;
-        if (n < min || n > max)
-            continue;
-        return n;
-    }
-    return undefined;
-}
-function extractBooleanFromRecord(o, ...keys) {
-    for (const k of keys) {
-        const v = o[k];
-        if (v === true)
-            return true;
-        if (v === false)
-            return false;
-        const s = extractString(v)?.toLowerCase();
-        if (s === 'true' || s === '1' || s === 'yes')
-            return true;
-        if (s === 'false' || s === '0' || s === 'no')
-            return false;
-    }
-    return undefined;
-}
-/** First matching optional boolean on a Studio widget/configuration object (JSON props). */
-function readOptionalBooleanFromConfiguration(o, ...keys) {
-    if (o == null || typeof o !== 'object')
-        return undefined;
-    return extractBooleanFromRecord(o, ...keys);
-}
-function extractString(v) {
-    if (v == null)
-        return undefined;
-    if (typeof v === 'string')
-        return v.trim() || undefined;
-    if (Array.isArray(v)) {
-        const first = v[0];
-        if (first != null)
-            return extractString(first);
-        return undefined;
-    }
-    if (typeof v === 'object') {
-        const o = v;
-        const candidates = [
-            o.$text,
-            o.value,
-            o['#text'],
-            o.__text,
-            o._,
-            o['@_id'],
-            o.text,
-            o.content
-        ];
-        for (const c of candidates) {
-            if (typeof c === 'string')
-                return c.trim() || undefined;
-        }
-        for (const c of candidates) {
-            if (c != null && typeof c === 'object') {
-                const s = extractString(c);
-                if (s)
-                    return s;
-            }
-        }
-        const values = Object.values(o);
-        if (values.length > 0) {
-            const first = extractString(values[0]);
-            if (first)
-                return first;
-        }
-    }
-    return undefined;
-}
-function extractAdditionalContextField(o) {
-    const ctx = extractString(o.additionalContext) ??
-        extractString(o['additional-context']) ??
-        extractString(o.context) ??
-        extractString(o.AdditionalContext) ??
-        extractString(o.additional_context);
-    return ctx?.trim() ? ctx.trim() : undefined;
-}
-/** Quick-action chips should be short labels; long / multiline "userText" is almost always mis-parsed additional context. */
-const MAX_QUICK_PROMPT_LABEL_CHARS = 100;
-const MIN_MULTILINE_QUICK_PROMPT_CHARS = 48;
-function isLikelyMisplacedContextPrompt(p) {
-    const t = (p.userText || '').trim();
-    if (!t)
-        return false;
-    if (t.length > MAX_QUICK_PROMPT_LABEL_CHARS)
-        return true;
-    if (t.includes('\n') && t.length >= MIN_MULTILINE_QUICK_PROMPT_CHARS)
-        return true;
-    return false;
-}
-/**
- * When Studio/XML produces two <prompt> entries (or flattens context into #text), the second
- * entry often becomes a second "button" with the full context as userText. Fold those into the
- * previous prompt's additionalContext instead.
- */
-function mergeMisplacedContextPrompts(prompts) {
-    if (prompts.length <= 1)
-        return prompts;
-    const out = [];
-    for (const p of prompts) {
-        if (isLikelyMisplacedContextPrompt(p) && out.length > 0) {
-            const prev = out[out.length - 1];
-            const body = (p.userText || '').trim();
-            const extra = (p.additionalContext || '').trim();
-            const chunk = [body, extra].filter(Boolean).join('\n\n');
-            prev.additionalContext = prev.additionalContext ? `${prev.additionalContext}\n\n${chunk}` : chunk;
-            continue;
-        }
-        out.push({ ...p });
-    }
-    return out;
-}
-function normalizePrompts(prompts) {
-    const normalizeOne = (p) => {
-        if (p == null)
-            return null;
-        // Back-compat: <prompt>Text</prompt>
-        if (typeof p === 'string')
-            return { userText: p };
-        if (typeof p !== 'object') {
-            const s = extractString(p);
-            return s ? { userText: s } : null;
-        }
-        const o = p;
-        // New structure:
-        // <prompt><userText>...</userText><additionalContext>...</additionalContext></prompt>
-        const userText = extractString(o.userText) ??
-            extractString(o['user-text']) ??
-            extractString(o.text) ??
-            extractString(o.UserText) ??
-            extractString(o.user_text);
-        const additionalContext = extractAdditionalContextField(o);
-        if (userText && userText.trim()) {
-            const pc = { userText: userText.trim() };
-            if (additionalContext)
-                pc.additionalContext = additionalContext;
-            const omitTools = extractBooleanFromRecord(o, 'omitTools', 'omit_tools');
-            if (omitTools === true)
-                pc.omitTools = true;
-            return pc;
-        }
-        // Studio/XML parsers sometimes emit sibling nodes as two array entries: one { userText }, one { additionalContext }.
-        // Never promote additionalContext alone to userText (that created a second "quick" button). Merge in processPromptList instead.
-        if (additionalContext)
-            return null;
-        // Some parsers might flatten the inner text into #text/value
-        const fallback = extractString(o);
-        return fallback ? { userText: fallback } : null;
-    };
-    const coerceList = (raw) => {
-        if (raw == null)
-            return [];
-        if (Array.isArray(raw))
-            return raw;
-        if (typeof raw === 'object')
-            return Object.values(raw);
-        return [raw];
-    };
-    /** Preserve order; merge orphan context-only fragments into the previous prompt. */
-    const processPromptList = (arr) => {
-        const out = [];
-        for (const item of arr) {
-            const normalized = normalizeOne(item);
-            if (normalized) {
-                out.push(normalized);
-                continue;
-            }
-            if (item != null && typeof item === 'object') {
-                const ctx = extractAdditionalContextField(item);
-                if (ctx && out.length > 0) {
-                    const prev = out[out.length - 1];
-                    prev.additionalContext = prev.additionalContext ? `${prev.additionalContext}\n\n${ctx}` : ctx;
-                }
-            }
-        }
-        return out;
-    };
-    const finalize = (arr) => mergeMisplacedContextPrompts(processPromptList(arr));
-    if (prompts && typeof prompts === 'object') {
-        const p = prompts;
-        const raw = p.prompt;
-        return finalize(coerceList(raw));
-    }
-    return finalize(coerceList(prompts));
-}
-
 /** Sandbox repo path — preferred read via content APIs (see {@link fetchCentralAgentsFile}). */
 const CENTRAL_AGENTS_SANDBOX_PATH = '/config/studio/ai-assistant/agents.json';
 /** Relative to `config/studio/` for {@code writeConfiguration} (Studio module {@code studio}). */
@@ -32770,19 +32770,10 @@ function entryToChatAgent(entry) {
         return null;
     const llmRaw = String(entry.llm ?? '').trim();
     let llm;
-    let legacyHostedLlm = false;
     if (llmRaw) {
         const low = llmRaw.toLowerCase();
         if (low === 'openai' || low === 'open-ai')
             llm = 'openAI';
-        else if (low === 'aiassistant' ||
-            low === 'hostedchat' ||
-            low === 'hosted-chat' ||
-            low === 'crafterq' ||
-            low === 'crafter-q') {
-            llm = 'openAI';
-            legacyHostedLlm = true;
-        }
         else
             llm = llmRaw;
     }
@@ -32804,8 +32795,6 @@ function entryToChatAgent(entry) {
     const lmTrim = typeof entry.llmModel === 'string' ? entry.llmModel.trim() : '';
     if (lmTrim)
         out.llmModel = lmTrim;
-    else if (legacyHostedLlm && out.llm === 'openAI')
-        out.llmModel = 'gpt-4o-mini';
     if (typeof entry.imageModel === 'string' && entry.imageModel.trim())
         out.imageModel = entry.imageModel.trim();
     if (typeof entry.imageGenerator === 'string' && entry.imageGenerator.trim())
@@ -32844,14 +32833,6 @@ function entryToAutonomousDefinition(entry) {
     const scopeRaw = String(entry.scope ?? 'project').trim().toLowerCase();
     const scope = scopeRaw === 'user' || scopeRaw === 'role' || scopeRaw === 'project' ? scopeRaw : 'project';
     let llm = String(entry.llm ?? 'openAI').trim();
-    const lz = llm.toLowerCase();
-    if (lz === 'crafterq' ||
-        lz === 'crafter-q' ||
-        lz === 'aiassistant' ||
-        lz === 'hostedchat' ||
-        lz === 'hosted-chat') {
-        llm = 'openAI';
-    }
     const llmModel = String(entry.llmModel ?? 'gpt-4o-mini').trim();
     const imageModel = entry.imageModel != null ? String(entry.imageModel).trim() : undefined;
     const imageGenerator = entry.imageGenerator != null && String(entry.imageGenerator).trim()
@@ -32983,7 +32964,7 @@ function defaultCentralAgentsFile() {
         agents: [
             {
                 mode: 'chat',
-                crafterQAgentId: '019c7237-478b-7f98-9a5c-87144c3fb010',
+                crafterQAgentId: AI_ASSISTANT_DEFAULT_AGENT_ID,
                 label: 'Authoring Assistant',
                 icon: '@mui/icons-material/AutoAwesomeRounded',
                 llm: 'openAI',
@@ -33040,19 +33021,13 @@ function parseAgentElement(agentEl) {
             break;
         }
     }
-    const llmRaw = (childTextDirect(agentEl, 'llm') ?? '').toLowerCase();
+    const llmText = String(childTextDirect(agentEl, 'llm') ?? '').trim();
+    const llmRaw = llmText.toLowerCase();
     let llm;
-    let legacyHostedUi = false;
     if (llmRaw === 'openai' || llmRaw === 'open-ai')
         llm = 'openAI';
-    else if (llmRaw === 'aiassistant' ||
-        llmRaw === 'hostedchat' ||
-        llmRaw === 'hosted-chat' ||
-        llmRaw === 'crafterq' ||
-        llmRaw === 'crafter-q') {
-        llm = 'openAI';
-        legacyHostedUi = true;
-    }
+    else if (llmText)
+        llm = llmText;
     const llmModel = childTextDirect(agentEl, 'llmModel');
     const imageModel = childTextDirect(agentEl, 'imageModel');
     const imageGenerator = childTextDirect(agentEl, 'imageGenerator');
@@ -33064,8 +33039,6 @@ function parseAgentElement(agentEl) {
         out.llm = llm;
     if (llmModel)
         out.llmModel = llmModel;
-    else if (legacyHostedUi && out.llm === 'openAI')
-        out.llmModel = 'gpt-4o-mini';
     if (imageModel)
         out.imageModel = imageModel;
     if (imageGenerator)
@@ -33167,7 +33140,7 @@ function mergeAgentsFromWidget(widgetEl, byId) {
 }
 /**
  * Walk site `ui.xml`: Helper widget and any widget that hosts `<plugin id="org.craftercms.aiassistant.studio">`.
- * Merges agents by stable key (same logic as legacy form control `main.js`).
+ * Merges agents by stable key (same logic as form engine `control/ai-assistant/main.js`).
  */
 function parseAgentsFromStudioUiXml(xmlString) {
     if (!xmlString || !xmlString.trim())
@@ -35716,17 +35689,24 @@ const CQ_SCRIPT_IMAGE_SELECT_CUSTOM = '__cqScriptImageCustom__';
 function cloneCatalog(f) {
     return { version: f.version ?? 1, agents: f.agents.map((a) => ({ ...a })) };
 }
+/** Obsolete hosted/plugin `<llm>` spellings → `openAI` for catalog UI + save (matches server `StudioAiLlmKind.normalize` rejections). */
+function normalizeLegacyHostedLlmToOpenAi(low) {
+    return (low === 'ai-assistant' ||
+        low === 'ai_assistant' ||
+        low === 'ai assistant' ||
+        low === 'aiassistant' ||
+        low === 'hostedchat' ||
+        low === 'hosted-chat' ||
+        low === 'crafterq' ||
+        low === 'crafter-q');
+}
 function parseLlmVendorAndScript(llm) {
     const s = String(llm ?? 'openAI').trim();
     const low = s.toLowerCase();
     if (low === 'script' || low.startsWith('script:')) {
         return { vendor: 'script', scriptId: low.startsWith('script:') ? s.slice('script:'.length).trim() : '' };
     }
-    if (low === 'aiassistant' ||
-        low === 'hostedchat' ||
-        low === 'hosted-chat' ||
-        low === 'crafterq' ||
-        low === 'crafter-q') {
+    if (normalizeLegacyHostedLlmToOpenAi(low)) {
         return { vendor: 'openAI', scriptId: '' };
     }
     return { vendor: s || 'openAI', scriptId: '' };
@@ -35820,8 +35800,9 @@ function normalizeCatalogForSave(f) {
             };
             const outRec = out;
             const lzAuto = String(out.llm ?? '').trim().toLowerCase();
-            if (lzAuto === 'crafterq' || lzAuto === 'crafter-q')
+            if (normalizeLegacyHostedLlmToOpenAi(lzAuto)) {
                 outRec.llm = 'openAI';
+            }
             delete outRec.prompts;
             const llmS = String(out.llm ?? '').toLowerCase();
             const scriptish = llmS === 'script' || llmS.startsWith('script:');
@@ -35844,8 +35825,9 @@ function normalizeCatalogForSave(f) {
         };
         const recChat = outChat;
         const lzChat = String(outChat.llm ?? '').trim().toLowerCase();
-        if (lzChat === 'crafterq' || lzChat === 'crafter-q')
+        if (normalizeLegacyHostedLlmToOpenAi(lzChat)) {
             recChat.llm = 'openAI';
+        }
         delete recChat.prompt;
         delete recChat.schedule;
         delete recChat.scope;
@@ -72060,7 +72042,7 @@ function AiAssistantProjectToolsConfigurationUiTab() {
 }
 
 /**
- * Resolves the folder used when importing remote chat images into the repo so it matches
+ * Resolves the folder used when importing images from assistant chat into the repo so it matches
  * the page content type's image datasources (same {@code repoPath} as XB / form pickers).
  */
 /** Used when the content type is unknown or has no image datasource paths yet. */

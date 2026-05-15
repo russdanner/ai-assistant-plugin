@@ -1,5 +1,5 @@
 /**
- * Resolves the folder used when importing remote chat images into the repo so it matches
+ * Resolves the folder used when importing images from assistant chat into the repo so it matches
  * the page content type's image datasources (same {@code repoPath} as XB / form pickers).
  */
 

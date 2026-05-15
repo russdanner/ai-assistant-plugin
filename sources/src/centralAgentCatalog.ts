@@ -5,7 +5,7 @@
  * `mode: "autonomous"`. Otherwise the plugin keeps merging agents from `ui.xml` as before.
  */
 import type { AgentConfig, AgentLlm, PromptConfig } from './agentConfig';
-import { normalizeEnabledBuiltInToolsRaw } from './agentConfig';
+import { AI_ASSISTANT_DEFAULT_AGENT_ID, normalizeEnabledBuiltInToolsRaw } from './agentConfig';
 import type { AutonomousAgentDefinition } from './autonomousAssistantsConfig';
 import { fetchConfigurationXML } from '@craftercms/studio-ui/services/configuration';
 import { fetchContentXML, fetchItemsByPath } from '@craftercms/studio-ui/services/content';
@@ -132,20 +132,10 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
   if (!label) return null;
   const llmRaw = String(entry.llm ?? '').trim();
   let llm: AgentLlm | undefined;
-  let legacyHostedLlm = false;
   if (llmRaw) {
     const low = llmRaw.toLowerCase();
     if (low === 'openai' || low === 'open-ai') llm = 'openAI';
-    else if (
-      low === 'aiassistant' ||
-      low === 'hostedchat' ||
-      low === 'hosted-chat' ||
-      low === 'crafterq' ||
-      low === 'crafter-q'
-    ) {
-      llm = 'openAI';
-      legacyHostedLlm = true;
-    } else llm = llmRaw;
+    else llm = llmRaw;
   }
   const enableToolsRaw = entry.enableTools ?? entry.enable_tools;
   let enableTools: boolean | undefined;
@@ -161,7 +151,6 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
   if (llm) out.llm = llm;
   const lmTrim = typeof entry.llmModel === 'string' ? entry.llmModel.trim() : '';
   if (lmTrim) out.llmModel = lmTrim;
-  else if (legacyHostedLlm && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (typeof entry.imageModel === 'string' && entry.imageModel.trim()) out.imageModel = entry.imageModel.trim();
   if (typeof entry.imageGenerator === 'string' && entry.imageGenerator.trim())
     out.imageGenerator = entry.imageGenerator.trim();
@@ -192,16 +181,6 @@ export function entryToAutonomousDefinition(entry: CentralAgentFileEntry): Auton
   const scope =
     scopeRaw === 'user' || scopeRaw === 'role' || scopeRaw === 'project' ? scopeRaw : ('project' as const);
   let llm = String(entry.llm ?? 'openAI').trim();
-  const lz = llm.toLowerCase();
-  if (
-    lz === 'crafterq' ||
-    lz === 'crafter-q' ||
-    lz === 'aiassistant' ||
-    lz === 'hostedchat' ||
-    lz === 'hosted-chat'
-  ) {
-    llm = 'openAI';
-  }
   const llmModel = String(entry.llmModel ?? 'gpt-4o-mini').trim();
   const imageModel = entry.imageModel != null ? String(entry.imageModel).trim() : undefined;
   const imageGenerator =
@@ -338,7 +317,7 @@ export function defaultCentralAgentsFile(): CentralAgentsFile {
     agents: [
       {
         mode: 'chat',
-        crafterQAgentId: '019c7237-478b-7f98-9a5c-87144c3fb010',
+        crafterQAgentId: AI_ASSISTANT_DEFAULT_AGENT_ID,
         label: 'Authoring Assistant',
         icon: '@mui/icons-material/AutoAwesomeRounded',
         llm: 'openAI',

@@ -11,7 +11,7 @@ Use this skill when editing **this repo**: `plugin-studio-crafterq` — Studio p
 
 - **Studio AI assistant** — The product-facing assistant in Studio (Helper, form control, optional autonomous runs). Prefer this in **author-facing** copy and docs.
 - **Two delivery modes** — **(1) Interactive chat** — authors drive each turn (Helper, form-engine control, preview/XB, optional TinyMCE). **(2) Autonomous assistants (experimental)** — the **`AutonomousAssistants`** Tools Panel widget runs **scheduled** server-side steps; see **`docs/internals/spec.md`**.
-- **CrafterQ** — The **CrafterQ API / SaaS integration** when an agent uses **`llm: crafterQ`**. It is a **tool/backend**, not the name of the whole assistant. **`openAI`** is another tool on the same assistant.
+- **Optional CrafterQ tools (integration)** — When a site wires them, the LLM may call tools that talk to a **CrafterQ** deployment (e.g. list agents, conversations, expert Q&A). This is an **add-on**, not the plugin core. **`llm: crafterQ`** (hosted-only) is **not** supported — use **`openAI`**, **`claude`**, **`script:{id}`**, etc.; see **`llm-configuration.md`**.
 
 ## Canonical local policy (read first)
 
@@ -29,7 +29,7 @@ Use this skill when editing **this repo**: `plugin-studio-crafterq` — Studio p
 - **`docs/using-and-extending/product-requirements.md`** — Product obligations (authors, admins, integrators); wire and build contracts live in **`spec.md`** and linked guides.
 - **`docs/internals/spec.md`** — **Official** product requirements & mechanics; update when behavior or contracts change. **Studio UI flags:** anchor **`#studio-ui-flags-studio-uijson`** (`studio-ui.json`, Project Tools).
 - **`docs/using-and-extending/`** — **`llm-configuration.md`**, **`studio-plugins-guide.md`**, **`README.md`** (`user-tools/`, script LLM paths, other guides).
-- **`docs/internals/`** — Maintainers: **`docs/internals/README.md`**, **`docs/internals/spec.md`**, **`docs/internals/stream-endpoint-design.md`**, MCP client notes in **`chat-and-tools-runtime.md`**, recurring hardening themes in **`docs/internals/maintainer-review-checklist.md`**.
+- **`docs/internals/`** — Maintainers: **`docs/internals/README.md`**, **`docs/internals/spec.md`**, **`docs/internals/stream-endpoint-design.md`**, MCP client notes in **`chat-and-tools-runtime.md`**, and **`docs/internals/maintainer-review-checklist.md`** (when review finds a **systemic** bad pattern, add **anti-pattern → preferred pattern** there; move author-visible contracts to **`spec.md`**).
 
 ## Mechanical checklist (non-UI changes)
 

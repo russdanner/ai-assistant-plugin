@@ -1302,32 +1302,37 @@
                 instanceConfig.onOpenAiAssistant(editor, api, messages);
             }
         });
-        editor.ui.registry.addMenuButton('aiassistantShortcuts', {
-            icon: 'ai-prompt',
-            tooltip: instanceConfig.strings.aiAssistantShortcuts,
-            fetch(callback) {
-                const onAction = (api, item) => {
-                    const content = getSelection(editor).trim() || getContent(editor);
-                    const messages = [...instanceConfig.prependMessages, ...(item.messages ?? [])].map((item) => ({
-                        ...item,
-                        content: item.content.replace('{context}', content)
-                    }));
-                    instanceConfig.onShortcutClick(editor, api, messages);
-                };
-                const mapper = (shortcut) => {
-                    const isNested = 'shortcuts' in shortcut;
-                    return {
-                        type: isNested ? 'nestedmenuitem' : 'menuitem',
-                        text: shortcut.label,
-                        icon: shortcut.icon,
-                        ...(isNested
-                            ? { getSubmenuItems: () => shortcut.shortcuts.map(mapper) }
-                            : { onAction: (api) => onAction(api, shortcut) })
+        const registerShortcutsMenuButton = (buttonId) => {
+            editor.ui.registry.addMenuButton(buttonId, {
+                icon: 'ai-prompt',
+                tooltip: instanceConfig.strings.aiAssistantShortcuts,
+                fetch(callback) {
+                    const onAction = (api, item) => {
+                        const content = getSelection(editor).trim() || getContent(editor);
+                        const messages = [...instanceConfig.prependMessages, ...(item.messages ?? [])].map((item) => ({
+                            ...item,
+                            content: item.content.replace('{context}', content)
+                        }));
+                        instanceConfig.onShortcutClick(editor, api, messages);
                     };
-                };
-                callback(instanceConfig.shortcuts.map(mapper));
-            }
-        });
+                    const mapper = (shortcut) => {
+                        const isNested = 'shortcuts' in shortcut;
+                        return {
+                            type: isNested ? 'nestedmenuitem' : 'menuitem',
+                            text: shortcut.label,
+                            icon: shortcut.icon,
+                            ...(isNested
+                                ? { getSubmenuItems: () => shortcut.shortcuts.map(mapper) }
+                                : { onAction: (api) => onAction(api, shortcut) })
+                        };
+                    };
+                    callback(instanceConfig.shortcuts.map(mapper));
+                }
+            });
+        };
+        registerShortcutsMenuButton('aiassistantShortcuts');
+        /** Legacy TinyMCE toolbar id — keep so existing RTE configs that reference `crafterqshortcuts` keep working. */
+        registerShortcutsMenuButton('crafterqshortcuts');
         editor.ui.registry.addSplitButton('aiassistant', {
             icon: 'aiassistant',
             tooltip: 'Open AI',

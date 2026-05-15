@@ -227,6 +227,11 @@ class StudioToolOperations {
         def s = a.toString()?.trim()
         if (s) return s
       }
+      def legacyPreview = request.getAttribute('crafterq.previewToken')
+      if (legacyPreview != null) {
+        def s2 = legacyPreview.toString()?.trim()
+        if (s2) return s2
+      }
     } catch (Throwable ignored) {}
     try {
       def cookies = request.getCookies()
@@ -550,6 +555,9 @@ class StudioToolOperations {
   int resolveTranslateBatchDefaultMaxConcurrency() {
     try {
       def v = request?.getAttribute('aiassistant.translateBatchConcurrency')
+      if (v == null) {
+        v = request?.getAttribute('crafterq.translateBatchConcurrency')
+      }
       if (v instanceof Number) {
         int n = ((Number) v).intValue()
         return Math.max(1, Math.min(64, n))
@@ -588,6 +596,7 @@ class StudioToolOperations {
     def reqSite = ''
     try {
       reqSite = request?.getAttribute('aiassistant.siteId')?.toString()?.trim() ?: ''
+      if (!reqSite) reqSite = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('siteId')?.toString()?.trim() ?: ''
       if (!reqSite) reqSite = request?.getParameter('crafterSite')?.toString()?.trim() ?: ''
       if (!reqSite && params != null) {
@@ -2367,7 +2376,7 @@ class StudioToolOperations {
         message   : status >= 200 && status < 300
           ? 'Fetched preview HTML.'
           : (status == 401
-            ? 'HTTP 401 — Engine rejected preview fetch. The plugin sends x-crafter-preview, crafterPreview cookie/query (re-encoded), and crafterSite. Authorization is not forwarded unless JVM aiassistant.preview.fetch.forwardAuthorization=true. Ensure previewToken is in the CrafterQ POST body and the author has an active XB preview session.'
+            ? 'HTTP 401 — Engine rejected preview fetch. The plugin sends x-crafter-preview, crafterPreview cookie/query (re-encoded), and crafterSite. Authorization is not forwarded unless JVM aiassistant.preview.fetch.forwardAuthorization=true. Ensure previewToken is in the AI Assistant chat/stream POST body and the author has an active XB preview session.'
             : "HTTP ${status} — body may be an error page.")
       ]
     } catch (Throwable t) {

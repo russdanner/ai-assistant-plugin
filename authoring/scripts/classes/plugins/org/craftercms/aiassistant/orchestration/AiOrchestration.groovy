@@ -537,10 +537,10 @@ class AiOrchestration {
   private static String prependFormEngineClientApplyEnforcement(String prompt) {
     def tail = (prompt ?: '').toString()
     return '''[FORM-ENGINE — CLIENT FIELD APPLY — READ FIRST]
-The author is in Studio's **legacy content form**. When the UI attaches **Current Studio content form**, it sends **metadata only** (content type, path, field ids, linked paths, model keys) — **not** full XML/JSON bodies. **GetContent** / **update_content** read the **git** copy; unsaved form edits are **not** inlined in the prompt — use **GetContent** after Save for repo truth, or return **`crafterqFormFieldUpdates`** from visible task + ids when the author expects client-side apply without Save.
+The author is in Studio's **legacy content form**. When the UI attaches **Current Studio content form**, it sends **metadata only** (content type, path, field ids, linked paths, model keys) — **not** full XML/JSON bodies. **GetContent** / **update_content** read the **git** copy; unsaved form edits are **not** inlined in the prompt — use **GetContent** after Save for repo truth, or return **`aiassistantFormFieldUpdates`** from visible task + ids when the author expects client-side apply without Save.
 
 **Content-changing requests** (translate, localize, rephrase, rewrite, fix grammar, shorten, expand, fill, update, change tone, write copy, etc.) mean **field values and item XML** — not FreeMarker templates, scripts, or other **code** unless the author explicitly asked for those. If the author updates **this page** / **the page** in preview **without** naming a single block, they mean **the page file and every referenced component** that shows copy (`sections_o`, `header_o` / `footer_o` / `left_rail_o`, etc.) — not the page item alone; apply or output updates for each path that holds visible text.
-1) **Do the work** in the target language or style. **End your reply** with a Markdown **```json** fenced block containing ONLY valid JSON of the form: {"crafterqFormFieldUpdates":{"field_id":"new value",...}} using **exact** field element names from the form definition / XML in the prompt. List **every** field you changed. HTML/RTE fields: string values may include markup.
+1) **Do the work** in the target language or style. **End your reply** with a Markdown **```json** fenced block containing ONLY valid JSON of the form: {"aiassistantFormFieldUpdates":{"field_id":"new value",...}} using **exact** field element names from the form definition / XML in the prompt. List **every** field you changed. HTML/RTE fields: string values may include markup.
 2) **Forbidden:** Generic CrafterCMS tutorials ("Access the Content Item", "Translation Configuration", "add a language", "click Save", workflow documentation), MCP/plugin commands, or refusing to translate when you can output the target language. A short intro sentence is OK; the **JSON block is mandatory** for these requests.
 
 **Pure Q&A** (no edits to the open item): answer normally and **omit** the JSON block.
@@ -560,7 +560,7 @@ This user request is a content/template/config modification task.
 You MUST call at least one tool before giving your final response.
 Do not respond with prose-only output for this request (no final answer that skips tools).
 **WriteContent**, **publish_content**, and **revert_change** are **not registered** — never call them.
-After **update_content** (or sufficient **GetContent** / **GetContentTypeFormDefinition**), your **final** reply must include **`crafterqFormFieldUpdates`** JSON (see system **Form-engine client-forward mode**) so the Studio form can apply edits — do not substitute MCP commands or “paste into Studio” tutorials.
+After **update_content** (or sufficient **GetContent** / **GetContentTypeFormDefinition**), your **final** reply must include **`aiassistantFormFieldUpdates`** JSON (see system **Form-engine client-forward mode**) so the Studio form can apply edits — do not substitute MCP commands or “paste into Studio” tutorials.
 First output a **business-readable ## Plan** (**📋** per numbered step, enough detail for a non-developer — see system STUDIO POLICY). **Do not** write plan steps that only restate that you will run tools or obey policy — each **📋** line must name a **concrete visitor- or editor-visible outcome** (what changes, where you verify it). **Do not** call tools until that heading and steps are visible. Then **follow that plan**; after each tool refresh the **same** **📋** lines with **✅** / **❌** / **⚠️** / **⬜** only — keep mid-flight updates compact. When you narrate tool use in your own words, prefix with **🛠️**. Do **not** fake server-style tool log lines (see system STUDIO POLICY).
 Do **not** paste full FreeMarker (`.ftl`) bodies or large XML dumps into the author's chat — summarize outcomes; they edit in the form.
 If target path/id is unclear and the user message does not include **Studio authoring context** with a current repository path, call discovery tools first.
@@ -575,7 +575,7 @@ When the author only asked to **update content** — **field values and item XML
       return """[TOOL-GUARD]
 This user request is a content/template/config modification task.
 You MUST call at least one tool before giving your final response.
-The repository item **${normProt}** is open in the Studio **content form** with client-side apply: for **that path only**, do **not** call **WriteContent**, **publish_content**, or **revert_change** (they are blocked) — use **`crafterqFormFieldUpdates`** in your **final** JSON for that item.
+The repository item **${normProt}** is open in the Studio **content form** with client-side apply: for **that path only**, do **not** call **WriteContent**, **publish_content**, or **revert_change** (they are blocked) — use **`aiassistantFormFieldUpdates`** in your **final** JSON for that item.
 For **any other path**, you may call **WriteContent** (and publish/revert) as usual after **update_*** tools.
 First output a **business-readable ## Plan** (**📋** per step, stakeholder-friendly — see system STUDIO POLICY). **Do not** write plan steps that only restate that you will run tools or obey policy — each **📋** line must name a **concrete visitor- or editor-visible outcome**. **Do not** call tools until that heading and steps are visible. Then **follow that plan**; after each tool refresh the **same** **📋** lines with **✅** / **❌** / **⚠️** / **⬜** only. When you narrate tool use in your own words, prefix with **🛠️**. Do **not** fake server-style tool log lines (see system STUDIO POLICY).
 Do **not** paste full FreeMarker (`.ftl`) bodies or large XML dumps into the author's chat — summarize outcomes.
@@ -1080,10 +1080,10 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     return normalizeOpenAiImagesApiModelId(canon)
   }
 
-  /** Per-request expert skill URLs from the client (see {@code crafterq.expertSkills} request attribute). */
+  /** Per-request expert skill URLs from the client (see {@code aiassistant.expertSkills} request attribute; legacy {@code crafterq.expertSkills}). */
   List<Map> readExpertSkillSpecsFromRequest() {
     try {
-      def v = request?.getAttribute('crafterq.expertSkills')
+      def v = request?.getAttribute('aiassistant.expertSkills') ?: request?.getAttribute('crafterq.expertSkills')
       if (v instanceof List) {
         List<Map> out = new ArrayList<>()
         for (Object o : (List) v) {
@@ -1128,7 +1128,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     String llmNorm = StudioAiLlmKind.normalize(llmRaw)
     Collection agentToolSubset = null
     try {
-      def raw = request?.getAttribute('crafterq.agentEnabledBuiltInTools')
+      def raw = request?.getAttribute('aiassistant.agentEnabledBuiltInTools') ?: request?.getAttribute('crafterq.agentEnabledBuiltInTools')
       if (raw instanceof Collection && !((Collection) raw).isEmpty()) {
         agentToolSubset = (Collection) raw
       }
@@ -1219,7 +1219,8 @@ For **content XML** (pages/components): do not invent a new element tree — pre
   ) {
     def site = ''
     try {
-      site = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
+      site = request?.getAttribute('aiassistant.siteId')?.toString()?.trim() ?: ''
+      if (!site) site = request?.getAttribute('crafterq.siteId')?.toString()?.trim() ?: ''
       if (!site) site = request?.getParameter('siteId')?.toString()?.trim() ?: ''
       if (!site) site = request?.getParameter('crafterSite')?.toString()?.trim() ?: ''
       if (!site && params != null) {
@@ -1236,7 +1237,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     def utEarly = (userText ?: '').toString()
     List exList = []
     try {
-      def raw = request?.getAttribute('crafterq.expertSkills')
+      def raw = request?.getAttribute('aiassistant.expertSkills') ?: request?.getAttribute('crafterq.expertSkills')
       if (raw instanceof List && !((List) raw).isEmpty()) {
         exList = (List) raw
       }
@@ -3902,7 +3903,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       def springAi = buildSpringAiChatClient(agentId, chatId, llm, openAiModel, openAiApiKey, null, imageModel, fullSuppress, protNorm, enableTools, imageGenerator)
       if (formEngineClientForward && !StudioAiLlmKind.useToolsLoopChatRestClient(springAi.llm, springAi)) {
         log.warn(
-          'Form-engine client-apply: llm is {} (not a tools-loop RestClient row). Use openAI / xAI / deepSeek / llama / genesis (gemini) on this agent for native RestClient tools + best compliance with crafterqFormFieldUpdates.',
+          'Form-engine client-apply: llm is {} (not a tools-loop RestClient row). Use openAI / xAI / deepSeek / llama / genesis (gemini) on this agent for native RestClient tools + best compliance with aiassistantFormFieldUpdates.',
           springAi.llm
         )
       }
@@ -4566,7 +4567,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       def springAi = buildSpringAiChatClient(agentId, chatId, llm, openAiModel, openAiApiKey, toolProgressListener, imageModel, fullSuppress, protNorm, enableTools, imageGenerator)
       if (formEngineClientForward && !StudioAiLlmKind.useToolsLoopChatRestClient(springAi.llm, springAi)) {
         log.warn(
-          'Form-engine client-apply: llm is {} (not a tools-loop RestClient row). Use openAI / xAI / deepSeek / llama / genesis (gemini) on this agent for native RestClient tools + best compliance with crafterqFormFieldUpdates.',
+          'Form-engine client-apply: llm is {} (not a tools-loop RestClient row). Use openAI / xAI / deepSeek / llama / genesis (gemini) on this agent for native RestClient tools + best compliance with aiassistantFormFieldUpdates.',
           springAi.llm
         )
       }

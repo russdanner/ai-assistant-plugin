@@ -438,7 +438,7 @@ class AiOrchestrationTools {
         error      : true,
         action     : actionTag,
         message    :
-          'Skipped: Studio form client-apply item — put field edits in crafterqFormFieldUpdates or use WriteContent for other paths.',
+          'Skipped: Studio form client-apply item — put field edits in aiassistantFormFieldUpdates or use WriteContent for other paths.',
         siteId     : siteId,
         contentPath: contentPath,
         paths      : [contentPath],
@@ -1607,7 +1607,7 @@ class AiOrchestrationTools {
    * @param openAiApiKeyForImages API key for the built-in **image** HTTP wire and for embedding/RAG inner calls when applicable (see {@link StudioAiImageGeneratorFactory})
    * @param imageModel resolved default image model from agent/request for the built-in images wire (e.g. gpt-image-1); optional per-call {@code model} in tool args; ignored for pure {@code script:…} image backends unless the script reads it from context
    * @param fullSuppressRepoWrites when true (form engine + client JSON apply but no item path), omit write/publish/revert tools entirely
-   * @param protectedFormItemPath normalized repo path of the open form item — when set (and not full suppress), write/publish/revert stay registered but are rejected only for this path; {@code update_content} for this path steers toward {@code crafterqFormFieldUpdates}
+   * @param protectedFormItemPath normalized repo path of the open form item — when set (and not full suppress), write/publish/revert stay registered but are rejected only for this path; {@code update_content} for this path steers toward {@code aiassistantFormFieldUpdates}
    * @param expertSkillSpecs normalized maps {@code skillId},{@code name},{@code url},{@code description} from the chat request; when non-empty and an OpenAI API key is available, registers {@code QueryExpertGuidance}
    * @param openAiTextModel resolved OpenAI chat model id for inner completions ({@code TranslateContentItem} / bulk subgraph when enabled) default {@code llmModel}; ignored when no API key
    * @param llmNormalized {@link plugins.org.craftercms.aiassistant.llm.StudioAiLlmKind#normalize} result for the active session (image wire defaults)
@@ -2059,8 +2059,8 @@ class AiOrchestrationTools {
                 blockedForFormClientApply: true,
                 path: p,
                 message:
-                  'WriteContent blocked: this path is the Studio form item with client-side apply. Put field edits in crafterqFormFieldUpdates JSON in your final reply. You may still call WriteContent for other repository paths.',
-                nextStep: 'Return crafterqFormFieldUpdates for this item; use WriteContent only for paths other than this one.'
+                  'WriteContent blocked: this path is the Studio form item with client-side apply. Put field edits in aiassistantFormFieldUpdates JSON in your final reply. You may still call WriteContent for other repository paths.',
+                nextStep: 'Return aiassistantFormFieldUpdates for this item; use WriteContent only for paths other than this one.'
               ]
             }
           }

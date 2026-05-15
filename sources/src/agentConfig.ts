@@ -2,8 +2,8 @@
  * Agent configuration as defined in ui.xml <configuration><agents><agent>...</agent></agents></configuration>
  */
 /**
- * Studio stream `llm` value. Common: `openAI`, `claude`, `xAI`, `deepSeek`, `llama`, `gemini`,
- * or `script:<id>` (see server `StudioAiLlmKind`). Hosted CrafterQ chat is not supported — configure a real provider.
+ * Studio stream `llm` value. Use a provider id accepted by server {@code StudioAiLlmKind.normalize}
+ * (e.g. `openAI`, `claude`, `xAI`, `deepSeek`, `llama`, `gemini`, or `script:<id>`).
  */
 export type AgentLlm = string;
 
@@ -19,8 +19,8 @@ export interface ExpertSkillConfig {
 
 export interface AgentConfig {
   /**
-   * CrafterQ SaaS agent UUID (and stream `agentId`), from ui.xml **{@code <crafterQAgentId>}** / widget JSON **`crafterQAgentId`**.
-   * With **label**, used for merge/dedupe and form toggles. For **OpenAI** without CrafterQ calls, may be omitted (empty).
+   * Stable agent id for stream `agentId` and merge/dedupe; from ui.xml **{@code <crafterQAgentId>}** / JSON **`crafterQAgentId`**
+   * (XML tag name is historical). With **label**, forms the composite {@link agentStableKey}. May be empty when omitted in config.
    */
   id: string;
   label: string;
@@ -68,7 +68,7 @@ export interface AgentConfig {
 /**
  * Stable key for matching agents between ui.xml, form field properties, and the form-control UI.
  * When both `id` and `label` are set, uses a composite key so multiple `<agent>` rows with the **same**
- * backend `id` (e.g. same CrafterQ UUID, different labels) stay distinct — otherwise merging collapses them.
+ * backend `id` (e.g. same UUID, different labels) stay distinct — otherwise merging collapses them.
  */
 export function agentStableKey(a: Pick<AgentConfig, 'id' | 'label'>): string {
   const id = (a.id || '').trim();
@@ -88,19 +88,29 @@ export function agentFormPropertyName(a: Pick<AgentConfig, 'id' | 'label'>): str
   return 'cqShow_' + s;
 }
 
-/** Label used when Studio JSON omits `<label>` (see {@link normalizeAgent}); not a real product name. */
-export const CRAFTERQ_AGENT_LABEL_PLACEHOLDER = 'CrafterQ';
+/**
+ * Sentinel label when Studio/widget JSON omits **{@code label}** (see {@link normalizeAgent}). The literal
+ * **{@code CrafterQ}** is historical; do not change without a migration pass on existing `ui.xml` / stored JSON.
+ */
+export const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'CrafterQ';
 
-/** Default **`<crafterQAgentId>`** / label pair from `craftercms-plugin.yaml` sample Helper `<agent>` (CrafterQ cloud). */
-export const CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
-export const CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL = 'CrafterQ content';
+/**
+ * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in fallbacks (same UUID everywhere).
+ */
+export const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+
+/**
+ * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
+ * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
+ */
+export const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'CrafterQ content';
 
 function shouldOverlayLabelFromSite(agent: AgentConfig, ui: AgentConfig): boolean {
   const u = (ui.label || '').trim();
   if (!u) return false;
   const a = (agent.label || '').trim();
   if (!a) return true;
-  if (a === CRAFTERQ_AGENT_LABEL_PLACEHOLDER && u !== a) return true;
+  if (a === AI_ASSISTANT_AGENT_LABEL_FALLBACK && u !== a) return true;
   return false;
 }
 
@@ -185,9 +195,9 @@ export function dedupeAgentsByStableKey(agents: AgentConfig[]): AgentConfig[] {
 }
 
 /**
- * Remove (a) JSON placeholder rows (label exactly {@link CRAFTERQ_AGENT_LABEL_PLACEHOLDER}) whenever another agent
+ * Remove (a) JSON placeholder rows (label exactly {@link AI_ASSISTANT_AGENT_LABEL_FALLBACK}) whenever another agent
  * has a non-placeholder label (Studio may still attach a non-sample id to the fallback row), and
- * (b) the plugin-install sample agent (`{@link CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID}` + {@link CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL}})
+ * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_DEFAULT_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
  * when at least one other row looks author-defined — typical duplicate Helper menu (Studio merges blueprint + site `ui.xml`).
  */
 export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[]): AgentConfig[] {
@@ -197,8 +207,8 @@ export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[
   const hasRicher = deduped.some((a) => {
     const lab = (a.label || '').trim();
     if (!lab) return false;
-    if (lab === CRAFTERQ_AGENT_LABEL_PLACEHOLDER) return false;
-    if (lab === CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL) return false;
+    if (lab === AI_ASSISTANT_AGENT_LABEL_FALLBACK) return false;
+    if (lab === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
     return true;
   });
   if (!hasRicher) return deduped;
@@ -206,8 +216,8 @@ export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[
   return deduped.filter((a) => {
     const id = (a.id || '').trim();
     const label = (a.label || '').trim();
-    if (hasRicher && label === CRAFTERQ_AGENT_LABEL_PLACEHOLDER) return false;
-    if (id === CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID && label === CRAFTERQ_PLUGIN_SAMPLE_AGENT_LABEL) return false;
+    if (hasRicher && label === AI_ASSISTANT_AGENT_LABEL_FALLBACK) return false;
+    if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
     return true;
   });
 }
@@ -223,7 +233,7 @@ const DEFAULT_AGENT_ID = '';
 
 /** Fallback when no config or parsing fails — one toolbar/menu row so click always has a target. */
 const DEFAULT_AGENT: AgentConfig = {
-  id: CRAFTERQ_PLUGIN_SAMPLE_AGENT_ID,
+  id: AI_ASSISTANT_DEFAULT_AGENT_ID,
   label: 'Studio AI Assistant',
   llm: 'openAI',
   llmModel: 'gpt-4o-mini',
@@ -234,12 +244,12 @@ const DEFAULT_AGENT: AgentConfig = {
 export const DEFAULT_AGENTS: AgentConfig[] = [DEFAULT_AGENT];
 
 /**
- * Default agents for the Form Engine “CrafterQ assistant” control when no agents come from ui.xml / widget config.
- * Keep IDs in sync with `sources/control/ai-assistant/main.js` (`CRAFTERQ_AGENT_CATALOG`).
+ * Default agents for the Form Engine AI Assistant control when no agents come from ui.xml / widget config.
+ * Keep **{@code crafterQAgentId}** in sync with `sources/control/ai-assistant/main.js` (`AIASSISTANT_FALLBACK_AGENTS`).
  */
 export const DEFAULT_FORM_CONTROL_AGENTS: AgentConfig[] = [
   {
-    id: '019c7237-478b-7f98-9a5c-87144c3fb010',
+    id: AI_ASSISTANT_DEFAULT_AGENT_ID,
     label: 'Content assistant',
     llm: 'openAI',
     llmModel: 'gpt-4o-mini'
@@ -356,7 +366,7 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   if (!a || typeof a !== 'object') return null;
   const o = a as Record<string, unknown>;
   const id = extractString(o.crafterQAgentId) ?? DEFAULT_AGENT_ID;
-  const label = extractString(o.label) ?? CRAFTERQ_AGENT_LABEL_PLACEHOLDER;
+  const label = extractString(o.label) ?? AI_ASSISTANT_AGENT_LABEL_FALLBACK;
   if (!label.trim()) return null;
   let icon: string | undefined;
   const iconVal = o.icon;
@@ -368,20 +378,10 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   const prompts = normalizePrompts(o.prompts);
   const llmStr = extractString(o.llm)?.trim();
   let llm: AgentLlm | undefined;
-  let legacyHostedLlm = false;
   if (llmStr) {
     const low = llmStr.toLowerCase();
     if (low === 'openai' || low === 'open-ai') llm = 'openAI';
-    else if (
-      low === 'aiassistant' ||
-      low === 'hostedchat' ||
-      low === 'hosted-chat' ||
-      low === 'crafterq' ||
-      low === 'crafter-q'
-    ) {
-      llm = 'openAI';
-      legacyHostedLlm = true;
-    } else llm = llmStr;
+    else llm = llmStr;
   }
   const llmModel = extractString(o.llmModel);
   const imageModel = extractString(o.imageModel);
@@ -396,7 +396,6 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   const out: AgentConfig = { id: id.trim(), label, icon, prompts };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
-  else if (legacyHostedLlm && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();

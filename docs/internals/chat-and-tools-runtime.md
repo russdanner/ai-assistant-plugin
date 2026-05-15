@@ -4,7 +4,9 @@ Companion to **[`spec.md`](spec.md)** for tools, REST bodies, MCP, and runtime t
 
 **Audience:** Maintainers and advanced integrators working on **tools**, **SSE**, or **Studio integration**. For **`<llm>`** selection and keys, see [llm-configuration.md](../using-and-extending/llm-configuration.md).
 
-**Hosted remote chat:** earlier releases could call CrafterQ SaaS (`api.crafterq.ai`) for hosted-only **`llm`** values or optional SME/chat-audit tools. That integration **has been removed**. Chat always runs against **your configured provider** (**`openAI`**, **`claude`**, **`script:{id}`**, etc.); legacy spellings such as **`crafterQ`**, **`aiassistant`**, and **`hostedchat`** are **rejected** by **`StudioAiLlmKind.normalize`** (**HTTP 400**).
+**Hosted-only `<llm>` via remote CrafterQ chat:** earlier releases could use CrafterQ-hosted **`llm`** values tied to `api.crafterq.ai`. That path **has been removed**. Chat always runs against **your configured provider** (**`openAI`**, **`claude`**, **`script:{id}`**, etc.); legacy spellings such as **`crafterQ`**, **`aiassistant`**, and **`hostedchat`** are **rejected** by **`StudioAiLlmKind.normalize`** (**HTTP 400**).
+
+**Optional CrafterQ tools (integration):** a CrafterQ deployment may still be reachable as **optional** function tools the model can call when a site wires them (e.g. list agents, list conversations, ask an expert). That is an **add-on integration**, not part of core Studio authoring UX and not implied by the **`crafterQAgentId`** XML tag name.
 
 **LLM ids, keys, and provider behavior:** [llm-configuration.md](../using-and-extending/llm-configuration.md)  
 **Admin checklist and `ui.xml` surfaces:** [configuration-guide.md](../using-and-extending/configuration-guide.md)  

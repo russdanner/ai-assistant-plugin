@@ -30,20 +30,11 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
       break;
     }
   }
-  const llmRaw = (childTextDirect(agentEl, 'llm') ?? '').toLowerCase();
+  const llmText = String(childTextDirect(agentEl, 'llm') ?? '').trim();
+  const llmRaw = llmText.toLowerCase();
   let llm: AgentLlm | undefined;
-  let legacyHostedUi = false;
   if (llmRaw === 'openai' || llmRaw === 'open-ai') llm = 'openAI';
-  else if (
-    llmRaw === 'aiassistant' ||
-    llmRaw === 'hostedchat' ||
-    llmRaw === 'hosted-chat' ||
-    llmRaw === 'crafterq' ||
-    llmRaw === 'crafter-q'
-  ) {
-    llm = 'openAI';
-    legacyHostedUi = true;
-  }
+  else if (llmText) llm = llmText;
   const llmModel = childTextDirect(agentEl, 'llmModel');
   const imageModel = childTextDirect(agentEl, 'imageModel');
   const imageGenerator = childTextDirect(agentEl, 'imageGenerator');
@@ -54,7 +45,6 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
   const out: AgentConfig = { id: id.trim(), label: label.trim(), icon, prompts: [] };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
-  else if (legacyHostedUi && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();
@@ -151,7 +141,7 @@ function mergeAgentsFromWidget(widgetEl: Element, byId: Map<string, AgentConfig>
 
 /**
  * Walk site `ui.xml`: Helper widget and any widget that hosts `<plugin id="org.craftercms.aiassistant.studio">`.
- * Merges agents by stable key (same logic as legacy form control `main.js`).
+ * Merges agents by stable key (same logic as form engine `control/ai-assistant/main.js`).
  */
 export function parseAgentsFromStudioUiXml(xmlString: string): AgentConfig[] {
   if (!xmlString || !xmlString.trim()) return [];

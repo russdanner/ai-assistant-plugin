@@ -16,6 +16,7 @@ var CRAFTERQ_HELPER_WIDGET_ID = 'craftercms.components.aiassistant.Helper';
 /** Matches <plugin id="…"> in ui.xml for this Studio plugin */
 var CRAFTERQ_PLUGIN_ID = 'org.craftercms.aiassistant.studio';
 
+/** Default form-engine agents when ui.xml lists none. `id` must match `AI_ASSISTANT_DEFAULT_AGENT_ID` in `sources/src/agentConfig.ts`. */
 var AIASSISTANT_FALLBACK_AGENTS = [
   {
     id: '019c7237-478b-7f98-9a5c-87144c3fb010',
@@ -26,7 +27,7 @@ var AIASSISTANT_FALLBACK_AGENTS = [
   }
 ];
 
-/** Must match agentStableKey() in sources/src/agentConfig.ts (composite when id+label both set). */
+/** Must match `agentStableKey()` in `sources/src/agentConfig.ts` (composite when id+label both set). */
 function cqStableKey(id, label) {
   var i = String(id || '').trim();
   var l = String(label || '').trim();
@@ -149,23 +150,11 @@ function cqChatAgentFromCentralJsonEntry(e) {
   if (!label) return null;
   var out = { id: id, label: label, prompts: [] };
   if (e.icon != null && String(e.icon).trim()) out.icon = String(e.icon).trim();
-  var llmRaw = String(e.llm != null ? e.llm : '')
-    .trim()
-    .toLowerCase();
-  var legacyHosted = false;
+  var rawLlm = String(e.llm != null ? e.llm : '').trim();
+  var llmRaw = rawLlm.toLowerCase();
   if (llmRaw === 'openai' || llmRaw === 'open-ai') out.llm = 'openAI';
-  else if (
-    llmRaw === 'aiassistant' ||
-    llmRaw === 'hostedchat' ||
-    llmRaw === 'hosted-chat' ||
-    llmRaw === 'crafterq' ||
-    llmRaw === 'crafter-q'
-  ) {
-    out.llm = 'openAI';
-    legacyHosted = true;
-  }
+  else if (rawLlm) out.llm = rawLlm;
   if (e.llmModel != null && String(e.llmModel).trim()) out.llmModel = String(e.llmModel).trim();
-  else if (legacyHosted && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (e.imageModel != null && String(e.imageModel).trim()) out.imageModel = String(e.imageModel).trim();
   if (e.imageGenerator != null && String(e.imageGenerator).trim()) out.imageGenerator = String(e.imageGenerator).trim();
   if (e.openAiApiKey != null && String(e.openAiApiKey).trim()) out.openAiApiKey = String(e.openAiApiKey).trim();
@@ -239,20 +228,11 @@ function cqParseAgentElement(agentEl) {
       break;
     }
   }
-  var llmRaw = String(cqChildTextDirect(agentEl, 'llm') || '').toLowerCase();
+  var llmText = String(cqChildTextDirect(agentEl, 'llm') || '').trim();
+  var llmRaw = llmText.toLowerCase();
   var llm;
-  var legacyHostedUi = false;
   if (llmRaw === 'openai' || llmRaw === 'open-ai') llm = 'openAI';
-  else if (
-    llmRaw === 'aiassistant' ||
-    llmRaw === 'hostedchat' ||
-    llmRaw === 'hosted-chat' ||
-    llmRaw === 'crafterq' ||
-    llmRaw === 'crafter-q'
-  ) {
-    llm = 'openAI';
-    legacyHostedUi = true;
-  }
+  else if (llmText) llm = llmText;
   var llmModel = cqChildTextDirect(agentEl, 'llmModel');
   var imageModel = cqChildTextDirect(agentEl, 'imageModel');
   var imageGenerator = cqChildTextDirect(agentEl, 'imageGenerator');
@@ -263,7 +243,6 @@ function cqParseAgentElement(agentEl) {
   var out = { id: String(id).trim(), label: String(label).trim(), icon: icon, prompts: [] };
   if (llm) out.llm = llm;
   if (llmModel) out.llmModel = llmModel;
-  else if (legacyHostedUi && out.llm === 'openAI') out.llmModel = 'gpt-4o-mini';
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
   if (openAiApiKey && String(openAiApiKey).trim()) out.openAiApiKey = String(openAiApiKey).trim();
