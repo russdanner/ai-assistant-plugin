@@ -207,7 +207,7 @@ export default function AiAssistantFormControlPanel(props: AiAssistantFormContro
                     llmModel={agent.llmModel}
                     imageModel={agent.imageModel}
                     imageGenerator={agent.imageGenerator}
-                    openAiApiKey={agent.openAiApiKey}
+                    llmApiKey={agent.llmApiKey}
                     enableTools={agent.enableTools}
                     enabledBuiltInTools={agent.enabledBuiltInTools}
                     expertSkills={agent.expertSkills}

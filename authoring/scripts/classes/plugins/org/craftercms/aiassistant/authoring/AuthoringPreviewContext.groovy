@@ -183,31 +183,42 @@ class AuthoringPreviewContext {
   }
 
   /**
+   * When non-null, intent recipe routing / expansion is skipped for this turn (stable codes for Studio logs).
+   * See {@link #isAuthoringIntentExpansionCandidate}.
+   */
+  static String intentRecipeRouterEligibilitySkipReason(String fullPrompt) {
+    if (isTrivialNonAuthoringTurn(fullPrompt)) {
+      return 'trivial_non_authoring_turn'
+    }
+    def v = stripStudioInjectedPromptBlocks((fullPrompt ?: '').toString())
+    if (!v) {
+      return 'empty_visible_after_strip'
+    }
+    if (v.length() > 1600) {
+      return 'visible_exceeds_1600_chars'
+    }
+    if (!authorVisibleSuggestsCmsTooling(fullPrompt)) {
+      return 'no_cms_task_signal'
+    }
+    if (v.length() <= AUTHORING_INTENT_EXPANSION_SHORT_VISIBLE_MAX_CHARS) {
+      return null
+    }
+    if (!authorVisibleContainsHttpOrLikelyExternalHost(v)) {
+      return 'long_message_no_url_for_expansion_gate'
+    }
+    if (!AUTHORING_INTENT_EXPANSION_VISUAL.matcher(v).find()) {
+      return 'long_message_url_without_visual_reference_phrase'
+    }
+    return null
+  }
+
+  /**
    * Eligible for the server’s **pre-tools** intent-expansion completion: either **short** author-visible text
    * (usually a one-liner too terse for reliable tool planning) or a **longer** message that combines a URL/host with
    * reference / visual language.
    */
   static boolean isAuthoringIntentExpansionCandidate(String fullPrompt) {
-    if (isTrivialNonAuthoringTurn(fullPrompt)) {
-      return false
-    }
-    def v = stripStudioInjectedPromptBlocks((fullPrompt ?: '').toString())
-    if (!v) {
-      return false
-    }
-    if (v.length() > 1600) {
-      return false
-    }
-    if (!authorVisibleSuggestsCmsTooling(fullPrompt)) {
-      return false
-    }
-    if (v.length() <= AUTHORING_INTENT_EXPANSION_SHORT_VISIBLE_MAX_CHARS) {
-      return true
-    }
-    if (!authorVisibleContainsHttpOrLikelyExternalHost(v)) {
-      return false
-    }
-    return AUTHORING_INTENT_EXPANSION_VISUAL.matcher(v).find()
+    return intentRecipeRouterEligibilitySkipReason(fullPrompt) == null
   }
 
   /**

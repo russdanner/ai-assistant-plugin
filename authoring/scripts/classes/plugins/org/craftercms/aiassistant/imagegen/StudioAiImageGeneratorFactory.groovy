@@ -19,16 +19,16 @@ final class StudioAiImageGeneratorFactory {
   private StudioAiImageGeneratorFactory() {}
 
   /**
-   * @param imageGeneratorSpec agent / request {@code imageGenerator}: blank (default), {@code openAiWire},
+   * @param imageGeneratorSpec agent / request {@code imageGenerator}: blank (default), {@code llmWire},
    *        {@code none}|{@code off}|{@code disabled}, or {@code script:id}
-   * @param openAiImagesApiKey key used for the built-in Images API wire (historically {@link AiOrchestration#resolveOpenAiApiKey})
+   * @param llmImagesApiKey key used for the built-in Images API wire (historically {@link AiOrchestration#resolveLlmApiKey})
    * @param defaultImageModel agent/request image model id when applicable
    */
   static StudioAiImageGenerator resolve(
     StudioToolOperations ops,
     String llmNormalized,
     String imageGeneratorSpec,
-    String openAiImagesApiKey,
+    String llmImagesApiKey,
     String defaultImageModel
   ) {
     String spec = (imageGeneratorSpec ?: '').toString().trim()
@@ -46,21 +46,21 @@ final class StudioAiImageGeneratorFactory {
         spec
       )
     }
-    String key = (openAiImagesApiKey ?: '').toString().trim()
+    String key = (llmImagesApiKey ?: '').toString().trim()
     if (!key) {
       return null
     }
     if (!AiOrchestration.imageModelFromRequestOrNull(defaultImageModel)) {
       return null
     }
-    return new OpenAiCompatibleImageGenerator()
+    return new CompatibleImageGenerator()
   }
 
   static StudioAiImageGenContext buildContext(
     StudioToolOperations ops,
     String llmNormalized,
     String imageGeneratorSpec,
-    String openAiImagesApiKey,
+    String llmImagesApiKey,
     String defaultImageModel
   ) {
     String siteId = ''
@@ -68,8 +68,8 @@ final class StudioAiImageGeneratorFactory {
       siteId = ops != null ? ops.resolveEffectiveSiteId('') : ''
     } catch (Throwable ignored) {
     }
-    String key = (openAiImagesApiKey ?: '').toString().trim()
-    String postUrl = StudioAiProviderCredentials.httpOpenAiImagesGenerationsUrl()
+    String key = (llmImagesApiKey ?: '').toString().trim()
+    String postUrl = StudioAiProviderCredentials.httpLlmImagesGenerationsUrl()
     return new StudioAiImageGenContext(
       ops,
       siteId,

@@ -10,8 +10,8 @@
 // Configure Studio (host-only base URL, no trailing /v1). Plugin env names:
 //   export SCRIPT_LLM_OPENAI_COMPAT_BASE_URL=https://api.example.com
 //   export SCRIPT_LLM_API_KEY=...
-// Per-agent chat model: <llmModel> or POST llmModel → req.openAiModelParam (Studio request field name)
-// Testing-only key from widget: optional agent <openAiApiKey> → req.openAiApiKeyFromRequest
+// Per-agent chat model: <llmModel> or POST llmModel → req.llmModelParam (Studio request field name)
+// Testing-only key from widget: optional agent <llmApiKey> → req.llmApiKeyFromRequest
 //
 // Optional session-bundle tuning (same keys as the Groq sample): `toolsLoopChatPreferMaxCompletionTokens`,
 // `toolsLoopChatMaxCompletionOutTokens`, `toolsLoopChatMaxWirePayloadChars` — add to the returned map if your host
@@ -60,7 +60,7 @@ class BringYourOwnToolsLoopHostRuntime implements StudioAiLlmRuntime {
   private static String compatApiKey(StudioAiRuntimeBuildRequest req) {
     String k = System.getenv('SCRIPT_LLM_API_KEY')?.toString()?.trim()
     if (!k) {
-      k = (req.openAiApiKeyFromRequest ?: '').toString().trim()
+      k = (req.llmApiKeyFromRequest ?: '').toString().trim()
     }
     return k
   }
@@ -76,10 +76,10 @@ class BringYourOwnToolsLoopHostRuntime implements StudioAiLlmRuntime {
     }
     if (!apiKey) {
       throw new IllegalStateException(
-        'Script LLM byo-openai-compat: set SCRIPT_LLM_API_KEY on Studio, or agent <openAiApiKey> for local testing only.'
+        'Script LLM byo-openai-compat: set SCRIPT_LLM_API_KEY on Studio, or agent <llmApiKey> for local testing only.'
       )
     }
-    String modelName = (req.openAiModelParam ?: 'gpt-4o-mini').toString().trim()
+    String modelName = (req.llmModelParam ?: 'gpt-4o-mini').toString().trim()
     def orch = req.orchestration
     def imageModel = AiOrchestration.imageModelFromRequestOrNull(req.imageModelParam)
     String builtInImageAndEmbeddingKey = AiOrchestration.resolveOpenAiApiKey(null)
@@ -118,7 +118,7 @@ class BringYourOwnToolsLoopHostRuntime implements StudioAiLlmRuntime {
       modelName,
       req.enableTools,
       base,
-      AiOrchestration.openAiApiKeyLogPreview(apiKey),
+      AiOrchestration.llmApiKeyLogPreview(apiKey),
       apiKey.length()
     )
     return [

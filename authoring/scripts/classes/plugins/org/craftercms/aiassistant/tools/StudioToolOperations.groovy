@@ -1,5 +1,6 @@
 package plugins.org.craftercms.aiassistant.tools
 
+import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 
 import org.craftercms.studio.api.v2.event.site.SyncFromRepoEvent
@@ -150,6 +151,42 @@ class StudioToolOperations {
    * with a clear tool error instead of a partial Studio pipeline failure after IO.
    * Skipped for non-{@code .xml} paths (e.g. {@code .ftl}) where the body is not XML.
    */
+  /**
+   * Refuses field fragments or non-item bodies for {@code /site/.../*.xml} writes (common LLM failure mode that
+   * passes SAX well-formedness but breaks Engine render with HTTP 500).
+   */
+  private static void assertCrafterSiteContentItemDocument(String pathLabel, String xmlUtf8) {
+    if (!isLikelyXmlRepositoryPath(pathLabel)) {
+      return
+    }
+    String p = (pathLabel ?: '').toString().trim().toLowerCase(Locale.ROOT)
+    if (!p.startsWith('/site/')) {
+      return
+    }
+    String t = (xmlUtf8 ?: '').toString().trim()
+    if (!t) {
+      return
+    }
+    if (t.startsWith('<?xml')) {
+      int declEnd = t.indexOf('?>')
+      if (declEnd >= 0) {
+        t = t.substring(declEnd + 2).trim()
+      }
+    }
+    if (!(t ==~ /(?is)<(page|component)(\s[^>]*)?>/) && !(t ==~ /(?is)<(page|component)\s*\/>/)) {
+      throw new IllegalArgumentException(
+        "contentXml for '${pathLabel}' must be a full Crafter content item with root <page> or <component>, not a field fragment or partial snippet. " +
+          'Call GetContent (or update_content), edit field values in place, then WriteContent the entire document.'
+      )
+    }
+    if (!t.contains('<content-type>') && !t.contains('<file-name>') && !t.contains('<merge-strategy>')) {
+      throw new IllegalArgumentException(
+        "contentXml for '${pathLabel}' is missing typical Crafter item markers (<content-type>, <file-name>, or <merge-strategy>). " +
+          'Refusing to write — re-fetch with GetContent and send the full item XML.'
+      )
+    }
+  }
+
   private static void assertWellFormedUtf8Xml(String pathLabel, String xmlUtf8) {
     if (xmlUtf8 == null || !xmlUtf8.toString().trim()) {
       throw new IllegalArgumentException(
@@ -604,6 +641,40 @@ class StudioToolOperations {
     if (tool && !tool.equalsIgnoreCase('default')) return tool
     if (reqSite) return reqSite
     return tool
+  }
+
+  /**
+   * Snapshot of site id, preview/form repo path, content type id, and Engine preview URL for
+   * {@link plugins.org.craftercms.aiassistant.recipes.AuthoringIntentRecipeEngine}. REST scripts set
+   * {@code aiassistant.*} request attributes on the servlet thread before orchestration runs.
+   */
+  Map recipeEngineAuthoringBindings() {
+    String siteId = resolveEffectiveSiteId(null)
+    String contentPath = ''
+    String contentTypeId = ''
+    try {
+      contentPath = AuthoringPreviewContext.normalizeRepoPath(
+        request?.getAttribute('aiassistant.contentPath')?.toString()
+      ) ?: ''
+      if (!contentPath) {
+        contentPath = AuthoringPreviewContext.normalizeRepoPath(
+          request?.getAttribute('aiassistant.formEngineItemPath')?.toString()
+        ) ?: ''
+      }
+      contentTypeId = request?.getAttribute('aiassistant.contentTypeId')?.toString()?.trim() ?: ''
+    } catch (Throwable ignored) {
+    }
+    String previewUrl = ''
+    try {
+      previewUrl = AuthoringPreviewContext.buildEnginePreviewAbsoluteUrl(request, siteId, contentPath) ?: ''
+    } catch (Throwable ignoredPu) {
+    }
+    return Collections.unmodifiableMap([
+      siteId        : siteId ?: '',
+      contentPath   : contentPath ?: '',
+      contentTypeId : contentTypeId ?: '',
+      previewUrl    : previewUrl ?: ''
+    ] as Map)
   }
 
   /**
@@ -1756,6 +1827,7 @@ class StudioToolOperations {
         )
       }
       if (isLikelyXmlRepositoryPath(normalized)) {
+        assertCrafterSiteContentItemDocument(normalized, safeBody)
         assertWellFormedUtf8Xml(normalized, safeBody)
       }
       byte[] bytes = safeBody.getBytes(StandardCharsets.UTF_8)

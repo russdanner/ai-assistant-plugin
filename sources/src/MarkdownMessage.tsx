@@ -27,7 +27,7 @@ import StudioDraggableImage from './StudioDraggableImage';
  * sequences backslash+n or backslash+t instead of real newlines/tabs. Markdown then
  * shows one long line. Convert those literals to actual whitespace for display.
  */
-export function normalizeOpenAiLiteralEscapes(input: string): string {
+export function normalizeLlmLiteralEscapes(input: string): string {
   if (!input) return input;
   return input
     .replace(/\\r\\n/g, '\n')
@@ -161,7 +161,7 @@ export function preprocessAssistantMarkdownImages(text: string): {
   longDataImageBlobRefMap: Map<string, string>;
 } {
   const longDataImageBlobRefMap = new Map<string, string>();
-  const normalized = normalizeOpenAiLiteralEscapes(text);
+  const normalized = normalizeLlmLiteralEscapes(text);
   const compactData = compactAllDataImageBase64Runs(normalized);
   const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
   const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);

@@ -70,7 +70,7 @@ final class AutonomousAssistantWorker {
           "AutonomousAssistantWorker requires a tools-loop llm (openAI, xAI, deepSeek, llama, genesis/gemini) or script:… site Groovy LLM with tools-loop bundle fields; got llm='${llm}' (normalized='${normLlm}'). Claude (claude) is not supported for autonomous runs yet."
         )
       }
-      String openAiImageExpertKey = AiOrchestration.resolveOpenAiApiKey(definition?.openAiApiKey)
+      String llmImageExpertKey = AiOrchestration.resolveLlmApiKey(definition?.llmApiKey)
       String chatApiKey = ''
       String model = ''
       String wireBaseUrl = ''
@@ -138,7 +138,7 @@ final class AutonomousAssistantWorker {
         try {
         String imageModel = (definition?.imageModel ?: '').toString().trim()
         if (imageModel) {
-          imageModel = AiOrchestration.normalizeOpenAiImagesApiModelId(imageModel)
+          imageModel = AiOrchestration.normalizeImagesApiModelId(imageModel)
         }
         StudioToolOperations studioOps = new StudioToolOperations(
           null,
@@ -158,8 +158,8 @@ final class AutonomousAssistantWorker {
           agentId: fullAgentId,
           chatId: null,
           llmNormalized: normLlm,
-          openAiModelParam: definition?.llmModel?.toString(),
-          openAiApiKeyFromRequest: definition?.openAiApiKey?.toString(),
+          llmModelParam: definition?.llmModel?.toString(),
+          llmApiKeyFromRequest: definition?.llmApiKey?.toString(),
           toolProgressListener: null,
           imageModelParam: definition?.imageModel?.toString(),
           imageGeneratorParam: imageGenSpec ?: null,
@@ -177,11 +177,11 @@ final class AutonomousAssistantWorker {
             'Autonomous assistant requires a tools-loop session (toolsLoopChatApiKey, resolvedChatModel, toolsLoopChatBaseUrl). For script LLM, return these keys from buildSessionBundle.'
           )
         }
-        String authoringStack = AiOrchestration.openAiAuthoringSystemOnlyForHeadless(
+        String authoringStack = AiOrchestration.llmAuthoringSystemOnlyForHeadless(
           (siteId ?: '').toString(),
           user,
           studioOps,
-          openAiImageExpertKey,
+          llmImageExpertKey,
           false,
           null,
           true,
@@ -213,7 +213,7 @@ final class AutonomousAssistantWorker {
         List tools = AiOrchestrationTools.buildWithDefaultWireConverter(
           studioOps,
           null,
-          openAiImageExpertKey,
+          llmImageExpertKey,
           imageModel ?: null,
           false,
           null,
@@ -228,7 +228,7 @@ final class AutonomousAssistantWorker {
             'AutonomousAssistantWorker: Studio tool catalog is empty after AiOrchestrationTools.build (agentId=' + fullAgentId + ').'
           )
         }
-        assistant = AiOrchestration.openAiHeadlessNativeToolsCompletion(
+        assistant = AiOrchestration.llmHeadlessNativeToolsCompletion(
           chatApiKey,
           model,
           systemForTools,

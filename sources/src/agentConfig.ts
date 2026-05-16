@@ -54,7 +54,7 @@ export interface AgentConfig {
    * Optional OpenAI API key from ui.xml — **not recommended** (exposed in Studio config / sent on requests).
    * Used only when `OPENAI_API_KEY` / JVM keys are unset. For local testing.
    */
-  openAiApiKey?: string;
+  llmApiKey?: string;
   prompts?: PromptConfig[];
   /** Markdown URLs for server-side QueryExpertGuidance (Spring AI vector store); OpenAI agents only. */
   expertSkills?: ExpertSkillConfig[];
@@ -168,7 +168,7 @@ export function mergeAgentsWithSiteUiXmlOverlay(fromWidget: AgentConfig[], fromU
       !(agent.imageGenerator || '').trim()
         ? { imageGenerator: ui.imageGenerator.trim() }
         : {}),
-      ...(ui.openAiApiKey !== undefined && agent.openAiApiKey === undefined ? { openAiApiKey: ui.openAiApiKey } : {}),
+      ...(ui.llmApiKey !== undefined && agent.llmApiKey === undefined ? { llmApiKey: ui.llmApiKey } : {}),
       ...(ui.openAsPopup !== undefined && agent.openAsPopup === undefined ? { openAsPopup: ui.openAsPopup } : {}),
       ...(Array.isArray(ui.expertSkills) &&
       ui.expertSkills.length > 0 &&
@@ -393,8 +393,8 @@ function normalizeAgent(a: unknown): AgentConfig | null {
     extractString(o.imageGenerator) ??
     extractString(o['image-generator']) ??
     extractString(o.image_generator);
-  const openAiApiKey =
-    extractString(o.openAiApiKey) ??
+  const llmApiKey =
+    extractString(o.llmApiKey) ??
     extractString(o['open-ai-api-key']) ??
     extractString(o.open_ai_api_key);
   const out: AgentConfig = { id: id.trim(), label, icon, prompts };
@@ -402,7 +402,7 @@ function normalizeAgent(a: unknown): AgentConfig | null {
   if (llmModel) out.llmModel = llmModel;
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
-  if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();
+  if (llmApiKey?.trim()) out.llmApiKey = llmApiKey.trim();
   const openAsPopup = extractBooleanFromRecord(o, 'openAsPopup', 'open_as_popup', 'OpenAsPopup');
   if (openAsPopup !== undefined) out.openAsPopup = openAsPopup;
   const enableTools = extractBooleanFromRecord(o, 'enableTools', 'enable_tools');

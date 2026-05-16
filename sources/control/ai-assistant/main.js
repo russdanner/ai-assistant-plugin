@@ -157,7 +157,7 @@ function cqChatAgentFromCentralJsonEntry(e) {
   if (e.llmModel != null && String(e.llmModel).trim()) out.llmModel = String(e.llmModel).trim();
   if (e.imageModel != null && String(e.imageModel).trim()) out.imageModel = String(e.imageModel).trim();
   if (e.imageGenerator != null && String(e.imageGenerator).trim()) out.imageGenerator = String(e.imageGenerator).trim();
-  if (e.openAiApiKey != null && String(e.openAiApiKey).trim()) out.openAiApiKey = String(e.openAiApiKey).trim();
+  if (e.llmApiKey != null && String(e.llmApiKey).trim()) out.llmApiKey = String(e.llmApiKey).trim();
   var et = e.enableTools != null ? e.enableTools : e.enable_tools;
   if (et != null && String(et).trim() !== '') {
     var es = String(et)
@@ -236,8 +236,8 @@ function cqParseAgentElement(agentEl) {
   var llmModel = cqChildTextDirect(agentEl, 'llmModel');
   var imageModel = cqChildTextDirect(agentEl, 'imageModel');
   var imageGenerator = cqChildTextDirect(agentEl, 'imageGenerator');
-  var openAiApiKey =
-    cqChildTextDirect(agentEl, 'openAiApiKey') ||
+  var llmApiKey =
+    cqChildTextDirect(agentEl, 'llmApiKey') ||
     cqChildTextDirect(agentEl, 'open-ai-api-key') ||
     cqChildTextDirect(agentEl, 'open_ai_api_key');
   var out = { id: String(id).trim(), label: String(label).trim(), icon: icon, prompts: [] };
@@ -245,7 +245,7 @@ function cqParseAgentElement(agentEl) {
   if (llmModel) out.llmModel = llmModel;
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
-  if (openAiApiKey && String(openAiApiKey).trim()) out.openAiApiKey = String(openAiApiKey).trim();
+  if (llmApiKey && String(llmApiKey).trim()) out.llmApiKey = String(llmApiKey).trim();
   var enableToolsRaw = cqChildTextDirect(agentEl, 'enableTools') || cqChildTextDirect(agentEl, 'enable_tools');
   if (enableToolsRaw != null && String(enableToolsRaw).trim() !== '') {
     var es = String(enableToolsRaw).trim().toLowerCase();

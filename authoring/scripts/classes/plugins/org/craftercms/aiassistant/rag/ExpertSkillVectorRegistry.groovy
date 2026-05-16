@@ -2,6 +2,9 @@ package plugins.org.craftercms.aiassistant.rag
 
 import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
 
+@Grab(group='org.springframework.ai', module='spring-ai-core', version='1.0.0-M6', initClass=false)
+@Grab(group='org.springframework.ai', module='spring-ai-openai', version='1.0.0-M6', initClass=false)
+
 import java.security.MessageDigest
 import java.util.ArrayList
 import java.util.HashMap
@@ -96,9 +99,9 @@ class ExpertSkillVectorRegistry {
     return p ?: 'text-embedding-3-small'
   }
 
-  static EmbeddingModel buildEmbeddingModel(String openAiApiKey) {
-    def api = OpenAiApi.builder().apiKey(openAiApiKey).build()
-    def opts = OpenAiEmbeddingOptions.builder().model(resolveEmbeddingModelName()).build()
+  static EmbeddingModel buildEmbeddingModel(String llmApiKey) {
+    OpenAiApi api = OpenAiApi.builder().apiKey(llmApiKey).build()
+    OpenAiEmbeddingOptions opts = OpenAiEmbeddingOptions.builder().model(resolveEmbeddingModelName()).build()
     return new OpenAiEmbeddingModel(api, MetadataMode.EMBED, opts)
   }
 

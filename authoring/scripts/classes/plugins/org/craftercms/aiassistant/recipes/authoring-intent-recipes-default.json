@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "recipes": [
+    {
+      "id": "modify_page_content",
+      "title": "Modify page or component content",
+      "description": "Change copy, tone, grammar, translate, or field values on a page or component XML item; author does not ask for new FreeMarker, form-definition schema, or site-wide discovery only.",
+      "matchHints": ["update", "change", "translate", "rewrite", "this page", "proofread", "grammar", "tone", "rephrase", "localize"],
+      "phases": {
+        "context": {
+          "hints": [
+            "Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters).",
+            "For full-page visible copy, consider ListContentTranslationScope from the page path before editing multiple items."
+          ],
+          "engineSteps": [
+            {
+              "tool": "GetContent",
+              "args": { "siteId": "$siteId", "path": "$contentPath" }
+            },
+            {
+              "tool": "GetContentTypeFormDefinition",
+              "args": { "siteId": "$siteId", "contentPath": "$contentPath" }
+            }
+          ]
+        },
+        "action": [
+          "Use update_content or GetContent → revise XML → WriteContent; preserve <page>/<component> structure and node-selector shapes."
+        ],
+        "confirmation": [
+          "When an Engine preview URL exists, use GetPreviewHtml after substantive writes affecting rendered output."
+        ]
+      }
+    },
+    {
+      "id": "template_display_change",
+      "title": "Template / display (FTL) change",
+      "description": "Author explicitly wants layout, FreeMarker, listing markup, dates formatting in code, or how the page renders.",
+      "matchHints": ["template", "ftl", "freemarker", "render", "layout", "listing", "cards", "display"],
+      "phases": {
+        "context": [
+          "GetContent on page/component XML; read display-template; follow sections_o keys to component templates when the shell is not the listing."
+        ],
+        "action": [
+          "Read templates with GetContent or analyze_template (read-only) before update_template; persist with WriteContent on .ftl paths."
+        ],
+        "confirmation": [
+          "GetPreviewHtml when preview URL is available."
+        ]
+      }
+    },
+    {
+      "id": "publish_item",
+      "title": "Publish or go live",
+      "description": "Author wants to publish the current item or a named path to live/staging.",
+      "matchHints": ["publish", "go live", "deploy", "push to live", "release"],
+      "phases": {
+        "context": [
+          "Confirm siteId and target path from Studio context or author text."
+        ],
+        "action": [
+          "Use publish_content with path/contentPath; avoid unnecessary discovery reads when context already has the item path."
+        ],
+        "confirmation": [
+          "Summarize publish package outcome from tool result."
+        ]
+      }
+    },
+    {
+      "id": "new_content_item",
+      "title": "Create new page or component",
+      "description": "Author asks to create, draft, or write a new item (new URL or new component), not only edit the open file.",
+      "matchHints": ["create", "new page", "new article", "draft", "write a", "add a page"],
+      "phases": {
+        "context": {
+          "hints": [
+            "ListStudioContentTypes (siteId only) then exact catalog match; GetContentTypeFormDefinition for resolved contentTypeId; GetContent on one sibling of the same type when siblings exist."
+          ],
+          "engineSteps": [
+            {
+              "tool": "ListStudioContentTypes",
+              "args": { "siteId": "$siteId", "searchable": false }
+            }
+          ]
+        },
+        "action": [
+          "WriteContent the new item with correct conventions (objectId, dates, file-name, sections)."
+        ],
+        "confirmation": [
+          "Tell the author how to preview the new route; optional GetPreviewHtml."
+        ]
+      }
+    }
+  ]
+}

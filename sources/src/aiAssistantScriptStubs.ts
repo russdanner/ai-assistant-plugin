@@ -36,8 +36,8 @@ import plugins.org.craftercms.aiassistant.llm.StudioAiRuntimeBuildRequest
     sub.agentId = r.agentId
     sub.chatId = r.chatId
     sub.llmNormalized = StudioAiLlmKind.OPENAI_NATIVE
-    sub.openAiModelParam = r.openAiModelParam
-    sub.openAiApiKeyFromRequest = r.openAiApiKeyFromRequest
+    sub.llmModelParam = r.llmModelParam
+    sub.llmApiKeyFromRequest = r.llmApiKeyFromRequest
     sub.toolProgressListener = r.toolProgressListener
     sub.imageModelParam = r.imageModelParam
     sub.imageGeneratorParam = r.imageGeneratorParam

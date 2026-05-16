@@ -26,7 +26,17 @@ import java.util.Set
  *   "mcpServers": [
  *     { "id": "docs", "url": "https://mcp.example.com/mcp", "headers": { "Authorization": "Bearer ${env:GITHUB_MCP_TOKEN}" }, "readTimeoutMs": 120000 }
  *   ],
- *   "disabledMcpTools": ["mcp_docs_search"]
+ *   "disabledMcpTools": ["mcp_docs_search"],
+ *   "intentRecipeRouting": {
+ *     "enabled": false,
+ *     "engineEnabled": false,
+ *     "engineMaxSteps": 8,
+ *     "engineMaxTotalChars": 200000,
+ *     "engineMaxFieldChars": 120000,
+ *     "requestClarificationOnUnmatched": false,
+ *     "minConfidence": 0.55,
+ *     "customRecipesPath": "/scripts/aiassistant/config/intent-recipes.json"
+ *   }
  * }
  * }</pre>
  * <strong>MCP client:</strong> {@code mcpServers} is ignored unless {@code mcpEnabled} is JSON boolean {@code true} (default is <strong>off</strong> when omitted).
@@ -168,5 +178,82 @@ final class StudioAiAssistantProjectConfig {
       return false
     }
     return disabledLower.contains(wireName.toString().trim().toLowerCase(Locale.ROOT))
+  }
+
+  /** Optional {@code intentRecipeRouting} object from {@code tools.json}. */
+  static Map intentRecipeRoutingSection(Map cfg) {
+    if (!(cfg instanceof Map)) {
+      return Collections.emptyMap()
+    }
+    Object o = cfg.get('intentRecipeRouting')
+    return o instanceof Map ? (Map) o : Collections.emptyMap()
+  }
+
+  static boolean intentRecipeRoutingEnabled(Map cfg) {
+    Boolean.TRUE.equals(intentRecipeRoutingSection(cfg).get('enabled'))
+  }
+
+  static boolean intentRecipeRequestClarificationOnUnmatched(Map cfg) {
+    Boolean.TRUE.equals(intentRecipeRoutingSection(cfg).get('requestClarificationOnUnmatched'))
+  }
+
+  static double intentRecipeMinConfidence(Map cfg) {
+    Map m = intentRecipeRoutingSection(cfg)
+    Object v = m.get('minConfidence')
+    if (v == null) {
+      return 0.55d
+    }
+    try {
+      if (v instanceof Number) {
+        return ((Number) v).doubleValue()
+      }
+      return Double.parseDouble(v.toString().trim())
+    } catch (Throwable ignored) {
+      return 0.55d
+    }
+  }
+
+  /** Optional Studio module path to site recipe JSON (merged over bundled defaults by recipe {@code id}). */
+  static String intentRecipeCustomRecipesPath(Map cfg) {
+    Map m = intentRecipeRoutingSection(cfg)
+    String p = m.get('customRecipesPath')?.toString()?.trim()
+    return p ?: ''
+  }
+
+  /**
+   * When {@code intentRecipeRouting.enabled} is true and a recipe matches: run {@code engineSteps} on the Studio JVM
+   * before the main tools loop (see {@code AuthoringIntentRecipeEngine}). Default {@code false}.
+   */
+  static boolean intentRecipeEngineEnabled(Map cfg) {
+    Boolean.TRUE.equals(intentRecipeRoutingSection(cfg).get('engineEnabled'))
+  }
+
+  /** Max deterministic steps per matched recipe (clamped {@code 1–32}, default {@code 8}). */
+  static int intentRecipeEngineMaxSteps(Map cfg) {
+    return intentRecipeRoutingInt(cfg, 'engineMaxSteps', 8, 1, 32)
+  }
+
+  /** Max characters for the entire prefetch block appended to the user message (clamped {@code 8_192–400_000}, default {@code 200_000}). */
+  static int intentRecipeEngineMaxTotalChars(Map cfg) {
+    return intentRecipeRoutingInt(cfg, 'engineMaxTotalChars', 200_000, 8192, 400_000)
+  }
+
+  /** Max characters retained per tool payload field such as {@code contentXml} / {@code formDefinitionXml} (default {@code 120_000}). */
+  static int intentRecipeEngineMaxFieldChars(Map cfg) {
+    return intentRecipeRoutingInt(cfg, 'engineMaxFieldChars', 120_000, 4096, 500_000)
+  }
+
+  private static int intentRecipeRoutingInt(Map cfg, String key, int defaultValue, int min, int max) {
+    Map m = intentRecipeRoutingSection(cfg)
+    Object v = m.get(key)
+    if (v == null) {
+      return defaultValue
+    }
+    try {
+      int n = (v instanceof Number) ? ((Number) v).intValue() : Integer.parseInt(v.toString().trim())
+      return Math.max(min, Math.min(max, n))
+    } catch (Throwable ignored) {
+      return defaultValue
+    }
   }
 }

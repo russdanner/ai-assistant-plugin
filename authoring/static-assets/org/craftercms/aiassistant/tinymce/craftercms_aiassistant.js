@@ -655,7 +655,7 @@
 
     const popoverWidgetId = 'craftercms.components.aiassistant.ChatPopover';
     const aiAssistantClosedMessageId = 'craftercms.aiassistant.PanelClosed';
-    const openAiAssistantMessageId = 'craftercms.aiassistant.OpenPanel';
+    const llmAssistantMessageId = 'craftercms.aiassistant.OpenPanel';
     /*
     import { EmptyStateOption } from './AiAssistant';
 
@@ -1001,7 +1001,7 @@
 
     const BASE_CONFIG = {
         strings: {
-            openAiAssistant: 'Open AI Assistant',
+            llmAssistant: 'Open AI Assistant',
             aiAssistantShortcuts: 'AI Shortcuts'
         },
         prependMessages: [],
@@ -1204,8 +1204,8 @@
                 break;
         }
     };
-    const tellStudioToOpenAiAssistant = (editor, props) => {
-        xb.post(openAiAssistantMessageId, props);
+    const tellStudioToOpenAssistant = (editor, props) => {
+        xb.post(llmAssistantMessageId, props);
         xb.fromTopic(aiAssistantClosedMessageId)
             .pipe(take(1))
             .subscribe(() => {
@@ -1249,7 +1249,7 @@
                 });
             }
             else {
-                tellStudioToOpenAiAssistant(editor, {
+                tellStudioToOpenAssistant(editor, {
                     ...config.AiAssistantPopoverProps,
                     AiAssistantProps: {
                         ...config.AiAssistantPopoverProps?.AiAssistantProps,
@@ -1272,23 +1272,23 @@
             ...configArg,
             strings: {
                 ...mergedStrings,
-                openAiAssistant: mergedStrings.openAiAssistant ?? 'Open AI Assistant',
+                llmAssistant: mergedStrings.llmAssistant ?? 'Open AI Assistant',
                 aiAssistantShortcuts: mergedStrings.aiAssistantShortcuts ?? 'AI Shortcuts'
             }
         };
-        const userOpen = configArg?.onOpenAiAssistant;
+        const userOpen = configArg?.onOpenAssistant;
         if (!userOpen || !configArg?.onShortcutClick) {
             const defaultHandler = createDefaultHandler(instanceConfig);
-            instanceConfig.onOpenAiAssistant = defaultHandler;
+            instanceConfig.onOpenAssistant = defaultHandler;
             instanceConfig.onShortcutClick = defaultHandler;
         }
         else {
-            instanceConfig.onOpenAiAssistant = userOpen;
+            instanceConfig.onOpenAssistant = userOpen;
             instanceConfig.onShortcutClick = configArg.onShortcutClick;
         }
         editor.ui.registry.addButton('aiAssistantOpen', {
             icon: 'ai',
-            tooltip: instanceConfig.strings.openAiAssistant,
+            tooltip: instanceConfig.strings.llmAssistant,
             onAction(api) {
                 const content = getSelection(editor).trim() || getContent(editor);
                 const messages = [...instanceConfig.prependMessages].map((item) => ({
@@ -1299,7 +1299,7 @@
                 if (selection) {
                     messages.push({ role: 'system', content: `Context: ${selection}` });
                 }
-                instanceConfig.onOpenAiAssistant(editor, api, messages);
+                instanceConfig.onOpenAssistant(editor, api, messages);
             }
         });
         const registerShortcutsMenuButton = (buttonId) => {
@@ -1356,7 +1356,7 @@
                     ...item,
                     content: item.content.replace('{context}', content)
                 }));
-                instanceConfig.onOpenAiAssistant(editor, api, messages);
+                instanceConfig.onOpenAssistant(editor, api, messages);
             },
             onItemAction(api, item) {
                 const content = getSelection(editor).trim() || getContent(editor);

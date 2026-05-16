@@ -19,7 +19,7 @@ import {
   Typography
 } from '@mui/material';
 import type { McpServerFormRow, ToolsPolicyFormState } from './aiAssistantToolsMcpUiModel';
-import { BUILTIN_TOOL_NAME_OPTIONS } from './aiAssistantToolsMcpUiModel';
+import AiAssistantSiteOrchestrationToolsForm from './AiAssistantSiteOrchestrationToolsForm';
 
 function emptyMcpServerRow(): McpServerFormRow {
   return { id: '', url: '', readTimeoutMs: '', headerPairs: [{ key: '', value: '' }] };
@@ -52,53 +52,7 @@ export default function AiAssistantToolsMcpForm(props: AiAssistantToolsMcpFormPr
 
   return (
     <Stack spacing={4}>
-      <Paper variant="outlined" sx={{ p: 2.5 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          Built-In CMS Tools:
-        </Typography>
-        <Typography variant="body2" color="text.secondary" paragraph>
-          Optional lists use exact wire names (see product docs). If <strong>Whitelist</strong> is non-empty, only those
-          built-ins stay; <code>InvokeSiteUserTool</code> and dynamic <code>mcp_*</code> tools still register unless you
-          disable them below or in <strong>Hide MCP tools</strong>.
-        </Typography>
-        <Stack spacing={2}>
-          <Autocomplete
-            multiple
-            freeSolo
-            options={[...BUILTIN_TOOL_NAME_OPTIONS]}
-            value={value.disabledBuiltInTools}
-            onChange={(_, v) => onChange({ ...value, disabledBuiltInTools: v.map(String) })}
-            renderTags={(tagValue, getTagProps) =>
-              tagValue.map((option, index) => (
-                <Chip variant="outlined" label={option} size="small" {...getTagProps({ index })} key={`${option}-${index}`} />
-              ))
-            }
-            renderInput={(params) => (
-              <TextField {...params} label="Hide built-in tools" placeholder="e.g. GenerateImage" size="small" />
-            )}
-          />
-          <Autocomplete
-            multiple
-            freeSolo
-            options={[...BUILTIN_TOOL_NAME_OPTIONS]}
-            value={value.enabledBuiltInTools}
-            onChange={(_, v) => onChange({ ...value, enabledBuiltInTools: v.map(String) })}
-            renderTags={(tagValue, getTagProps) =>
-              tagValue.map((option, index) => (
-                <Chip variant="outlined" label={option} size="small" {...getTagProps({ index })} key={`${option}-${index}`} />
-              ))
-            }
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Whitelist built-in tools (optional)"
-                placeholder="Leave empty for no whitelist"
-                size="small"
-              />
-            )}
-          />
-        </Stack>
-      </Paper>
+      <AiAssistantSiteOrchestrationToolsForm value={value} onChange={onChange} />
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>

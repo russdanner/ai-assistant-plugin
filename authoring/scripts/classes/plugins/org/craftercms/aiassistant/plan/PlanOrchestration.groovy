@@ -153,6 +153,42 @@ Rules:
     return ordered.size() == toolCallsList.size() ? ordered : null
   }
 
+  /**
+   * Stable reorder: form-definition reads and other non-write tools first, then writes, then preview verification.
+   * Preserves relative order within each bucket. Always returns a new list (may equal input order).
+   */
+  static List reorderToolCallsReadBeforeWritePreview(List toolCallsList) {
+    if (toolCallsList == null || toolCallsList.isEmpty()) {
+      return toolCallsList
+    }
+    List lead = new ArrayList<>()
+    List formDefs = new ArrayList<>()
+    List writes = new ArrayList<>()
+    List previews = new ArrayList<>()
+    for (def tcObj : toolCallsList) {
+      if (!(tcObj instanceof Map)) {
+        lead.add(tcObj)
+        continue
+      }
+      String fn = extractToolName((Map) tcObj)
+      if ('WriteContent'.equals(fn) || 'update_content'.equals(fn)) {
+        writes.add(tcObj)
+      } else if ('GetContentTypeFormDefinition'.equals(fn)) {
+        formDefs.add(tcObj)
+      } else if ('GetPreviewHtml'.equals(fn)) {
+        previews.add(tcObj)
+      } else {
+        lead.add(tcObj)
+      }
+    }
+    List out = new ArrayList<>(toolCallsList.size())
+    out.addAll(lead)
+    out.addAll(formDefs)
+    out.addAll(writes)
+    out.addAll(previews)
+    return out
+  }
+
   private static String extractToolName(Map tc) {
     def fn = tc.get('function')
     if (!(fn instanceof Map)) {

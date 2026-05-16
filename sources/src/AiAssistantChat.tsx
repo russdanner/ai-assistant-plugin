@@ -42,7 +42,7 @@ import {
 import { formatSessionLogForDebugCopy } from './aiAssistantSessionDebugLog';
 import type { ExpertSkillConfig, PromptConfig } from './agentConfig';
 import type { AuthoringFormContextSnapshot } from './aiAssistantFormAuthoringTypes';
-import MarkdownMessage, { normalizeOpenAiLiteralEscapes } from './MarkdownMessage';
+import MarkdownMessage, { normalizeLlmLiteralEscapes } from './MarkdownMessage';
 import GenerateImageBlurredPlaceholder from './GenerateImageBlurredPlaceholder';
 import AssistantChatGeneratedImages from './AssistantChatGeneratedImages';
 import {
@@ -374,7 +374,7 @@ function looksLikeFollowUpPromptClause(t: string): boolean {
  * so authors can one-click send them like 📋 verification chips.
  */
 function extractFollowUpActionPrompts(markdown: string): string[] {
-  const raw = normalizeOpenAiLiteralEscapes((markdown || '').trim());
+  const raw = normalizeLlmLiteralEscapes((markdown || '').trim());
   if (!raw) return [];
   const lines = raw.split(/\r?\n/);
   const out: string[] = [];

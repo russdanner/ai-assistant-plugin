@@ -3,6 +3,9 @@ package plugins.org.craftercms.aiassistant.rag
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
 
+@Grab(group='org.springframework.ai', module='spring-ai-core', version='1.0.0-M6', initClass=false)
+@Grab(group='org.springframework.ai', module='spring-ai-openai', version='1.0.0-M6', initClass=false)
+
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.io.ByteArrayInputStream
@@ -89,7 +92,7 @@ class PluginRagVectorRegistry {
     String siteId,
     String userText,
     StudioToolOperations ops,
-    String openAiApiKey,
+    String llmApiKey,
     boolean toolSchemasOnApi
   ) {
     if (!toolSchemasOnApi) {
@@ -100,7 +103,7 @@ class PluginRagVectorRegistry {
       return authoringCore
     }
     def site = (siteId ?: '').toString().trim()
-    def key = (openAiApiKey ?: '').toString().trim()
+    def key = (llmApiKey ?: '').toString().trim()
     if (!site || !ops || !key) {
       return authoringCore
     }
@@ -213,9 +216,9 @@ class PluginRagVectorRegistry {
       q.add(u.length() > 2000 ? u.substring(0, 2000) : u)
     }
     q.add('WriteContent GetContent XML page component content type form definition CDATA')
-    q.add('ListContentTranslationScope TranslateContentBatch TranslateContentItem translate localize full page pathChunks sections_o referenced components')
+    q.add('ListContentDependencyScope TranslateContentBatch TranslateContentItem translate localize full page pathChunks sections_o referenced components')
     q.add('FreeMarker template update_template content vs code analyze_template hardcoded')
-    q.add('revert_change publish_content GetPreviewHtml ListContentTranslationScope')
+    q.add('revert_change publish_content GetPreviewHtml ListContentDependencyScope')
     q.add('GetCrafterizingPlaybook crafterize expert skill QueryExpertGuidance')
     return q
   }
@@ -504,7 +507,7 @@ class PluginRagVectorRegistry {
     appendSection(sb, 'CMS_DEVELOPMENT_UPDATE_CONTENT_TYPE', ToolPrompts.getUPDATE_CONTENT_TYPE())
     appendSection(sb, 'CMS_DEVELOPMENT_UPDATE_CONTENT_TYPE_FORM_ENGINE', ToolPrompts.getUPDATE_CONTENT_TYPE_FORM_ENGINE())
     appendSection(sb, 'CMS_CONTENT_DESC_GET_CONTENT', ToolPrompts.getDESC_GET_CONTENT())
-    appendSection(sb, 'CMS_CONTENT_DESC_LIST_CONTENT_TRANSLATION_SCOPE', ToolPrompts.getDESC_LIST_CONTENT_TRANSLATION_SCOPE())
+    appendSection(sb, 'CMS_CONTENT_DESC_LIST_CONTENT_DEPENDENCY_SCOPE', ToolPrompts.getDESC_LIST_CONTENT_DEPENDENCY_SCOPE())
     appendSection(sb, 'CMS_DEVELOPMENT_DESC_GET_CONTENT_TYPE_FORM_DEFINITION', ToolPrompts.getDESC_GET_CONTENT_TYPE_FORM_DEFINITION())
     appendSection(sb, 'CMS_CONTENT_DESC_WRITE_CONTENT', ToolPrompts.getDESC_WRITE_CONTENT())
     appendSection(sb, 'CMS_CONTENT_DESC_TRANSFORM_CONTENT_SUBGRAPH', ToolPrompts.getDESC_TRANSFORM_CONTENT_SUBGRAPH())

@@ -69,7 +69,7 @@ for (Object raw : (List) agents) {
   String llmModel = a.llmModel?.toString()?.trim() ?: 'gpt-4o-mini'
   String imageModel = a.imageModel?.toString()?.trim() ?: ''
   String imageGenerator = a.imageGenerator?.toString()?.trim() ?: ''
-  String openAiApiKey = a.openAiApiKey?.toString()
+  String llmApiKey = a.llmApiKey?.toString()
   boolean manageOtherAgentsHumanTasks =
     Boolean.TRUE.equals(a.get('manageOtherAgentsHumanTasks')) ||
     'true'.equalsIgnoreCase(a.get('manageOtherAgentsHumanTasks')?.toString())
@@ -125,7 +125,7 @@ for (Object raw : (List) agents) {
     llmModel                    : llmModel,
     imageModel                  : imageModel,
     imageGenerator              : imageGenerator,
-    openAiApiKey                : openAiApiKey,
+    llmApiKey                : llmApiKey,
     manageOtherAgentsHumanTasks : manageOtherAgentsHumanTasks,
     startAutomatically          : startAutomatically,
     stopOnFailure               : stopOnFailure

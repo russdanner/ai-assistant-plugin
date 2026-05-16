@@ -5,16 +5,16 @@ import org.springframework.ai.openai.api.common.OpenAiApiConstants
 import java.util.Locale
 
 /**
- * API keys, default models, and tools-loop {@link org.springframework.ai.openai.api.OpenAiApi} base URLs
- * for non-OpenAI {@link StudioAiLlmKind} values. RestClient + {@code OpenAiApi} append {@code /v1/chat/completions}
+ * API keys, default models, and tools-loop {@link org.springframework.ai.openai.api.Api} base URLs
+ * for non-OpenAI {@link StudioAiLlmKind} values. RestClient + {@code Api} append {@code /v1/chat/completions}
  * to the base URL — bases here must <strong>not</strong> include a trailing {@code /v1}.
  */
 final class StudioAiProviderCredentials {
 
   private StudioAiProviderCredentials() {}
 
-  /** Spring {@link OpenAiApi} + native RestClient tools loop: host-only style base (no trailing {@code /v1}). */
-  static String wireOpenAiRestBaseUrl(String llmNormalized) {
+  /** Spring {@link Api} + native RestClient tools loop: host-only style base (no trailing {@code /v1}). */
+  static String wireLlmRestBaseUrl(String llmNormalized) {
     String n = (llmNormalized ?: '').toString()
     if (StudioAiLlmKind.OPENAI_NATIVE == n) {
       return (OpenAiApiConstants.DEFAULT_BASE_URL ?: 'https://api.openai.com').toString().replaceAll(/\/+$/, '')
@@ -22,14 +22,14 @@ final class StudioAiProviderCredentials {
     if (StudioAiLlmKind.XAI_NATIVE == n) {
       return firstNonBlank(
         System.getenv('XAI_OPENAI_BASE_URL'),
-        System.getProperty('crafter.xai.openAiBaseUrl'),
+        System.getProperty('crafter.xai.llmBaseUrl'),
         'https://api.x.ai'
       )
     }
     if (StudioAiLlmKind.DEEPSEEK_NATIVE == n) {
       return firstNonBlank(
         System.getenv('DEEPSEEK_OPENAI_BASE_URL'),
-        System.getProperty('crafter.deepseek.openAiBaseUrl'),
+        System.getProperty('crafter.deepseek.llmBaseUrl'),
         'https://api.deepseek.com'
       )
     }
@@ -37,7 +37,7 @@ final class StudioAiProviderCredentials {
       return firstNonBlank(
         System.getenv('LLAMA_OPENAI_BASE_URL'),
         System.getenv('OLLAMA_OPENAI_BASE_URL'),
-        System.getProperty('crafter.llama.openAiBaseUrl'),
+        System.getProperty('crafter.llama.llmBaseUrl'),
         'http://127.0.0.1:11434'
       )
     }
@@ -45,7 +45,7 @@ final class StudioAiProviderCredentials {
       return firstNonBlank(
         System.getenv('GEMINI_OPENAI_BASE_URL'),
         System.getenv('GOOGLE_GENAI_OPENAI_BASE_URL'),
-        System.getProperty('crafter.gemini.openAiBaseUrl'),
+        System.getProperty('crafter.gemini.llmBaseUrl'),
         'https://generativelanguage.googleapis.com/v1beta/openai'
       )
     }
@@ -54,10 +54,10 @@ final class StudioAiProviderCredentials {
 
   /**
    * Absolute URL for {@link java.net.HttpURLConnection} simple completions (must match
-   * {@link org.springframework.ai.openai.api.OpenAiApi} path rules for the same provider).
+   * {@link org.springframework.ai.openai.api.Api} path rules for the same provider).
    */
   static String httpChatCompletionsUrl(String llmNormalized) {
-    String b = wireOpenAiRestBaseUrl(llmNormalized).replaceAll(/\/+$/, '')
+    String b = wireLlmRestBaseUrl(llmNormalized).replaceAll(/\/+$/, '')
     if (b.endsWith('/v1')) {
       return b + '/chat/completions'
     }
@@ -66,14 +66,14 @@ final class StudioAiProviderCredentials {
 
   /**
    * Absolute POST URL for OpenAI Images-compatible {@code /v1/images/generations}.
-   * Defaults to the same host family as {@link #wireOpenAiRestBaseUrl}{@code (OPENAI_NATIVE)}; override with
-   * {@code OPENAI_IMAGES_OPENAI_BASE_URL} or JVM {@code crafter.openai.imagesOpenAiBaseUrl} when using a compatible proxy.
+   * Defaults to the same host family as {@link #wireLlmRestBaseUrl}{@code (OPENAI_NATIVE)}; override with
+   * {@code OPENAI_IMAGES_OPENAI_BASE_URL} or JVM {@code crafter.openai.imagesBaseUrl} when using a compatible proxy.
    */
-  static String httpOpenAiImagesGenerationsUrl() {
+  static String httpLlmImagesGenerationsUrl() {
     String b = firstNonBlank(
       System.getenv('OPENAI_IMAGES_OPENAI_BASE_URL'),
-      System.getProperty('crafter.openai.imagesOpenAiBaseUrl'),
-      wireOpenAiRestBaseUrl(StudioAiLlmKind.OPENAI_NATIVE)
+      System.getProperty('crafter.openai.imagesBaseUrl'),
+      wireLlmRestBaseUrl(StudioAiLlmKind.OPENAI_NATIVE)
     )
     b = b.replaceAll(/\/+$/, '')
     if (b.endsWith('/v1')) {
@@ -86,7 +86,7 @@ final class StudioAiProviderCredentials {
     String n = (llmNormalized ?: '').toString()
     String w = (fromWidgetOrRequest ?: '').toString().trim()
     if (StudioAiLlmKind.OPENAI_NATIVE == n) {
-      return resolveOpenAiStyleKey(
+      return resolveLlmProviderApiKey(
         'OPENAI_API_KEY',
         'crafter.openai.apiKey',
         'OPENAI_API_KEY',
@@ -94,7 +94,7 @@ final class StudioAiProviderCredentials {
       )
     }
     if (StudioAiLlmKind.XAI_NATIVE == n) {
-      return resolveOpenAiStyleKey(
+      return resolveLlmProviderApiKey(
         'XAI_API_KEY',
         'crafter.xai.apiKey',
         'XAI_API_KEY',
@@ -102,7 +102,7 @@ final class StudioAiProviderCredentials {
       )
     }
     if (StudioAiLlmKind.DEEPSEEK_NATIVE == n) {
-      return resolveOpenAiStyleKey(
+      return resolveLlmProviderApiKey(
         'DEEPSEEK_API_KEY',
         'crafter.deepseek.apiKey',
         'DEEPSEEK_API_KEY',
@@ -111,7 +111,7 @@ final class StudioAiProviderCredentials {
     }
     if (StudioAiLlmKind.LLAMA_NATIVE == n) {
       // Ollama often accepts any non-empty placeholder; still allow env for hosted tools-loop Llama endpoints.
-      String k = resolveOpenAiStyleKey(
+      String k = resolveLlmProviderApiKey(
         'LLAMA_API_KEY',
         'crafter.llama.apiKey',
         'LLAMA_API_KEY',
@@ -120,12 +120,12 @@ final class StudioAiProviderCredentials {
       return k ?: 'ollama'
     }
     if (StudioAiLlmKind.GEMINI_NATIVE == n) {
-      return resolveOpenAiStyleKey(
+      return resolveLlmProviderApiKey(
         'GEMINI_API_KEY',
         'crafter.gemini.apiKey',
         'GOOGLE_API_KEY',
         w
-      ) ?: resolveOpenAiStyleKey(
+      ) ?: resolveLlmProviderApiKey(
         'GOOGLE_API_KEY',
         'crafter.google.apiKey',
         'GOOGLE_API_KEY',
@@ -138,16 +138,16 @@ final class StudioAiProviderCredentials {
   static String apiKeyResolutionSourceForLog(String llmNormalized) {
     String n = (llmNormalized ?: '').toString()
     if (StudioAiLlmKind.OPENAI_NATIVE == n) {
-      return openAiStyleSource('OPENAI_API_KEY', 'crafter.openai.apiKey', 'OPENAI_API_KEY')
+      return llmStyleSource('OPENAI_API_KEY', 'crafter.openai.apiKey', 'OPENAI_API_KEY')
     }
     if (StudioAiLlmKind.XAI_NATIVE == n) {
-      return openAiStyleSource('XAI_API_KEY', 'crafter.xai.apiKey', 'XAI_API_KEY')
+      return llmStyleSource('XAI_API_KEY', 'crafter.xai.apiKey', 'XAI_API_KEY')
     }
     if (StudioAiLlmKind.DEEPSEEK_NATIVE == n) {
-      return openAiStyleSource('DEEPSEEK_API_KEY', 'crafter.deepseek.apiKey', 'DEEPSEEK_API_KEY')
+      return llmStyleSource('DEEPSEEK_API_KEY', 'crafter.deepseek.apiKey', 'DEEPSEEK_API_KEY')
     }
     if (StudioAiLlmKind.LLAMA_NATIVE == n) {
-      return openAiStyleSource('LLAMA_API_KEY', 'crafter.llama.apiKey', 'LLAMA_API_KEY')
+      return llmStyleSource('LLAMA_API_KEY', 'crafter.llama.apiKey', 'LLAMA_API_KEY')
     }
     if (StudioAiLlmKind.GEMINI_NATIVE == n) {
       if (System.getenv('GEMINI_API_KEY')?.toString()?.trim()) return 'GEMINI_API_KEY(env)'
@@ -199,10 +199,10 @@ final class StudioAiProviderCredentials {
   static String missingApiKeyMessage(String llmNormalized) {
     String n = (llmNormalized ?: '').toString()
     if (StudioAiLlmKind.XAI_NATIVE == n) {
-      return 'LLM is xAI but no API key was found. Set XAI_API_KEY or JVM crafter.xai.apiKey on Studio. For local testing only, optional agent <openAiApiKey> in ui.xml (see docs/using-and-extending/llm-configuration.md).'
+      return 'LLM is xAI but no API key was found. Set XAI_API_KEY or JVM crafter.xai.apiKey on Studio. For local testing only, optional agent <llmApiKey> in ui.xml (see docs/using-and-extending/llm-configuration.md).'
     }
     if (StudioAiLlmKind.DEEPSEEK_NATIVE == n) {
-      return 'LLM is DeepSeek but no API key was found. Set DEEPSEEK_API_KEY or JVM crafter.deepseek.apiKey on Studio. For local testing only, optional agent <openAiApiKey> in ui.xml.'
+      return 'LLM is DeepSeek but no API key was found. Set DEEPSEEK_API_KEY or JVM crafter.deepseek.apiKey on Studio. For local testing only, optional agent <llmApiKey> in ui.xml.'
     }
     if (StudioAiLlmKind.LLAMA_NATIVE == n) {
       return 'LLM is llama (tools-loop host) but no key was resolved. Set LLAMA_API_KEY / crafter.llama.apiKey for hosted endpoints, or rely on the Ollama default placeholder when the server does not require a secret.'
@@ -228,7 +228,7 @@ final class StudioAiProviderCredentials {
           'The OpenAI chat model is not configured properly. Set the agent LLM / llmModel in Studio (for example ui.xml), pass llmModel on the chat request, or set JVM property crafter.openai.model to a valid OpenAI chat model id.'
         )
       }
-      return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.openAiCanonicalizeApiModelToken(raw)
+      return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.llmCanonicalizeApiModelToken(raw)
     }
     if (!raw) {
       if (StudioAiLlmKind.XAI_NATIVE == n) {
@@ -246,11 +246,11 @@ final class StudioAiProviderCredentials {
         "The chat model is not configured for llm='${n}'. Set <llmModel> on the agent or pass llmModel on the request (or JVM crafter.*.model for this provider)."
       )
     }
-    return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.openAiCanonicalizeApiModelToken(raw)
+    return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.llmCanonicalizeApiModelToken(raw)
   }
 
   static String resolveAnthropicApiKey(String fromWidgetOrRequest = null) {
-    resolveOpenAiStyleKey(
+    resolveLlmProviderApiKey(
       'ANTHROPIC_API_KEY',
       'crafter.anthropic.apiKey',
       'ANTHROPIC_API_KEY',
@@ -259,7 +259,7 @@ final class StudioAiProviderCredentials {
   }
 
   static String anthropicApiKeySourceForLog() {
-    openAiStyleSource('ANTHROPIC_API_KEY', 'crafter.anthropic.apiKey', 'ANTHROPIC_API_KEY')
+    llmStyleSource('ANTHROPIC_API_KEY', 'crafter.anthropic.apiKey', 'ANTHROPIC_API_KEY')
   }
 
   static String resolveAnthropicChatModel(String fromRequestOrAgent) {
@@ -270,7 +270,7 @@ final class StudioAiProviderCredentials {
     if (!raw) {
       throw new IllegalStateException('The Claude model is not configured. Set agent llmModel or JVM crafter.anthropic.model.')
     }
-    return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.openAiCanonicalizeApiModelToken(raw)
+    return plugins.org.craftercms.aiassistant.orchestration.AiOrchestration.llmCanonicalizeApiModelToken(raw)
   }
 
   private static String firstNonBlank(String... vals) {
@@ -282,7 +282,7 @@ final class StudioAiProviderCredentials {
     return ''
   }
 
-  private static String resolveOpenAiStyleKey(String envName, String jvmPrimary, String jvmAlt, String widget) {
+  private static String resolveLlmProviderApiKey(String envName, String jvmPrimary, String jvmAlt, String widget) {
     def e = System.getenv(envName)
     if (e?.toString()?.trim()) return e.toString().trim()
     def p = System.getProperty(jvmPrimary)
@@ -292,7 +292,7 @@ final class StudioAiProviderCredentials {
     return (widget ?: '').toString().trim()
   }
 
-  private static String openAiStyleSource(String envName, String jvmPrimary, String jvmAlt) {
+  private static String llmStyleSource(String envName, String jvmPrimary, String jvmAlt) {
     if (System.getenv(envName)?.toString()?.trim()) return "${envName}(env)"
     if (System.getProperty(jvmPrimary)?.trim()) return "${jvmPrimary}(jvm)"
     if (System.getProperty(jvmAlt)?.trim()) return "${jvmAlt}(jvm)"

@@ -23,8 +23,9 @@ class StudioAiRuntimeBuildRequest {
   /** Result of {@link StudioAiLlmKind#normalize(String)}. */
   String llmNormalized
 
-  String openAiModelParam
-  String openAiApiKeyFromRequest
+  String llmModelParam
+  /** Optional per-agent key from POST / ui.xml ({@code llmApiKey}); {@link OpenAiSpringAiLlmRuntime} maps this to {@code apiKeyFromRequest}. */
+  String llmApiKeyFromRequest
   Closure toolProgressListener
   /** OpenAI Images API default model from agent **{@code <imageModel>}** / POST **{@code imageModel}** only (no JVM fallback). */
   String imageModelParam

@@ -77,6 +77,24 @@ try {
       // non-mutable request in some contexts
     }
   }
+  def normContentPath = AuthoringPreviewContext.normalizeRepoPath(contentPathBody?.toString())
+  if (normContentPath) {
+    try {
+      request.setAttribute('aiassistant.contentPath', normContentPath)
+    } catch (Throwable ignoredCp) {}
+  }
+  def normFormItemPath = AuthoringPreviewContext.normalizeRepoPath(body?.formEngineItemPath?.toString())
+  if (normFormItemPath) {
+    try {
+      request.setAttribute('aiassistant.formEngineItemPath', normFormItemPath)
+    } catch (Throwable ignoredFp) {}
+  }
+  def ctIdBody = contentTypeIdBody?.toString()?.trim()
+  if (ctIdBody) {
+    try {
+      request.setAttribute('aiassistant.contentTypeId', ctIdBody)
+    } catch (Throwable ignoredCt) {}
+  }
   def previewTokenBody = body?.previewToken?.toString()?.trim()
   if (previewTokenBody) {
     try {
@@ -126,7 +144,7 @@ try {
   def imageModelRaw = body?.imageModel?.toString()
   def imageModel = null
   if (imageModelRaw?.trim()) {
-    imageModel = AiOrchestration.normalizeOpenAiImagesApiModelId(imageModelRaw.trim())
+    imageModel = AiOrchestration.normalizeImagesApiModelId(imageModelRaw.trim())
     if (body instanceof Map) {
       try {
         body.put('imageModel', imageModel)

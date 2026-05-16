@@ -154,7 +154,7 @@ export function entryToChatAgent(entry: CentralAgentFileEntry): AgentConfig | nu
   if (typeof entry.imageModel === 'string' && entry.imageModel.trim()) out.imageModel = entry.imageModel.trim();
   if (typeof entry.imageGenerator === 'string' && entry.imageGenerator.trim())
     out.imageGenerator = entry.imageGenerator.trim();
-  if (typeof entry.openAiApiKey === 'string' && entry.openAiApiKey.trim()) out.openAiApiKey = entry.openAiApiKey.trim();
+  if (typeof entry.llmApiKey === 'string' && entry.llmApiKey.trim()) out.llmApiKey = entry.llmApiKey.trim();
   if (enableTools !== undefined) out.enableTools = enableTools;
   const popRaw = entry.openAsPopup;
   if (popRaw === true || String(popRaw ?? '').trim().toLowerCase() === 'true') out.openAsPopup = true;
@@ -187,7 +187,7 @@ export function entryToAutonomousDefinition(entry: CentralAgentFileEntry): Auton
     entry.imageGenerator != null && String(entry.imageGenerator).trim()
       ? String(entry.imageGenerator).trim()
       : undefined;
-  const openAiApiKey = entry.openAiApiKey != null ? String(entry.openAiApiKey).trim() : undefined;
+  const llmApiKey = entry.llmApiKey != null ? String(entry.llmApiKey).trim() : undefined;
   const manageOtherAgentsHumanTasks =
     entry.manageOtherAgentsHumanTasks === true ||
     String(entry.manageOtherAgentsHumanTasks ?? '').toLowerCase() === 'true';
@@ -208,7 +208,7 @@ export function entryToAutonomousDefinition(entry: CentralAgentFileEntry): Auton
     llmModel,
     ...(imageModel ? { imageModel } : {}),
     ...(imageGenerator ? { imageGenerator } : {}),
-    ...(openAiApiKey ? { openAiApiKey } : {}),
+    ...(llmApiKey ? { llmApiKey } : {}),
     ...(manageOtherAgentsHumanTasks ? { manageOtherAgentsHumanTasks: true } : {}),
     ...(startAutomatically === false ? { startAutomatically: false } : {}),
     ...(stopOnFailure === false ? { stopOnFailure: false } : {})

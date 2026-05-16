@@ -17,9 +17,9 @@ import java.util.Map
  * Built-in {@code POST …/v1/images/generations} HTTP wire for {@link StudioAiImageGenerator}. Not tied to the chat LLM vendor:
  * credentials and base URL come from {@link StudioAiImageGenContext}.
  */
-final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
+final class CompatibleImageGenerator implements StudioAiImageGenerator {
 
-  private static final Logger LOG = LoggerFactory.getLogger(OpenAiCompatibleImageGenerator.class)
+  private static final Logger LOG = LoggerFactory.getLogger(CompatibleImageGenerator.class)
 
   @Override
   Map generate(Map input, StudioAiImageGenContext ctx) {
@@ -29,7 +29,7 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
     }
     String urlPost = (ctx?.imagesGenerationsHttpUrl ?: '').toString().trim()
     if (!urlPost) {
-      urlPost = StudioAiProviderCredentials.httpOpenAiImagesGenerationsUrl()
+      urlPost = StudioAiProviderCredentials.httpLlmImagesGenerationsUrl()
     }
     return postImagesGenerations(apiKey, urlPost, (ctx?.defaultImageModel ?: '').toString(), (Map) (input ?: [:]))
   }
@@ -37,7 +37,7 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
   /**
    * JSON body for {@code POST /v1/images/generations} — assembled as a string so no accidental extra keys are merged.
    */
-  static String buildOpenAiImagesGenerationsRequestJson(String model, String prompt, String size, String quality) {
+  static String buildImagesGenerationsRequestJson(String model, String prompt, String size, String quality) {
     String mLower = model.toLowerCase(Locale.US)
     boolean gptFamily = mLower.startsWith('gpt-image') || mLower.startsWith('chatgpt-image')
     StringBuilder sb = new StringBuilder(Math.max(96, prompt.length() + 96))
@@ -72,19 +72,19 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
     if (!modelRaw?.trim()) {
       return [error: true, message: 'No image model configured']
     }
-    String model = AiOrchestration.normalizeOpenAiImagesApiModelId(AiOrchestration.openAiCanonicalizeApiModelToken(modelRaw))
+    String model = AiOrchestration.normalizeImagesApiModelId(AiOrchestration.llmCanonicalizeApiModelToken(modelRaw))
     if (!model?.trim()) {
       return [error: true, message: 'No image model configured']
     }
     def size = input?.size?.toString()?.trim()
     def quality = input?.quality?.toString()?.trim()
-    model = AiOrchestration.normalizeOpenAiImagesApiModelId(model)
+    model = AiOrchestration.normalizeImagesApiModelId(model)
     if (!model?.trim()) {
       return [error: true, message: 'No image model configured']
     }
-    String body = buildOpenAiImagesGenerationsRequestJson(model, prompt, size, quality)
+    String body = buildImagesGenerationsRequestJson(model, prompt, size, quality)
     if (LOG.isDebugEnabled()) {
-      LOG.debug('OpenAiCompatibleImageGenerator wireJson={}', AiHttpProxy.elideForLog(body, 900))
+      LOG.debug('CompatibleImageGenerator wireJson={}', AiHttpProxy.elideForLog(body, 900))
     }
     HttpURLConnection conn = null
     try {
@@ -113,7 +113,7 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
         }
         if (errMsg?.contains('response_format')) {
           LOG.warn(
-            'OpenAiCompatibleImageGenerator HTTP {} — provider mentioned response_format; JSON is built without that field. attemptElided={}',
+            'CompatibleImageGenerator HTTP {} — provider mentioned response_format; JSON is built without that field. attemptElided={}',
             code,
             AiHttpProxy.elideForLog(body, 700)
           )
@@ -162,7 +162,7 @@ final class OpenAiCompatibleImageGenerator implements StudioAiImageGenerator {
         : 'Image URL expires; for CMS use, download and upload to /static-assets/ then reference in content.'
       return out
     } catch (Throwable t) {
-      LOG.warn('OpenAiCompatibleImageGenerator failed: {}', t.toString())
+      LOG.warn('CompatibleImageGenerator failed: {}', t.toString())
       return [error: true, message: (t.message ?: t.toString())]
     } finally {
       try {
