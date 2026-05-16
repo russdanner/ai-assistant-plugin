@@ -15,15 +15,15 @@ plugin:
     minor: 0
     patch: 0
   description: AI Assistant — Studio chat, form control, tools, and autonomous agents. Requires a configured LLM provider per agent (see plugin docs).
-  documentation: "https://raw.githubusercontent.com/craftercms/CrafterQ Studio -plugin/main/README.md"
+  documentation: "https://raw.githubusercontent.com/russdanner/ai-assistant-plugin/main/README.md"
   website:
     name: AI Assistant Studio Plugin
-    url: https://github.com/craftercms/crafterQ-plugin
+    url: https://github.com/russdanner/ai-assistant-plugin
   media:
     screenshots:
       - title: Crafter Studio AI Assistant Plugin
         description: CrafterCMS Crafter Studio AI Assistant Plugin
-        url: "https://raw.githubusercontent.com/craftercms/CrafterQ Studio -plugin/main/.crafter/logo.png"
+        url: "https://raw.githubusercontent.com/russdanner/ai-assistant-plugin/main/.crafter/logo.png"
   developer:
     company:
       name: CrafterCMS

@@ -36,10 +36,11 @@ import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
  */
 
 def log = LoggerFactory.getLogger('plugins.org.craftercms.aiassistant.chat')
-def body = AiHttpProxy.parseJsonBody(request)
-if (Boolean.TRUE.equals(body?.get('__aiassistantInvalidJson'))) {
+def parsedBody = AiHttpProxy.parseJsonBody(request)
+def body = parsedBody instanceof Map ? (Map) parsedBody : [:]
+if (Boolean.TRUE.equals(body.get('__aiassistantInvalidJson'))) {
   response.setStatus(HttpServletResponse.SC_BAD_REQUEST)
-  return [ok: false, message: 'Invalid JSON request body', detail: body?.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
+  return [ok: false, message: 'Invalid JSON request body', detail: body.get('__aiassistantInvalidJsonDetail')?.toString() ?: '']
 }
 def agentId = body.agentId != null ? body.agentId.toString().trim() : ''
 def prompt = body.prompt?.toString()

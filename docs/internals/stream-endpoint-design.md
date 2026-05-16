@@ -1,6 +1,6 @@
 # AI Streaming Endpoint Design
 
-Companion to **[`spec.md`](spec.md)** for SSE/stream wire behavior. When stream URLs, body fields, or server-side stream semantics change, update **this file** and the relevant sections of **`spec.md`.
+Companion to [spec.md](spec.md) for SSE/stream wire behavior. When stream URLs, body fields, or server-side stream semantics change, update **this file** and the relevant sections of **`spec.md`**.
 
 **Internals** — SSE contract and server-side stream behavior. **LLM matrix & keys:** [llm-configuration.md](../using-and-extending/llm-configuration.md). **Doc index:** [README.md](../README.md).
 

@@ -21,7 +21,8 @@ import plugins.org.craftercms.aiassistant.tools.StudioToolOperations
  * }
  * </pre>
  */
-def body = AiHttpProxy.parseJsonBody(request, 33_554_432) ?: [:]
+// Cap must exceed base64+JSON size for a 25 MiB raw image (see StudioToolOperations.MAX_REMOTE_IMAGE_BYTES) — ~35 MiB payload.
+def body = AiHttpProxy.parseJsonBody(request, 40 * 1024 * 1024) ?: [:]
 if (Boolean.TRUE.equals(body.get('__aiassistantInvalidJson'))) {
   response.status = HttpServletResponse.SC_BAD_REQUEST
   String detail = body.get('__aiassistantInvalidJsonDetail')?.toString() ?: ''
