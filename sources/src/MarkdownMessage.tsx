@@ -155,18 +155,45 @@ export function wrapBareLongDataImageUrlsAsMarkdown(input: string, minUrlChars =
   return parts.join('');
 }
 
+/** Apply data:image compaction only outside fenced ``` code blocks (preserve literal examples in fences). */
+function preprocessAssistantMarkdownImagesSegment(
+  text: string,
+  longDataImageBlobRefMap: Map<string, string>
+): string {
+  const normalized = normalizeLlmLiteralEscapes(text);
+  const compactData = compactAllDataImageBase64Runs(normalized);
+  const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
+  const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
+  return wrapDataImageMarkdownDestInAngleBrackets(shortened);
+}
+
 /** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
 export function preprocessAssistantMarkdownImages(text: string): {
   displayText: string;
   longDataImageBlobRefMap: Map<string, string>;
 } {
   const longDataImageBlobRefMap = new Map<string, string>();
-  const normalized = normalizeLlmLiteralEscapes(text);
-  const compactData = compactAllDataImageBase64Runs(normalized);
-  const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
-  const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
-  const displayText = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-  return { displayText, longDataImageBlobRefMap };
+  if (!text || text.indexOf('```') < 0) {
+    return {
+      displayText: preprocessAssistantMarkdownImagesSegment(text, longDataImageBlobRefMap),
+      longDataImageBlobRefMap
+    };
+  }
+  const fenceRe = /```[^\n]*\n[\s\S]*?```/g;
+  const parts: string[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = fenceRe.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last, m.index), longDataImageBlobRefMap));
+    }
+    parts.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last), longDataImageBlobRefMap));
+  }
+  return { displayText: parts.join(''), longDataImageBlobRefMap };
 }
 
 /**

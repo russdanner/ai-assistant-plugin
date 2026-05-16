@@ -13,7 +13,7 @@ export function redactSessionLogLineForCopy(s: string): string {
 }
 
 function previewText(s: string, max = TEXT_PREVIEW_CHARS): string {
-  const t = (s || '').trim();
+  const t = redactSessionLogLineForCopy((s || '').trim());
   if (!t) return '(empty)';
   if (t.length <= max) return t;
   return `${t.slice(0, max)}… [+${t.length - max} chars — see VERBATIM]`;
@@ -209,8 +209,9 @@ function buildParsedTimeline(lines: string[]): string {
 
 export function formatSessionLogForDebugCopy(lines: string[]): string {
   const generatedAt = new Date().toISOString();
-  const timeline = buildParsedTimeline(lines);
-  const verbatim = lines.map(redactSessionLogLineForCopy).join('\n');
+  const redactedLines = lines.map(redactSessionLogLineForCopy);
+  const timeline = buildParsedTimeline(redactedLines);
+  const verbatim = redactedLines.join('\n');
 
   return [
     '==============================================================================',

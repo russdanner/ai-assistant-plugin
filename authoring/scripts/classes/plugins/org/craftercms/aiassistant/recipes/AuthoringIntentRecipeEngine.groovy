@@ -33,6 +33,7 @@ final class AuthoringIntentRecipeEngine {
     'GetContent',
     'GetContentTypeFormDefinition',
     'ListContentTranslationScope',
+    'ListContentDependencyScope',
     'ListStudioContentTypes',
     'GetContentVersionHistory',
     'GetPreviewHtml'
@@ -280,6 +281,7 @@ final class AuthoringIntentRecipeEngine {
           throw new IllegalArgumentException('Provide contentPath or contentTypeId for GetContentTypeFormDefinition')
         }
         return ops.getContentTypeFormDefinition(siteId, contentTypeId)
+      case 'ListContentDependencyScope':
       case 'ListContentTranslationScope':
         String cp = input?.contentPath?.toString()?.trim() ?: input?.path?.toString()?.trim()
         if (!siteId || !cp) {
@@ -595,7 +597,9 @@ final class AuthoringIntentRecipeEngine {
     if (!m.find()) {
       return ''
     }
-    return m.replaceFirst('<' + tag + '>' + inner + '</' + tag + '>')
+    return m.replaceFirst(
+      Matcher.quoteReplacement('<' + tag + '>' + inner + '</' + tag + '>')
+    )
   }
 
   private static String formatContentFieldInnerXml(String fieldId, String plain) {

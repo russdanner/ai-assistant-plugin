@@ -339,27 +339,6 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
 
   if (!trimmed) return null;
 
-  if (isAbsoluteHttp && remoteHttpFetchFailed) {
-    return (
-      <Box
-        sx={{
-          my: 1,
-          display: 'inline-block',
-          maxWidth: '100%',
-          borderRadius: 1,
-          border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
-          bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
-          px: 1.25,
-          py: 1
-        }}
-      >
-        <Typography variant="caption" color="text.secondary" component="p" sx={{ m: 0 }}>
-          Image preview unavailable.
-        </Typography>
-      </Box>
-    );
-  }
-
   const canDrag = !isRemote || Boolean(effectiveSite);
   const caption = isRemote
     ? 'Drag onto an image field in preview (imports when you drop)'
@@ -416,6 +395,11 @@ export default function StudioDraggableImage(props: Readonly<StudioDraggableImag
         >
           <CircularProgress size={28} sx={{ color: '#fff' }} />
         </Box>
+      )}
+      {isAbsoluteHttp && remoteHttpFetchFailed && (
+        <Typography variant="caption" color="text.secondary" component="p" sx={{ px: 1, py: 0.5, m: 0 }}>
+          Preview unavailable — drag still imports the remote URL.
+        </Typography>
       )}
       <Box
         sx={{

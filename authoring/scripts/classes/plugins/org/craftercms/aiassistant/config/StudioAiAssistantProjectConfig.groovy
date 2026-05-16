@@ -204,10 +204,19 @@ final class StudioAiAssistantProjectConfig {
       return 0.55d
     }
     try {
+      double conf
       if (v instanceof Number) {
-        return ((Number) v).doubleValue()
+        conf = ((Number) v).doubleValue()
+      } else {
+        conf = Double.parseDouble(v.toString().trim())
       }
-      return Double.parseDouble(v.toString().trim())
+      if (conf < 0.0d) {
+        return 0.0d
+      }
+      if (conf > 1.0d) {
+        return 1.0d
+      }
+      return conf
     } catch (Throwable ignored) {
       return 0.55d
     }

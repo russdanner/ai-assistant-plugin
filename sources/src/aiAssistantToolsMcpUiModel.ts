@@ -31,10 +31,7 @@ const INTENT_RECIPE_ROUTING_KNOWN_KEYS = new Set([
   'engineEnabled',
   'minConfidence',
   'requestClarificationOnUnmatched',
-  'customRecipesPath',
-  'engineMaxSteps',
-  'engineMaxTotalChars',
-  'engineMaxFieldChars'
+  'customRecipesPath'
 ]);
 
 export interface IntentRecipeRoutingFormState {

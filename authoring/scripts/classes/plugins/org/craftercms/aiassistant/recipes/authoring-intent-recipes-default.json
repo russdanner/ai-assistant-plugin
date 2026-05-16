@@ -4,13 +4,12 @@
     {
       "id": "modify_page_content",
       "title": "Modify page or component content",
-      "description": "Change copy, tone, grammar, translate, or field values on a page or component XML item; author does not ask for new FreeMarker, form-definition schema, or site-wide discovery only.",
-      "matchHints": ["update", "change", "translate", "rewrite", "this page", "proofread", "grammar", "tone", "rephrase", "localize", "look up", "lyrics", "fetch", "hero title"],
+      "description": "Change copy, tone, grammar, or field values on a page or component XML item in the same language; author does not ask to translate/localize, generate a new bitmap, change FreeMarker/templates, or run site-wide discovery only.",
+      "matchHints": ["update", "change", "rewrite", "proofread", "grammar", "tone", "rephrase", "look up", "fetch", "lyrics", "hero title"],
       "phases": {
         "context": {
           "hints": [
-            "Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters).",
-            "For full-page visible copy, consider ListContentTranslationScope from the page path before editing multiple items."
+            "Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters)."
           ],
           "engineSteps": [
             {
@@ -28,6 +27,56 @@
         ],
         "confirmation": [
           "When an Engine preview URL exists, use GetPreviewHtml after substantive writes affecting rendered output."
+        ]
+      }
+    },
+    {
+      "id": "translate_content_item",
+      "title": "Translate or localize content",
+      "description": "Author explicitly asks to translate or localize page/component copy into another language. Use TranslateContentItem or TranslateContentBatch (with ListContentTranslationScope for full-page scope) — not update_content or same-language rewrite via GetContent→WriteContent.",
+      "matchHints": ["translate", "translation", "localize", "localise", "localization", "localisation", "language", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Chinese", "Korean", "Arabic", "Dutch", "Polish", "Russian"],
+      "phases": {
+        "context": {
+          "hints": [
+            "When the author means full page / everything visible / this page copy: ListContentTranslationScope once on the anchored contentPath, then TranslateContentBatch (same target language for every path) or TranslateContentItem per path — never call ListContentTranslationScope twice in one turn without a write in between.",
+            "When scope is only the open repository item: TranslateContentItem on that contentPath is enough; skip ListContentTranslationScope unless they expand scope mid-task.",
+            "GetContentTypeFormDefinition only when you need unknown field ids."
+          ],
+          "engineSteps": [
+            {
+              "tool": "GetContent",
+              "args": { "siteId": "$siteId", "path": "$contentPath" }
+            },
+            {
+              "tool": "GetContentTypeFormDefinition",
+              "args": { "siteId": "$siteId", "contentPath": "$contentPath" }
+            }
+          ]
+        },
+        "action": [
+          "TranslateContentItem or TranslateContentBatch with explicit target language/locale from the author message; reuse the first ListContentTranslationScope result for batch paths."
+        ],
+        "confirmation": [
+          "Optional GetPreviewHtml when preview URL exists after substantive translation writes."
+        ]
+      }
+    },
+    {
+      "id": "generate_image",
+      "title": "Generate image (bitmap)",
+      "description": "Author wants a new AI-generated image, illustration, hero art, cover, logo, or picture — not a CMS XML field edit, translation, or template change. Use GenerateImage in the first tool round unless they explicitly ask to save into a repository field in the same turn.",
+      "matchHints": ["generate", "draw", "image", "picture", "illustration", "hero", "cover", "banner", "logo", "artwork", "graphic", "bitmap", "sketch", "paint"],
+      "toolsLoopAllowlist": ["GenerateImage"],
+      "toolsLoopAllowlistBypassIfAuthorMentions": ["WriteContent", "write content", "save to", "update_content", "image-picker", "static-assets", "upload to repo"],
+      "phases": {
+        "context": [
+          "Build the GenerateImage prompt from the author's exact words plus any page/topic context already in the message; do not run GetContent unless subject detail for the prompt is still missing."
+        ],
+        "action": [
+          "Call GenerateImage in the first tool round with a concrete prompt; optional size/quality only when the author specified them."
+        ],
+        "confirmation": [
+          "Wrap up in short prose only — the bitmap appears in the Studio chat image strip, not markdown image syntax."
         ]
       }
     },

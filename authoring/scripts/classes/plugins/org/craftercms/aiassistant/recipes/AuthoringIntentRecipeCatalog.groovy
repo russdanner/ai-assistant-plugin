@@ -43,14 +43,11 @@ final class AuthoringIntentRecipeCatalog {
     {
       "id": "modify_page_content",
       "title": "Modify page or component content",
-      "description": "Change copy, tone, grammar, translate, or field values on a page or component XML item; author does not ask for new FreeMarker, form-definition schema, or site-wide discovery only.",
-      "matchHints": ["update", "change", "translate", "rewrite", "this page", "proofread", "grammar", "tone", "rephrase", "localize"],
+      "description": "Change copy, tone, grammar, or field values on a page or component XML item in the same language; author does not ask to translate/localize, generate a new bitmap, change FreeMarker/templates, or run site-wide discovery only.",
+      "matchHints": ["update", "change", "rewrite", "proofread", "grammar", "tone", "rephrase", "look up", "fetch", "lyrics", "hero title"],
       "phases": {
         "context": {
-          "hints": [
-            "Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters).",
-            "For full-page visible copy, consider ListContentTranslationScope from the page path before editing multiple items."
-          ],
+          "hints": ["Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters)."],
           "engineSteps": [
             { "tool": "GetContent", "args": { "siteId": "$siteId", "path": "$contentPath" } },
             { "tool": "GetContentTypeFormDefinition", "args": { "siteId": "$siteId", "contentPath": "$contentPath" } }
@@ -58,6 +55,39 @@ final class AuthoringIntentRecipeCatalog {
         },
         "action": ["Use update_content or GetContent → revise XML → WriteContent; preserve <page>/<component> structure and node-selector shapes."],
         "confirmation": ["When an Engine preview URL exists, use GetPreviewHtml after substantive writes affecting rendered output."]
+      }
+    },
+    {
+      "id": "translate_content_item",
+      "title": "Translate or localize content",
+      "description": "Author explicitly asks to translate or localize page/component copy into another language. Use TranslateContentItem or TranslateContentBatch (with ListContentTranslationScope for full-page scope) — not update_content or same-language rewrite via GetContent→WriteContent.",
+      "matchHints": ["translate", "translation", "localize", "localise", "localization", "localisation", "language"],
+      "phases": {
+        "context": {
+          "hints": [
+            "Full page / this page: ListContentTranslationScope once on contentPath, then TranslateContentBatch or TranslateContentItem per path.",
+            "Open item only: TranslateContentItem on contentPath; skip ListContentTranslationScope unless scope expands."
+          ],
+          "engineSteps": [
+            { "tool": "GetContent", "args": { "siteId": "$siteId", "path": "$contentPath" } },
+            { "tool": "GetContentTypeFormDefinition", "args": { "siteId": "$siteId", "contentPath": "$contentPath" } }
+          ]
+        },
+        "action": ["TranslateContentItem or TranslateContentBatch with explicit target language from the author."],
+        "confirmation": ["Optional GetPreviewHtml when preview URL exists after translation writes."]
+      }
+    },
+    {
+      "id": "generate_image",
+      "title": "Generate image (bitmap)",
+      "description": "Author wants a new AI-generated image, illustration, hero art, cover, logo, or picture — not a CMS XML field edit, translation, or template change. Use GenerateImage in the first tool round unless they explicitly ask to save into a repository field in the same turn.",
+      "matchHints": ["generate", "draw", "image", "picture", "illustration", "hero", "cover", "logo"],
+      "toolsLoopAllowlist": ["GenerateImage"],
+      "toolsLoopAllowlistBypassIfAuthorMentions": ["WriteContent", "write content", "save to", "update_content", "image-picker", "static-assets"],
+      "phases": {
+        "context": ["Build GenerateImage prompt from author words; skip GetContent unless prompt detail is missing."],
+        "action": ["Call GenerateImage in the first tool round with a concrete prompt."],
+        "confirmation": ["Short prose wrap-up only — image appears in the Studio chat image strip."]
       }
     },
     {

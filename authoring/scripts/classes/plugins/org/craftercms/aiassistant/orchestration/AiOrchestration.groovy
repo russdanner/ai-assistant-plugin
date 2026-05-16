@@ -1899,6 +1899,21 @@ For **content XML** (pages/components): do not invent a new element tree — pre
   }
 
   /**
+   * Author asked to translate/localize into another language — route to {@code translate_content_item}, not {@code modify_page_content}.
+   */
+  private static boolean authorRequestLooksLikeTranslateIntent(String cand, String visible) {
+    String probe = (visible ?: '').trim() ?: (cand ?: '').trim()
+    if (!probe) {
+      return false
+    }
+    if (plainTextLooksLikeImageOnlyGenerateRequest((visible ?: '').trim() ?: probe)) {
+      return false
+    }
+    String low = probe.toLowerCase(Locale.ROOT)
+    return low =~ /(?s).*\b(translate|translation|localize|localise|localization|localisation)\b.*/
+  }
+
+  /**
    * Deterministic {@code modify_page_content} when anchored XML + field target is known (including lyrics lookup).
    */
   private static boolean intentRecipeDeterministicMatchForFieldEdit(
@@ -1907,6 +1922,9 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     String authorFieldLabelEarly,
     boolean concreteField
   ) {
+    if (authorRequestLooksLikeTranslateIntent(cand, visible)) {
+      return false
+    }
     if ((authorFieldLabelEarly ?: '').trim() && concreteField) {
       return true
     }
@@ -3422,6 +3440,44 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       }
       boolean concreteField =
         authorRequestIsConcreteFieldEdit(cand) || authorRequestIsConcreteFieldEdit(visible)
+      if (plainTextLooksLikeImageOnlyGenerateRequest(visible)) {
+        Map recipeImg = AuthoringIntentRecipeCatalog.findRecipeById(recipes, 'generate_image')
+        if (recipeImg != null) {
+          log.info('Intent recipe routing: deterministic match generate_image (image-only author request)')
+          return intentRecipeRoutingAttachMatchedRecipe(
+            ops,
+            cfg,
+            result,
+            userTextAfterGuard,
+            recipeImg,
+            'generate_image',
+            1.0d,
+            StudioAiAssistantProjectConfig.intentRecipeMinConfidence(cfg),
+            'deterministic_image_only',
+            visible,
+            null
+          )
+        }
+      }
+      if (authorRequestLooksLikeTranslateIntent(cand, visible)) {
+        Map recipeTr = AuthoringIntentRecipeCatalog.findRecipeById(recipes, 'translate_content_item')
+        if (recipeTr != null) {
+          log.info('Intent recipe routing: deterministic match translate_content_item')
+          return intentRecipeRoutingAttachMatchedRecipe(
+            ops,
+            cfg,
+            result,
+            userTextAfterGuard,
+            recipeTr,
+            'translate_content_item',
+            1.0d,
+            StudioAiAssistantProjectConfig.intentRecipeMinConfidence(cfg),
+            'deterministic_translate_intent',
+            visible,
+            null
+          )
+        }
+      }
       if (intentRecipeDeterministicMatchForFieldEdit(cand, visible, authorFieldLabelEarly, concreteField)) {
         Map bindEarly = ops.recipeEngineAuthoringBindings()
         String anchorEarly = (bindEarly?.contentPath ?: '').toString().trim()
