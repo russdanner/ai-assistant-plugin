@@ -452,7 +452,7 @@ If the bundle exceeds ~280k characters, the tool fails — narrow **maxDepth**/s
   }
 
   static String nextStepUpdateContent(String contentPath) {
-    return "Edit the **full** `contentXml` from this result in place: keep the same root and field element names (`formFieldIds` / form definition). Then call `WriteContent` with: `siteId` (same as this call), `path='${contentPath}'`, `contentXml=` the **entire** updated document (not a fragment or empty string — empty XML corrupts the repo), `unlock='true'` (or omit)."
+    return "Edit the **full** `contentXml` from this result in place: keep the same root and field element names (`formFieldIds` / form definition). Then call `WriteContent` with: `siteId` (same as this call), `path='${contentPath}'`, `contentXml=` the **entire** updated document (not a fragment or empty string — empty XML corrupts the repo), `unlock='true'` (or omit). **Do not** invent partial XML (e.g. `<hero><title>…</title></hero>`) — copy the full `<page>` or `<component>` from this tool result, change one field, then write."
   }
 
   static String nextStepUpdateContentType(String configPath) {

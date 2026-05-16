@@ -151,6 +151,40 @@ class StudioToolOperations {
    * with a clear tool error instead of a partial Studio pipeline failure after IO.
    * Skipped for non-{@code .xml} paths (e.g. {@code .ftl}) where the body is not XML.
    */
+  /** {@code ==~} is full-string match in Groovy; Crafter items often have a license comment before {@code <page>}. */
+  private static boolean xmlBodyContainsCrafterItemRootElement(String xmlUtf8) {
+    String s = (xmlUtf8 ?: '').toString()
+    if (!s.trim()) {
+      return false
+    }
+    return (s =~ /(?is)<(page|component)(\s[^>]*)?>/).find() ||
+      (s =~ /(?is)<(page|component)\s*\/>/).find()
+  }
+
+  /**
+   * True when {@code xmlUtf8} looks like a full Crafter page/component item (same rules as write guard).
+   */
+  static boolean looksLikeFullCrafterSiteContentItemDocument(String pathLabel, String xmlUtf8) {
+    if (!isLikelyXmlRepositoryPath(pathLabel)) {
+      return true
+    }
+    String p = (pathLabel ?: '').toString().trim().toLowerCase(Locale.ROOT)
+    if (!p.startsWith('/site/')) {
+      return true
+    }
+    String t = (xmlUtf8 ?: '').toString().trim()
+    if (!t) {
+      return false
+    }
+    if (!xmlBodyContainsCrafterItemRootElement(t)) {
+      return false
+    }
+    if (!t.contains('<content-type>') && !t.contains('<file-name>') && !t.contains('<merge-strategy>')) {
+      return false
+    }
+    return true
+  }
+
   /**
    * Refuses field fragments or non-item bodies for {@code /site/.../*.xml} writes (common LLM failure mode that
    * passes SAX well-formedness but breaks Engine render with HTTP 500).
@@ -167,19 +201,13 @@ class StudioToolOperations {
     if (!t) {
       return
     }
-    if (t.startsWith('<?xml')) {
-      int declEnd = t.indexOf('?>')
-      if (declEnd >= 0) {
-        t = t.substring(declEnd + 2).trim()
+    if (!looksLikeFullCrafterSiteContentItemDocument(pathLabel, t)) {
+      if (!xmlBodyContainsCrafterItemRootElement(t)) {
+        throw new IllegalArgumentException(
+          "contentXml for '${pathLabel}' must be a full Crafter content item with root <page> or <component>, not a field fragment or partial snippet. " +
+            'Call GetContent (or update_content), edit field values in place, then WriteContent the entire document.'
+        )
       }
-    }
-    if (!(t ==~ /(?is)<(page|component)(\s[^>]*)?>/) && !(t ==~ /(?is)<(page|component)\s*\/>/)) {
-      throw new IllegalArgumentException(
-        "contentXml for '${pathLabel}' must be a full Crafter content item with root <page> or <component>, not a field fragment or partial snippet. " +
-          'Call GetContent (or update_content), edit field values in place, then WriteContent the entire document.'
-      )
-    }
-    if (!t.contains('<content-type>') && !t.contains('<file-name>') && !t.contains('<merge-strategy>')) {
       throw new IllegalArgumentException(
         "contentXml for '${pathLabel}' is missing typical Crafter item markers (<content-type>, <file-name>, or <merge-strategy>). " +
           'Refusing to write — re-fetch with GetContent and send the full item XML.'

@@ -135,7 +135,26 @@ class AuthoringPreviewContext {
   }
 
   private static final Pattern CMS_TASK_SIGNAL = Pattern.compile(
-    '(?i)(\\b(translat|localiz|publish|deploy|go\\s+live|revert|update|edit|change|rewrite|rephrase|delete|create|write|draft|generate\\s+image|draw|fix|content|templates?|template|css|scss|less|stylesheet|styling|branding|mockup|theme|layout|ftl|freemarker|component|sections?_o|writecontent|listpages|getcontent|static-assets|update_template|analyze_template)\\b|https?://|\\blook\\s+like\\b|\\bsimilar\\s+to\\b|\\bmatch(es)?\\b|\\bsite\\b|\\bwebsite\\b)'
+    '(?i)(\\b(translat|localiz|publish|deploy|go\\s+live|revert|update|edit|change|rewrite|rephrase|delete|create|write|draft|put|add|place|insert|set|generate\\s+image|draw|fix|content|templates?|template|css|scss|less|stylesheet|styling|branding|mockup|theme|layout|ftl|freemarker|component|sections?_o|writecontent|listpages|getcontent|static-assets|update_template|analyze_template|hero|headline|subtitle|lyrics?)\\b|https?://|\\blook\\s+like\\b|\\bsimilar\\s+to\\b|\\bmatch(es)?\\b|\\bsite\\b|\\bwebsite\\b)'
+  )
+
+  /** Preview/form anchor + author names a repository field target (e.g. “put … in the hero title”). */
+  private static final Pattern ANCHORED_FIELD_PLACEMENT = Pattern.compile(
+    '(?i)(\\b(put|place|add|insert|set)\\b.+\\b(in|into)\\b.+\\b(hero|title|headline|subtitle|body|copy|text|field|excerpt|nav|label)\\b|' +
+      '\\b(hero|title|headline|subtitle)\\b.+\\b(with|to)\\b|' +
+      '\\bupdate\\b.+\\b(hero|title|headline|subtitle)\\b)'
+  )
+
+  private static final Pattern REPOSITORY_PATH_IN_PROMPT = Pattern.compile(
+    '(?im)^Repository path:\\s*(\\S+)\\s*$'
+  )
+
+  private static final Pattern CURRENT_REQUEST_SECTION = Pattern.compile(
+    '(?is)Current request:\\s*\\n(.*)\\z'
+  )
+
+  private static final Pattern SHORT_CMS_CONTINUATION_AFFIRMATION = Pattern.compile(
+    '(?is)^(yes|yeah|yep|ok|okay|let\'?s\\s+do\\s+it|do\\s+it|go\\s+ahead|please\\s+do|sure|confirm|sounds\\s+good|proceed)[\\s!.?]*$'
   )
 
   /**
@@ -166,6 +185,57 @@ class AuthoringPreviewContext {
     return v && CMS_TASK_SIGNAL.matcher(v).find()
   }
 
+  /** {@code Repository path: /site/...} from a Studio request anchor block, when present. */
+  static String extractAnchoredRepositoryPath(String fullPrompt) {
+    def s = (fullPrompt ?: '').toString()
+    if (!s.trim()) {
+      return ''
+    }
+    def m = REPOSITORY_PATH_IN_PROMPT.matcher(s)
+    return m.find() ? normalizeRepoPath(m.group(1)) : ''
+  }
+
+  /**
+   * Author wants to place or change copy on the open {@code /site/.../*.xml} item (hero title, body field, etc.)
+   * even when they did not say “update” / “edit”.
+   */
+  static boolean anchoredSiteXmlFieldPlacementIntent(String fullPrompt) {
+    def anchor = extractAnchoredRepositoryPath(fullPrompt)
+    if (!anchor || !anchor.toLowerCase(Locale.ROOT).startsWith('/site/') ||
+      !anchor.toLowerCase(Locale.ROOT).endsWith('.xml')) {
+      return false
+    }
+    def v = stripStudioInjectedPromptBlocks((fullPrompt ?: '').toString())?.trim()
+    return v && ANCHORED_FIELD_PLACEMENT.matcher(v).find()
+  }
+
+  /**
+   * Short “yes / let’s do it” after a prior turn that already scoped CMS work on the anchored item.
+   */
+  static boolean isShortAffirmationContinuingPriorCmsWork(String fullPrompt) {
+    def s = (fullPrompt ?: '').toString()
+    if (!s.contains('[Prior conversation')) {
+      return false
+    }
+    def currentVisible = ''
+    def cm = CURRENT_REQUEST_SECTION.matcher(s)
+    if (cm.find()) {
+      currentVisible = stripStudioInjectedPromptBlocks(cm.group(1) ?: '')?.trim() ?: ''
+    }
+    if (!currentVisible || !SHORT_CMS_CONTINUATION_AFFIRMATION.matcher(currentVisible).matches()) {
+      return false
+    }
+    if (!extractAnchoredRepositoryPath(s)) {
+      return false
+    }
+    def prior = s
+    def curIdx = s.indexOf('Current request:')
+    if (curIdx > 0) {
+      prior = s.substring(0, curIdx)
+    }
+    return authorVisibleSuggestsCmsTooling(prior) || anchoredSiteXmlFieldPlacementIntent(prior)
+  }
+
   /**
    * True when the author-visible text names an {@code http(s)} URL or a **likely external host** (e.g. {@code google.com}
    * without a scheme).
@@ -188,6 +258,9 @@ class AuthoringPreviewContext {
    */
   static String intentRecipeRouterEligibilitySkipReason(String fullPrompt) {
     if (isTrivialNonAuthoringTurn(fullPrompt)) {
+      if (isShortAffirmationContinuingPriorCmsWork(fullPrompt)) {
+        return null
+      }
       return 'trivial_non_authoring_turn'
     }
     def v = stripStudioInjectedPromptBlocks((fullPrompt ?: '').toString())
@@ -198,6 +271,9 @@ class AuthoringPreviewContext {
       return 'visible_exceeds_1600_chars'
     }
     if (!authorVisibleSuggestsCmsTooling(fullPrompt)) {
+      if (anchoredSiteXmlFieldPlacementIntent(fullPrompt)) {
+        return null
+      }
       return 'no_cms_task_signal'
     }
     if (v.length() <= AUTHORING_INTENT_EXPANSION_SHORT_VISIBLE_MAX_CHARS) {
@@ -232,7 +308,10 @@ class AuthoringPreviewContext {
       return true
     }
     // Any CMS / site / template signal — never force tools off (check before length heuristics).
-    if (authorVisibleSuggestsCmsTooling(fullPrompt)) {
+    if (authorVisibleSuggestsCmsTooling(fullPrompt) || anchoredSiteXmlFieldPlacementIntent(fullPrompt)) {
+      return false
+    }
+    if (isShortAffirmationContinuingPriorCmsWork(fullPrompt)) {
       return false
     }
     if (visible.length() > 160) {

@@ -131,6 +131,70 @@ final class AuthoringIntentRecipeEngine {
     ]
   }
 
+  /**
+   * Runs {@code modify_page_content} engine steps without the intent-router LLM when Studio already knows
+   * the anchor repository path (preview/form context) and the author named a single field edit.
+   */
+  static Map bootstrapConcreteFieldEditPrefetch(StudioToolOperations ops, Map projectCfg, String authorFieldLabelPhrase) {
+    Map empty = [
+      applied                     : Boolean.FALSE,
+      markdown                    : '',
+      prefetchSteps               : [],
+      prefetchEnvelopeTruncated   : Boolean.FALSE,
+      resolvedFieldId             : '',
+      resolvedFieldLabel          : '',
+      duplicateGetContentBanned   : Boolean.FALSE,
+      contentPath                 : '',
+      contentXml                  : ''
+    ]
+    if (ops == null || projectCfg == null) {
+      return empty
+    }
+    if (!StudioAiAssistantProjectConfig.intentRecipeEngineEnabled(projectCfg)) {
+      return empty
+    }
+    String label = (authorFieldLabelPhrase ?: '').toString().trim()
+    if (!label) {
+      return empty
+    }
+    Map bindings = ops.recipeEngineAuthoringBindings()
+    String anchorPath = (bindings?.get('contentPath') ?: '').toString().trim()
+    if (!anchorPath || !anchorPath.toLowerCase(Locale.ROOT).startsWith('/site/') ||
+      !anchorPath.toLowerCase(Locale.ROOT).endsWith('.xml')) {
+      return empty
+    }
+    List recipes = AuthoringIntentRecipeCatalog.loadRecipes(ops, projectCfg)
+    Map recipe = AuthoringIntentRecipeCatalog.findRecipeById(recipes, 'modify_page_content')
+    if (recipe == null) {
+      return empty
+    }
+    Map pfb = runPrefetchBlock(ops, recipe, projectCfg)
+    String markdown = (pfb?.markdown ?: '').toString()
+    Map fieldHot = buildSimpleFieldEditHotpathExtras(markdown, label)
+    String fieldId = (fieldHot?.resolvedFieldId ?: '').toString().trim()
+    if (!fieldId) {
+      return empty
+    }
+    Map gc = extractPrefetchSuccessfulGetContent(markdown)
+    String contentXml = (gc?.contentXml ?: '').toString()
+    String path = (gc?.path ?: anchorPath).toString().trim()
+    if (!contentXml?.trim()) {
+      return empty
+    }
+    Map hotMeta = buildPrefetchHotpathDirective(ops, markdown)
+    return [
+      applied                     : Boolean.TRUE,
+      markdown                    : markdown,
+      prefetchSteps               : pfb.prefetchSteps instanceof List ? (List) pfb.prefetchSteps : [],
+      prefetchEnvelopeTruncated   : Boolean.TRUE.equals(pfb.prefetchEnvelopeTruncated),
+      resolvedFieldId             : fieldId,
+      resolvedFieldLabel          : (fieldHot?.resolvedFieldLabel ?: label).toString(),
+      duplicateGetContentBanned   : Boolean.TRUE.equals(hotMeta?.duplicateGetContentBanned),
+      contentPath                 : path,
+      contentXml                  : contentXml
+    ]
+  }
+
   private static Map resolveArgsMap(Map template, Map bindings, List<Map> priorResults) {
     Map out = new LinkedHashMap<>()
     for (Map.Entry e : template.entrySet()) {
@@ -535,11 +599,51 @@ final class AuthoringIntentRecipeEngine {
   }
 
   private static String formatContentFieldInnerXml(String fieldId, String plain) {
-    String t = escapeXmlElementText((plain ?: '').trim())
-    if (fieldId.endsWith('_html')) {
-      return '<![CDATA[<p>' + t + '</p>]]>'
+    String raw = (plain ?: '').trim()
+    if (!raw) {
+      return ''
     }
-    return t
+    if (fieldId.endsWith('_html')) {
+      if (raw.contains('\n')) {
+        return formatRteCdataFromPlainText(raw)
+      }
+      return '<![CDATA[<p>' + escapeXmlElementText(raw) + '</p>]]>'
+    }
+    return escapeXmlElementText(raw)
+  }
+
+  /** Plain text / lyrics with newlines → RTE CDATA with {@code <p>} and {@code <br/>}. */
+  private static String formatRteCdataFromPlainText(String plain) {
+    String[] blocks = plain.split(/\n\s*\n+/)
+    StringBuilder sb = new StringBuilder('<![CDATA[')
+    boolean wrote = false
+    for (String block : blocks) {
+      String b = (block ?: '').trim()
+      if (!b) {
+        continue
+      }
+      sb.append('<p>')
+      String[] lines = b.split(/\r?\n/)
+      boolean firstLine = true
+      for (String lineRaw : lines) {
+        String line = (lineRaw ?: '').trim()
+        if (!line) {
+          continue
+        }
+        if (!firstLine) {
+          sb.append('<br/>')
+        }
+        sb.append(escapeXmlElementText(line))
+        firstLine = false
+      }
+      sb.append('</p>')
+      wrote = true
+    }
+    if (!wrote) {
+      sb.append('<p>').append(escapeXmlElementText(plain.trim())).append('</p>')
+    }
+    sb.append(']]>')
+    return sb.toString()
   }
 
   private static String escapeXmlElementText(String s) {

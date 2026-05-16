@@ -1771,9 +1771,8 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     return v.length() <= 600 ? v : v.substring(Math.max(0, v.length() - 600))
   }
 
-  /** Field label from "update the hero title to …" / "… with …" (not the new value). */
-  private static String extractAuthorFieldLabelPhrase(String authorVisible) {
-    String tail = authorVisibleTailForOutcomePhrase(authorVisible)
+  private static String extractAuthorFieldLabelFromLine(String line) {
+    String tail = (line ?: '').trim()
     if (!tail) {
       return ''
     }
@@ -1785,7 +1784,37 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     if (mWith.matches()) {
       return mWith.group(1)?.trim() ?: ''
     }
+    def mPutIn = (tail =~ /(?is)\bput\b(?:\s+(?:them|it|those|that|the))?\s+(?:in|into)\s+(?:the\s+)?(.+?)\s*\.?\s*$/)
+    if (mPutIn.find()) {
+      return mPutIn.group(1)?.trim() ?: ''
+    }
+    def mAddTo = (tail =~ /(?is)\badd\b.+\bto\s+(?:the\s+)?(.+?)\s*\.?\s*$/)
+    if (mAddTo.find()) {
+      return mAddTo.group(1)?.trim() ?: ''
+    }
     return ''
+  }
+
+  /** Field label from "update the hero title to …" / "put … in the hero title" (not the new value). */
+  private static String extractAuthorFieldLabelPhrase(String authorVisible) {
+    String fromTail = extractAuthorFieldLabelFromLine(authorVisibleTailForOutcomePhrase(authorVisible))
+    if (fromTail) {
+      return fromTail
+    }
+    if (!(authorVisible ?: '').contains('User:')) {
+      return ''
+    }
+    String found = ''
+    def m = (authorVisible =~ /(?is)User:\s*([\s\S]*?)(?=\n\nAssistant:|\n\nUser:|\n\nCurrent request:|\z)/)
+    while (m.find()) {
+      String block = (m.group(1) ?: '').trim()
+      String firstLine = block.split(/\r?\n/).find { (it ?: '').trim() } ?: ''
+      String label = extractAuthorFieldLabelFromLine(firstLine)
+      if (label) {
+        found = label
+      }
+    }
+    return found
   }
 
   /** True when the author already named a concrete field-level edit (skip pre-tools intent expansion). */
@@ -1794,35 +1823,180 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     if (!tail) {
       return false
     }
-    return (tail =~ /(?is)^(?:update|change|set|replace)\s+(?:the\s+)?[\w\s'-]+\s+to\s+\S.+$/).matches() ||
-      (tail =~ /(?is)^(?:update|change|set|replace)\s+(?:the\s+)?[\w\s'-]+\s+with\s+\S.+$/).matches()
+    if ((tail =~ /(?is)^(?:update|change|set|replace)\s+(?:the\s+)?[\w\s'-]+\s+to\s+\S.+$/).matches() ||
+      (tail =~ /(?is)^(?:update|change|set|replace)\s+(?:the\s+)?[\w\s'-]+\s+with\s+\S.+$/).matches()) {
+      return true
+    }
+    return AuthoringPreviewContext.anchoredSiteXmlFieldPlacementIntent(authorVisible ?: '')
+  }
+
+  /**
+   * Author needs externally resolved copy (lyrics lookup, fetch text) before a field write — not a literal hotpath value.
+   */
+  private static boolean authorRequestNeedsExternalContentResolution(String authorVisible) {
+    String tail = authorVisibleTailForOutcomePhrase(authorVisible)
+    String scan = [tail, (authorVisible ?: '').toString()].findAll { it?.trim() }.join('\n')
+    if (!scan?.trim()) {
+      return false
+    }
+    if ((scan =~ /(?is)\b(look\s*up|fetch|retrieve|get|find|search\s+for)\b.{0,160}\b(lyrics?|song|poem)\b/).find()) {
+      return true
+    }
+    if ((scan =~ /(?is)\b(look\s*up|fetch|get)\b.{0,60}\b(lyrics?|text)\b/).find()) {
+      return true
+    }
+    if ((scan =~ /(?is)\bwith\s+the\s+lyrics\s+of\b/).find()) {
+      return true
+    }
+    if ((scan =~ /(?is)\b(?:lyrics?|song)\s+of\s+/).find()) {
+      return true
+    }
+    if ((scan =~ /(?is)\b(lyrics?)\s+to\s+/).find() && (scan =~ /(?is)\band\s+update\b/).find()) {
+      return true
+    }
+    return false
+  }
+
+  /** True when {@code phrase} is meta-instruction text, not CMS body copy to publish. */
+  private static boolean outcomePhraseLooksLikeInstructionNotContent(String phrase) {
+    String p = (phrase ?: '').trim()
+    if (!p) {
+      return true
+    }
+    String low = p.toLowerCase(Locale.ROOT)
+    if ((low =~ /(?is)\b(look\s*up|fetch|get|find)\b/).find()) {
+      return true
+    }
+    if ((low =~ /(?is)\b(and\s+)?update\s+(the\s+)?(hero\s+)?title\b/).find()) {
+      return true
+    }
+    if ((low =~ /(?is)\bthe\s+lyrics\s+of\b/).find() || (low =~ /(?is)\blyrics?\s+of\b/).find()) {
+      return true
+    }
+    if ((low =~ /(?is)\b(update|change|set|replace)\b/).find() &&
+      (low =~ /(?is)\b(hero\s+title|page\s+title|field)\b/).find()) {
+      return true
+    }
+    return false
+  }
+
+  /** Hotpath may write {@code phrase} only when it is literal author copy, not a deferred lookup instruction. */
+  private static boolean isUsableHotpathOutcomePhrase(String phrase, String authorVisible) {
+    String p = (phrase ?: '').trim()
+    if (!p) {
+      return false
+    }
+    if (authorRequestNeedsExternalContentResolution(authorVisible ?: '')) {
+      return false
+    }
+    if (outcomePhraseLooksLikeInstructionNotContent(p)) {
+      return false
+    }
+    if (p.contains('\n') && p.length() >= 24) {
+      return true
+    }
+    return p.length() <= 280
+  }
+
+  /**
+   * Deterministic {@code modify_page_content} when anchored XML + field target is known (including lyrics lookup).
+   */
+  private static boolean intentRecipeDeterministicMatchForFieldEdit(
+    String cand,
+    String visible,
+    String authorFieldLabelEarly,
+    boolean concreteField
+  ) {
+    if ((authorFieldLabelEarly ?: '').trim() && concreteField) {
+      return true
+    }
+    if (!authorRequestNeedsExternalContentResolution(cand) && !authorRequestNeedsExternalContentResolution(visible)) {
+      return false
+    }
+    String label = (authorFieldLabelEarly ?: '').trim()
+    if (!label) {
+      label = extractAuthorFieldLabelPhrase(cand) ?: extractAuthorFieldLabelPhrase(visible)
+    }
+    if (!label && ((cand ?: '') + '\n' + (visible ?: '')) =~ /(?is)\bhero\s+title\b/) {
+      label = 'hero title'
+    }
+    return (label ?: '').length() > 0
   }
 
   /** Phrase the author asked to appear in content (e.g. "Russ was Here" from "… with Russ was Here"). */
   private static String extractAuthoringOutcomePhrase(String authorVisible) {
     String v = authorVisibleTailForOutcomePhrase(authorVisible)
-    if (!v) {
-      return ''
-    }
-    def mTo = (v =~ /(?is)\b(?:update|change|set|replace)\s+.+?\s+to\s+(.+)$/)
-    if (mTo.matches()) {
-      return normalizeOutcomePhrase(mTo.group(1))
-    }
-    def m1 = (v =~ /(?is)\b(?:update|change|set|replace)\s+(?:the\s+)?[\w\s-]+?\s+with\s+(.+)$/)
-    if (m1.matches()) {
-      return normalizeOutcomePhrase(m1.group(1))
-    }
-    def m2 = (v =~ /(?is)\b(?:to|with)\s+["']([^"']+)["']/)
-    if (m2.find()) {
-      return normalizeOutcomePhrase(m2.group(1))
-    }
-    if (v.length() <= 400) {
-      def m3 = (v =~ /(?is)\b(?:to|with)\s+(.+)$/)
-      if (m3.find()) {
-        return normalizeOutcomePhrase(m3.group(1))
+    if (v) {
+      if (!authorRequestNeedsExternalContentResolution(authorVisible)) {
+        def mTo = (v =~ /(?is)\b(?:update|change|set|replace)\s+.+?\s+to\s+(.+)$/)
+        if (mTo.matches()) {
+          String cap = normalizeOutcomePhrase(mTo.group(1))
+          if (isUsableHotpathOutcomePhrase(cap, authorVisible)) {
+            return cap
+          }
+        }
+        def m1 = (v =~ /(?is)\b(?:update|change|set|replace)\s+(?:the\s+)?[\w\s-]+?\s+with\s+(.+)$/)
+        if (m1.matches()) {
+          String cap = normalizeOutcomePhrase(m1.group(1))
+          if (isUsableHotpathOutcomePhrase(cap, authorVisible)) {
+            return cap
+          }
+        }
+        def m2 = (v =~ /(?is)\b(?:to|with)\s+["']([^"']+)["']/)
+        if (m2.find()) {
+          String cap = normalizeOutcomePhrase(m2.group(1))
+          if (isUsableHotpathOutcomePhrase(cap, authorVisible)) {
+            return cap
+          }
+        }
+        if (v.length() <= 400) {
+          def m3 = (v =~ /(?is)\b(?:to|with)\s+(.+)$/)
+          if (m3.find()) {
+            String cap = normalizeOutcomePhrase(m3.group(1))
+            if (isUsableHotpathOutcomePhrase(cap, authorVisible)) {
+              return cap
+            }
+          }
+        }
       }
     }
+    String fromPrior = extractOutcomeFromPriorAssistantContentBlock(authorVisible)
+    if (isUsableHotpathOutcomePhrase(fromPrior, authorVisible)) {
+      return fromPrior
+    }
     return ''
+  }
+
+  /**
+   * After “let’s do it”, reuse prose the assistant already produced (e.g. lyrics in a fenced block) as write payload.
+   */
+  private static String extractOutcomeFromPriorAssistantContentBlock(String fullPrompt) {
+    String s = (fullPrompt ?: '').toString()
+    if (!s.contains('[Prior conversation') || !AuthoringPreviewContext.isShortAffirmationContinuingPriorCmsWork(s)) {
+      return ''
+    }
+    int curIdx = s.indexOf('Current request:')
+    String prior = curIdx > 0 ? s.substring(0, curIdx) : s
+    int lastAssist = prior.toLowerCase(Locale.ROOT).lastIndexOf('assistant:')
+    if (lastAssist < 0) {
+      return ''
+    }
+    String assistBody = prior.substring(lastAssist + 'assistant:'.length()).trim()
+    int fenceStart = assistBody.indexOf('```')
+    if (fenceStart < 0) {
+      return ''
+    }
+    int contentStart = assistBody.indexOf('\n', fenceStart)
+    if (contentStart < 0) {
+      return ''
+    }
+    contentStart++
+    int fenceEnd = assistBody.indexOf('```', contentStart)
+    if (fenceEnd <= contentStart) {
+      return ''
+    }
+    String block = assistBody.substring(contentStart, fenceEnd).trim()
+    return block.length() > 12_000 ? block.substring(0, 12_000).trim() : block
   }
 
   private static String normalizeOutcomePhrase(String s) {
@@ -2994,11 +3168,21 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     if (!AuthoringPreviewContext.isAuthoringIntentExpansionCandidate(cand)) {
       return guard
     }
-    if (authorRequestIsConcreteFieldEdit(cand)) {
-      log.debug('maybePrependAuthoringIntentExpansionBlock: skip — concrete field-level edit')
+    boolean needsExternal =
+      authorRequestNeedsExternalContentResolution(cand) || authorRequestNeedsExternalContentResolution(guard)
+    if (!needsExternal &&
+      authorRequestIsConcreteFieldEdit(cand) &&
+      isUsableHotpathOutcomePhrase(extractAuthoringOutcomePhrase(cand), cand)) {
+      log.debug('maybePrependAuthoringIntentExpansionBlock: skip — concrete field-level edit with explicit outcome text')
       return guard
     }
-    if (guard.contains('[Studio — recipe engine prefetch]') || guard.contains('[Studio — matched authoring intent recipe]')) {
+    if (needsExternal &&
+      (guard.contains('[Studio — recipe engine prefetch]') || guard.contains('[Studio — matched authoring intent recipe]'))) {
+      log.debug('maybePrependAuthoringIntentExpansionBlock: skip — external content will use server prefetch hotpath')
+      return guard
+    }
+    if (!needsExternal &&
+      (guard.contains('[Studio — recipe engine prefetch]') || guard.contains('[Studio — matched authoring intent recipe]'))) {
       log.debug('maybePrependAuthoringIntentExpansionBlock: skip — intent recipe prefetch already on wire')
       return guard
     }
@@ -3084,6 +3268,73 @@ For **content XML** (pages/components): do not invent a new element tree — pre
    *
    * @return keys: {@code clarificationOnly} (Boolean), {@code userTextForToolsLoop} (String), {@code clarificationUserText} (String body for tools-off clarification when clarificationOnly), {@code intentRecipeRoutingTelemetry} (Map with at least {@code outcome})
    */
+  private static Map intentRecipeRoutingAttachMatchedRecipe(
+    StudioToolOperations ops,
+    Map cfg,
+    Map result,
+    String userTextAfterGuard,
+    Map recipe,
+    String rid,
+    double conf,
+    double minC,
+    String routerReason,
+    String visible,
+    String authorFieldLabelOverride = null
+  ) {
+    Map pfb = AuthoringIntentRecipeEngine.runPrefetchBlock(ops, recipe, cfg)
+    String prefetch = (pfb.markdown ?: '').toString()
+    List pfbSteps = pfb.prefetchSteps instanceof List ? (List) pfb.prefetchSteps : []
+    boolean prefetchEnvTrunc = Boolean.TRUE.equals(pfb.prefetchEnvelopeTruncated)
+    boolean prefetchRan = prefetch.trim().length() > 0
+    Map hotpathMeta = AuthoringIntentRecipeEngine.buildPrefetchHotpathDirective(ops, prefetch)
+    String hotpathDirective = (hotpathMeta?.directive ?: '').toString()
+    boolean prefetchSkipRedundantGetForListedPath = Boolean.TRUE.equals(hotpathMeta?.duplicateGetContentBanned)
+    String authorFieldLabel = (authorFieldLabelOverride ?: extractAuthorFieldLabelPhrase(visible ?: '')).toString()
+    Map fieldHot = AuthoringIntentRecipeEngine.buildSimpleFieldEditHotpathExtras(prefetch, authorFieldLabel)
+    hotpathDirective = hotpathDirective + (fieldHot?.directive ?: '').toString()
+    String prefetchResolvedFieldId = (fieldHot?.resolvedFieldId ?: '').toString().trim()
+    String prefetchResolvedFieldLabel = (fieldHot?.resolvedFieldLabel ?: '').toString().trim()
+    String prelude =
+      AuthoringIntentRecipeCatalog.formatMatchedRecipePrelude(
+        recipe,
+        rid,
+        conf,
+        routerReason
+      )
+    String orchPrelude = AuthoringIntentRecipeCatalog.matchedUserPrelude(recipe)
+    if (orchPrelude) {
+      prelude = orchPrelude + '\n\n' + prelude
+    }
+    Map matchedTelExtra = new LinkedHashMap<>()
+    matchedTelExtra.putAll(AuthoringIntentRecipeCatalog.orchestrationTelemetryExtras(recipe))
+    matchedTelExtra.putAll([
+      recipeId                                     : rid,
+      confidence                                   : conf,
+      minConfidence                                : minC,
+      recipeFoundInCatalog                         : true,
+      prefetchRan                                  : prefetchRan,
+      prefetchSteps                                : pfbSteps,
+      prefetchEnvelopeTruncated                    : prefetchEnvTrunc,
+      prefetchSkipRedundantGetContentForListedPath : prefetchSkipRedundantGetForListedPath,
+      prefetchResolvedFieldId                      : prefetchResolvedFieldId,
+      prefetchResolvedFieldLabel                   : prefetchResolvedFieldLabel,
+      routerReason                                 : (routerReason ?: '').toString().trim()
+    ])
+    String externalHint = ''
+    String rr = (routerReason ?: '').toString()
+    if (rr.contains('external_content') ||
+      authorRequestNeedsExternalContentResolution(userTextAfterGuard ?: '') ||
+      authorRequestNeedsExternalContentResolution(visible ?: '')) {
+      externalHint =
+        '[Studio — the author asked to **look up / fetch** text (e.g. song lyrics) and place it in a CMS field. ' +
+        'Resolve the full lyrics or requested copy first (model knowledge or FetchHttpUrl). ' +
+        'Do **not** write the instruction sentence, song title alone, or “lyrics of …” meta-text as the field value. ' +
+        'Then GetContent → WriteContent the full resolved HTML/text on the anchored path.]\n\n'
+    }
+    result.userTextForToolsLoop = prefetch + hotpathDirective + externalHint + prelude + (userTextAfterGuard ?: '')
+    return intentRecipeAttachTelemetry(ops, cfg, result, 'matched', matchedTelExtra)
+  }
+
   static Map intentRecipeRoutingPrelude(
     String bodyPrompt,
     String userTextAfterGuard,
@@ -3165,6 +3416,48 @@ For **content XML** (pages/components): do not invent a new element tree — pre
         log.warn('Intent recipe routing skipped: author-visible text empty after strip (unexpected after eligibility pass).')
         return intentRecipeAttachTelemetry(ops, cfg, result, 'skipped_visible_empty')
       }
+      String authorFieldLabelEarly = extractAuthorFieldLabelPhrase(cand)
+      if (!authorFieldLabelEarly) {
+        authorFieldLabelEarly = extractAuthorFieldLabelPhrase(visible)
+      }
+      boolean concreteField =
+        authorRequestIsConcreteFieldEdit(cand) || authorRequestIsConcreteFieldEdit(visible)
+      if (intentRecipeDeterministicMatchForFieldEdit(cand, visible, authorFieldLabelEarly, concreteField)) {
+        Map bindEarly = ops.recipeEngineAuthoringBindings()
+        String anchorEarly = (bindEarly?.contentPath ?: '').toString().trim()
+        if (!anchorEarly) {
+          anchorEarly = AuthoringPreviewContext.extractAnchoredRepositoryPath(cand)
+        }
+        if (anchorEarly && anchorEarly.toLowerCase(Locale.ROOT).startsWith('/site/') &&
+          anchorEarly.toLowerCase(Locale.ROOT).endsWith('.xml')) {
+          Map recipeDet = AuthoringIntentRecipeCatalog.findRecipeById(recipes, 'modify_page_content')
+          if (recipeDet != null) {
+            boolean externalLookup =
+              authorRequestNeedsExternalContentResolution(cand) || authorRequestNeedsExternalContentResolution(visible)
+            String detReason = externalLookup ?
+              'deterministic_external_content_field_edit' :
+              'deterministic_concrete_field_edit'
+            log.info(
+              'Intent recipe routing: deterministic match modify_page_content ({}, anchor path={})',
+              detReason,
+              anchorEarly
+            )
+            return intentRecipeRoutingAttachMatchedRecipe(
+              ops,
+              cfg,
+              result,
+              userTextAfterGuard,
+              recipeDet,
+              'modify_page_content',
+              1.0d,
+              StudioAiAssistantProjectConfig.intentRecipeMinConfidence(cfg),
+              detReason,
+              visible,
+              authorFieldLabelEarly
+            )
+          }
+        }
+      }
       String catalogMd = AuthoringIntentRecipeCatalog.toRouterCatalogMarkdown(recipes)
       String userRouter = '## Recipe catalog\n\n' + catalogMd + '\n\n## Author message\n\n' + visible
       String rawJson = toolsLoopSimpleCompletionAssistantText(
@@ -3210,47 +3503,54 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       }
       if (matched) {
         log.info('Intent recipe routing matched recipeId={} confidence={} (minConfidence={})', rid, conf, minC)
-        Map pfb = AuthoringIntentRecipeEngine.runPrefetchBlock(ops, recipe, cfg)
-        String prefetch = (pfb.markdown ?: '').toString()
-        List pfbSteps = pfb.prefetchSteps instanceof List ? (List) pfb.prefetchSteps : []
-        boolean prefetchEnvTrunc = Boolean.TRUE.equals(pfb.prefetchEnvelopeTruncated)
-        boolean prefetchRan = prefetch.trim().length() > 0
-        Map hotpathMeta = AuthoringIntentRecipeEngine.buildPrefetchHotpathDirective(ops, prefetch)
-        String hotpathDirective = (hotpathMeta?.directive ?: '').toString()
-        boolean prefetchSkipRedundantGetForListedPath = Boolean.TRUE.equals(hotpathMeta?.duplicateGetContentBanned)
-        String authorFieldLabel = extractAuthorFieldLabelPhrase(visible)
-        Map fieldHot = AuthoringIntentRecipeEngine.buildSimpleFieldEditHotpathExtras(prefetch, authorFieldLabel)
-        hotpathDirective = hotpathDirective + (fieldHot?.directive ?: '').toString()
-        String prefetchResolvedFieldId = (fieldHot?.resolvedFieldId ?: '').toString().trim()
-        String prefetchResolvedFieldLabel = (fieldHot?.resolvedFieldLabel ?: '').toString().trim()
-        String prelude =
-          AuthoringIntentRecipeCatalog.formatMatchedRecipePrelude(
-            recipe,
-            rid,
-            conf,
-            decision.reason?.toString()
-          )
-        String orchPrelude = AuthoringIntentRecipeCatalog.matchedUserPrelude(recipe)
-        if (orchPrelude) {
-          prelude = orchPrelude + '\n\n' + prelude
+        return intentRecipeRoutingAttachMatchedRecipe(
+          ops,
+          cfg,
+          result,
+          userTextAfterGuard,
+          recipe,
+          rid,
+          conf,
+          minC,
+          decision.reason?.toString(),
+          visible,
+          null
+        )
+      }
+      if (!matched) {
+        boolean externalLookup =
+          authorRequestNeedsExternalContentResolution(cand) || authorRequestNeedsExternalContentResolution(visible)
+        String anchorFallback = AuthoringPreviewContext.extractAnchoredRepositoryPath(cand)
+        if (externalLookup && anchorFallback &&
+          anchorFallback.toLowerCase(Locale.ROOT).startsWith('/site/') &&
+          anchorFallback.toLowerCase(Locale.ROOT).endsWith('.xml')) {
+          String labelFb = extractAuthorFieldLabelPhrase(cand) ?: extractAuthorFieldLabelPhrase(visible)
+          if (!labelFb && ((cand ?: '') + (visible ?: '')) =~ /(?is)\bhero\s+title\b/) {
+            labelFb = 'hero title'
+          }
+          if (labelFb) {
+            Map recipeFb = AuthoringIntentRecipeCatalog.findRecipeById(recipes, 'modify_page_content')
+            if (recipeFb != null) {
+              log.info(
+                'Intent recipe routing: deterministic fallback modify_page_content after router no_match (external content + anchor path={})',
+                anchorFallback
+              )
+              return intentRecipeRoutingAttachMatchedRecipe(
+                ops,
+                cfg,
+                result,
+                userTextAfterGuard,
+                recipeFb,
+                'modify_page_content',
+                1.0d,
+                minC,
+                'deterministic_external_content_after_router_miss',
+                visible,
+                labelFb
+              )
+            }
+          }
         }
-        Map matchedTelExtra = new LinkedHashMap<>()
-        matchedTelExtra.putAll(AuthoringIntentRecipeCatalog.orchestrationTelemetryExtras(recipe))
-        matchedTelExtra.putAll([
-          recipeId                        : rid,
-          confidence                      : conf,
-          minConfidence                   : minC,
-          recipeFoundInCatalog            : true,
-          prefetchRan                    : prefetchRan,
-          prefetchSteps                   : pfbSteps,
-          prefetchEnvelopeTruncated      : prefetchEnvTrunc,
-          prefetchSkipRedundantGetContentForListedPath: prefetchSkipRedundantGetForListedPath,
-          prefetchResolvedFieldId         : prefetchResolvedFieldId,
-          prefetchResolvedFieldLabel      : prefetchResolvedFieldLabel,
-          routerReason                    : (decision.reason?.toString()?.trim() ?: '')
-        ])
-        result.userTextForToolsLoop = prefetch + hotpathDirective + prelude + (userTextAfterGuard ?: '')
-        return intentRecipeAttachTelemetry(ops, cfg, result, 'matched', matchedTelExtra)
       }
       if (StudioAiAssistantProjectConfig.intentRecipeRequestClarificationOnUnmatched(cfg)) {
         result.clarificationOnly = true
@@ -3443,9 +3743,37 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       return false
     }
     if (authorRequestIsConcreteFieldEdit(authorVisible ?: '')) {
-      return (intentTel.prefetchResolvedFieldId?.toString()?.trim() ?: '').length() > 0
+      return (intentTel.prefetchResolvedFieldId?.toString()?.trim() ?: '').length() > 0 &&
+        isUsableHotpathOutcomePhrase(outcomePhrase, authorVisible)
     }
-    return (outcomePhrase ?: '').trim().length() > 0
+    return isUsableHotpathOutcomePhrase(outcomePhrase, authorVisible)
+  }
+
+  /** Server write hotpath when prefetch (or bootstrap) resolved field id + full contentXml for anchor path. */
+  private static boolean serverConcreteFieldEditHotpathEligible(
+    String authorVisible,
+    String outcomePhrase,
+    String resolvedFieldId,
+    String contentXml,
+    String contentPath
+  ) {
+    boolean fieldScoped =
+      authorRequestIsConcreteFieldEdit(authorVisible ?: '') ||
+        AuthoringPreviewContext.isShortAffirmationContinuingPriorCmsWork(authorVisible ?: '')
+    if (!fieldScoped) {
+      return false
+    }
+    if (!(outcomePhrase ?: '').trim()) {
+      return false
+    }
+    if (!isUsableHotpathOutcomePhrase(outcomePhrase, authorVisible)) {
+      return false
+    }
+    if (!(resolvedFieldId ?: '').trim() || !(contentXml ?: '').trim()) {
+      return false
+    }
+    String p = (contentPath ?: '').trim()
+    return p && p.toLowerCase(Locale.ROOT).startsWith('/site/') && p.toLowerCase(Locale.ROOT).endsWith('.xml')
   }
 
   /** {@link FunctionToolCallback#call} may return a {@link Map} or JSON text; hotpath must accept both. */
@@ -3476,86 +3804,88 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     return 'written'.equalsIgnoreCase((writeRes.result ?: '').toString().trim())
   }
 
-  /**
-   * Deterministic single-field edit when intent prefetch already loaded content + resolved field id.
-   * Skips the first tools-loop {@code /v1/chat/completions} call (large prompt + tool schemas).
-   *
-   * @return assistant markdown, or {@code null} when the hotpath does not apply or fails
-   */
-  private static String tryServerPrefetchSimpleFieldEditHotpath(
-    String origUser,
-    String authorVisible,
+  /** User prompt for a single inner completion that materializes lyrics / external copy for a CMS field write. */
+  private static String buildExternalContentLookupUserPrompt(String authorVisible, String fieldLabel) {
+    String tail = authorVisibleTailForOutcomePhrase(authorVisible)
+    String label = (fieldLabel ?: '').trim()
+    StringBuilder sb = new StringBuilder()
+    sb.append('The author is editing a Crafter CMS content field')
+    if (label) {
+      sb.append(' ("').append(label).append('")')
+    }
+    sb.append('.\n\nAuthor request:\n').append(tail ?: authorVisible ?: '').append(
+      '\n\nOutput ONLY the final text to store in the field (plain text). ' +
+        'For song lyrics, include the complete standard lyrics with stanza breaks (blank lines between verses). ' +
+        'No JSON, markdown fences, explanations, or instructions.'
+    )
+    return sb.toString()
+  }
+
+  private static boolean serverExternalContentFieldEditHotpathEligible(
     Map intentTel,
+    String authorVisible,
+    String fieldId,
+    String contentXml,
+    String contentPath
+  ) {
+    if (!authorRequestNeedsExternalContentResolution(authorVisible ?: '')) {
+      return false
+    }
+    if (!(intentTel instanceof Map)) {
+      return false
+    }
+    if (!'matched'.equalsIgnoreCase(intentTel.outcome?.toString())) {
+      return false
+    }
+    if (!'modify_page_content'.equalsIgnoreCase(intentTel.recipeId?.toString())) {
+      return false
+    }
+    if (!Boolean.TRUE.equals(intentTel.prefetchSkipRedundantGetContentForListedPath)) {
+      return false
+    }
+    if (Boolean.TRUE.equals(intentTel.prefetchEnvelopeTruncated)) {
+      return false
+    }
+    if (!(fieldId ?: '').trim() || !(contentXml ?: '').trim()) {
+      return false
+    }
+    String p = (contentPath ?: '').trim()
+    return p && p.toLowerCase(Locale.ROOT).startsWith('/site/') && p.toLowerCase(Locale.ROOT).endsWith('.xml')
+  }
+
+  /**
+   * Shared write + preview verification after {@link AuthoringIntentRecipeEngine#patchContentXmlFieldValue}.
+   *
+   * @return assistant markdown, or {@code null} on failure
+   */
+  private static String completeServerPrefetchFieldWriteFromPatchedXml(
+    StudioToolOperations ops,
+    String siteId,
+    String normPath,
+    String patched,
+    String fieldId,
+    String outcomePhraseForPreview,
     Map toolsLoopSessionBundle,
     Map<String, FunctionToolCallback> byName,
+    String origUser,
     String agentId,
     OutputStream sseOut,
-    AtomicBoolean cancelRequested
+    Map toolTimingCtx = null
   ) {
-    if (cancelRequested != null && cancelRequested.get()) {
-      return null
-    }
-    if (!prefetchHotpathAllowsForcedWriteContent(
-      intentTel,
-      extractAuthoringOutcomePhrase(authorVisible),
-      authorVisible
-    )) {
-      return null
-    }
-    String fieldId = (intentTel?.prefetchResolvedFieldId ?: '').toString().trim()
-    String outcomePhrase = extractAuthoringOutcomePhrase(authorVisible)?.trim()
-    if (!fieldId || !outcomePhrase) {
-      return null
-    }
-    Map gc = AuthoringIntentRecipeEngine.extractPrefetchSuccessfulGetContent(origUser ?: '')
-    String path = (gc?.path ?: '').toString().trim()
-    String contentXml = (gc?.contentXml ?: '').toString()
-    if (!path || !contentXml?.trim()) {
-      return null
-    }
-    StudioToolOperations ops = (toolsLoopSessionBundle?.studioOps instanceof StudioToolOperations) ?
-      (StudioToolOperations) toolsLoopSessionBundle.studioOps :
-      null
-    if (ops == null) {
-      return null
-    }
-    String normPath = AuthoringPreviewContext.normalizeRepoPath(path)
-    if (!normPath) {
-      return null
-    }
-    String patched = AuthoringIntentRecipeEngine.patchContentXmlFieldValue(contentXml, fieldId, outcomePhrase)
-    if (!patched?.trim()) {
-      log.info(
-        'Tools-loop: server prefetch field hotpath skipped — could not patch field {} in contentXml agentId={}',
-        fieldId,
-        agentId
-      )
-      return null
-    }
-    FunctionToolCallback writeCb = byName?.get('WriteContent')
-    if (writeCb == null) {
-      return null
-    }
-    String siteId = ''
+    Map writeRes
+    long writeStartMs = System.currentTimeMillis()
     try {
-      siteId = ops.resolveEffectiveSiteId('')
-    } catch (Throwable ignoredSite) {
-    }
-    // Progress SSE is emitted by WriteContent/GetPreviewHtml via runWithToolProgress (toolProgressListener).
-    Map writeIn = [siteId: siteId, path: normPath, contentPath: normPath, contentXml: patched, unlock: 'true']
-    Object writeRaw
-    try {
-      writeRaw = writeCb.call(JsonOutput.toJson(writeIn))
+      writeRes = ops.writeContent(siteId, normPath, patched, 'true')
     } catch (Throwable wex) {
       log.warn(
-        'Tools-loop: server prefetch field hotpath WriteContent threw path={} agentId={} reason={}',
+        'Tools-loop: server prefetch field hotpath writeContent threw path={} agentId={} reason={}',
         normPath,
         agentId,
         wex.message ?: wex.toString()
       )
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, wex.message?.toString() ?: 'write_failed', false)
       return null
     }
-    Map writeRes = coerceFunctionToolCallbackResultMap(writeRaw)
     if (Boolean.TRUE.equals(writeRes.blockedForFormClientApply)) {
       log.info(
         'Tools-loop: server prefetch field hotpath skipped — WriteContent blocked for form client-apply path={} agentId={}',
@@ -3566,12 +3896,26 @@ For **content XML** (pages/components): do not invent a new element tree — pre
     }
     if (!writeContentToolResultSucceeded(writeRes)) {
       log.warn(
-        'Tools-loop: server prefetch field hotpath WriteContent did not succeed path={} agentId={} message={}',
+        'Tools-loop: server prefetch field hotpath writeContent did not succeed path={} agentId={} message={}',
         normPath,
         agentId,
-        (writeRes.message ?: writeRes.error ?: 'WriteContent failed')?.toString()
+        (writeRes?.message ?: writeRes?.error ?: 'WriteContent failed')?.toString()
       )
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, (writeRes?.message ?: writeRes?.error)?.toString(), false)
       return null
+    }
+    markTaskCompletionWallMsIfUnset(toolTimingCtx)
+    if (sseOut != null) {
+      long writeDurMs = Math.max(0L, System.currentTimeMillis() - writeStartMs)
+      writeToolProgressSse(
+        sseOut,
+        'WriteContent',
+        'done',
+        [path: normPath],
+        null,
+        writeRes,
+        writeDurMs
+      )
     }
     Boolean previewFound = null
     String previewUrl = ''
@@ -3588,7 +3932,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
         String prevJson = (prevRaw instanceof Map) ?
           JsonOutput.toJson((Map) prevRaw) :
           (prevRaw?.toString() ?: '')
-        Map enriched = enrichGetPreviewHtmlToolResult(prevJson, outcomePhrase, new JsonSlurper())
+        Map enriched = enrichGetPreviewHtmlToolResult(prevJson, outcomePhraseForPreview, new JsonSlurper())
         previewFound = enriched.previewGoalFound instanceof Boolean ? (Boolean) enriched.previewGoalFound : null
       } catch (Throwable pex) {
         log.warn(
@@ -3600,13 +3944,324 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       }
     }
     if (previewFound == Boolean.TRUE) {
-      return synthesizePlanExecutionAfterVerifiedWrite(outcomePhrase, previewUrl)
+      return synthesizePlanExecutionAfterVerifiedWrite(outcomePhraseForPreview, previewUrl)
     }
-    String base = synthesizePlanExecutionAfterVerifiedWrite(outcomePhrase, previewUrl)
+    String base = synthesizePlanExecutionAfterVerifiedWrite(outcomePhraseForPreview, previewUrl)
     if (previewFound == Boolean.FALSE) {
-      return appendPreviewVerificationWarningIfNeeded(base, previewFound, outcomePhrase)
+      return appendPreviewVerificationWarningIfNeeded(base, previewFound, outcomePhraseForPreview)
     }
     return base
+  }
+
+  /**
+   * Look up lyrics / external copy with one inner completion, then write + preview — skips the tools-loop LLM rounds.
+   */
+  private static String tryServerPrefetchExternalContentFieldEditHotpath(
+    String origUser,
+    String authorVisible,
+    Map intentTel,
+    Map toolsLoopSessionBundle,
+    Map<String, FunctionToolCallback> byName,
+    String agentId,
+    OutputStream sseOut,
+    AtomicBoolean cancelRequested,
+    Map toolTimingCtx = null
+  ) {
+    if (cancelRequested != null && cancelRequested.get()) {
+      return null
+    }
+    String fieldId = (intentTel?.prefetchResolvedFieldId ?: '').toString().trim()
+    Map gc = AuthoringIntentRecipeEngine.extractPrefetchSuccessfulGetContent(origUser ?: '')
+    String path = (gc?.path ?: '').toString().trim()
+    String contentXml = (gc?.contentXml ?: '').toString()
+    StudioToolOperations ops = (toolsLoopSessionBundle?.studioOps instanceof StudioToolOperations) ?
+      (StudioToolOperations) toolsLoopSessionBundle.studioOps :
+      null
+    if (ops == null) {
+      return null
+    }
+    if (!fieldId || !contentXml?.trim()) {
+      String label = extractAuthorFieldLabelPhrase(origUser ?: authorVisible)
+      if (!label) {
+        label = extractAuthorFieldLabelPhrase(authorVisible)
+      }
+      Map cfgBoot = null
+      try {
+        cfgBoot = StudioAiAssistantProjectConfig.load(ops)
+      } catch (Throwable ignoredCfg) {
+      }
+      if (cfgBoot != null && label) {
+        Map boot = AuthoringIntentRecipeEngine.bootstrapConcreteFieldEditPrefetch(ops, cfgBoot, label)
+        if (Boolean.TRUE.equals(boot?.applied)) {
+          fieldId = (boot.resolvedFieldId ?: fieldId).toString().trim()
+          contentXml = (boot.contentXml ?: contentXml).toString()
+          path = (boot.contentPath ?: path).toString().trim()
+        }
+      }
+    }
+    String promptForIntent = (origUser ?: authorVisible)
+    if (!serverExternalContentFieldEditHotpathEligible(intentTel, promptForIntent, fieldId, contentXml, path)) {
+      return null
+    }
+    String apiKey = StudioAiLlmKind.toolsLoopChatApiKeyFromBundle(toolsLoopSessionBundle)
+    String model = (toolsLoopSessionBundle?.resolvedChatModel ?: '').toString().trim()
+    String wireBaseUrl = StudioAiLlmKind.toolsLoopChatBaseUrlFromBundle(toolsLoopSessionBundle)
+    if (!apiKey || !model) {
+      log.info('Tools-loop: external content hotpath skipped — missing apiKey or model on session bundle')
+      return null
+    }
+    String fieldLabel = (intentTel?.prefetchResolvedFieldLabel ?: extractAuthorFieldLabelPhrase(authorVisible) ?: '').toString().trim()
+    String genPrompt = buildExternalContentLookupUserPrompt(authorVisible, fieldLabel)
+    if (sseOut != null) {
+      writeToolProgressSse(sseOut, 'GenerateTextNoTools', 'start', [:], null, null, null)
+    }
+    long genStartMs = System.currentTimeMillis()
+    String generatedText = ''
+    try {
+      generatedText = toolsLoopSimpleCompletionAssistantText(
+        apiKey,
+        model,
+        'You are a writing assistant invoked as a tool inside Crafter Studio. Follow the user text exactly. Output only what was asked.',
+        genPrompt,
+        2048,
+        120_000,
+        'GenerateTextNoTools',
+        wireBaseUrl,
+        toolsLoopSessionBundle
+      )
+    } catch (Throwable gex) {
+      log.warn(
+        'Tools-loop: external content hotpath GenerateTextNoTools failed agentId={} reason={}',
+        agentId,
+        gex.message ?: gex.toString()
+      )
+      return null
+    }
+    generatedText = (generatedText ?: '').toString().trim()
+    if (sseOut != null) {
+      long genDurMs = Math.max(0L, System.currentTimeMillis() - genStartMs)
+      writeToolProgressSse(sseOut, 'GenerateTextNoTools', 'done', [:], null, null, genDurMs)
+    }
+    if (!generatedText || generatedText.length() < 8) {
+      log.info('Tools-loop: external content hotpath skipped — inner completion returned empty or too short')
+      return null
+    }
+    if (outcomePhraseLooksLikeInstructionNotContent(generatedText)) {
+      log.info('Tools-loop: external content hotpath skipped — inner completion looks like instructions not copy')
+      return null
+    }
+    String normPath = AuthoringPreviewContext.normalizeRepoPath(path)
+    if (!normPath) {
+      return null
+    }
+    String siteId = ''
+    try {
+      siteId = ops.resolveEffectiveSiteId('')
+    } catch (Throwable ignoredSite) {
+    }
+    try {
+      Map freshItem = ops.getContent(siteId, normPath) as Map
+      String freshXml = (freshItem?.contentXml ?: '').toString()
+      if (freshXml?.trim()) {
+        contentXml = freshXml
+      }
+    } catch (Throwable gex) {
+      log.warn(
+        'Tools-loop: external content hotpath GetContent failed path={} agentId={} reason={}',
+        normPath,
+        agentId,
+        gex.message ?: gex.toString()
+      )
+    }
+    if (!contentXml?.trim() || !StudioToolOperations.looksLikeFullCrafterSiteContentItemDocument(normPath, contentXml)) {
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'no_content_xml', false)
+      return null
+    }
+    String patched = AuthoringIntentRecipeEngine.patchContentXmlFieldValue(contentXml, fieldId, generatedText)
+    if (!patched?.trim() || !StudioToolOperations.looksLikeFullCrafterSiteContentItemDocument(normPath, patched)) {
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'patch_produced_invalid_document', true)
+      return null
+    }
+    String previewSnippet = generatedText.length() > 200 ? generatedText.substring(0, 197) + '…' : generatedText
+    String result = completeServerPrefetchFieldWriteFromPatchedXml(
+      ops,
+      siteId,
+      normPath,
+      patched,
+      fieldId,
+      previewSnippet,
+      toolsLoopSessionBundle,
+      byName,
+      origUser,
+      agentId,
+      sseOut,
+      toolTimingCtx
+    )
+    if (result != null) {
+      log.info(
+        'Tools-loop: external content prefetch hotpath completed agentId={} fieldId={}',
+        agentId,
+        fieldId
+      )
+    }
+    return result
+  }
+
+  /**
+   * Deterministic single-field edit when intent prefetch already loaded content + resolved field id.
+   * Skips the first tools-loop {@code /v1/chat/completions} call (large prompt + tool schemas).
+   *
+   * @return assistant markdown, or {@code null} when the hotpath does not apply or fails
+   */
+  private static String tryServerPrefetchSimpleFieldEditHotpath(
+    String origUser,
+    String authorVisible,
+    Map intentTel,
+    Map toolsLoopSessionBundle,
+    Map<String, FunctionToolCallback> byName,
+    String agentId,
+    OutputStream sseOut,
+    AtomicBoolean cancelRequested,
+    Map toolTimingCtx = null
+  ) {
+    if (cancelRequested != null && cancelRequested.get()) {
+      return null
+    }
+    String outcomePhrase = extractAuthoringOutcomePhrase(origUser ?: authorVisible)?.trim()
+    if (!outcomePhrase) {
+      outcomePhrase = extractAuthoringOutcomePhrase(authorVisible)?.trim()
+    }
+    String fieldId = (intentTel?.prefetchResolvedFieldId ?: '').toString().trim()
+    Map gc = AuthoringIntentRecipeEngine.extractPrefetchSuccessfulGetContent(origUser ?: '')
+    String path = (gc?.path ?: '').toString().trim()
+    String contentXml = (gc?.contentXml ?: '').toString()
+    StudioToolOperations ops = (toolsLoopSessionBundle?.studioOps instanceof StudioToolOperations) ?
+      (StudioToolOperations) toolsLoopSessionBundle.studioOps :
+      null
+    if (ops == null) {
+      return null
+    }
+    if (!fieldId || !contentXml?.trim()) {
+      String label = extractAuthorFieldLabelPhrase(origUser ?: authorVisible)
+      if (!label) {
+        label = extractAuthorFieldLabelPhrase(authorVisible)
+      }
+      Map cfgBoot = null
+      try {
+        cfgBoot = StudioAiAssistantProjectConfig.load(ops)
+      } catch (Throwable ignoredCfg) {
+      }
+      if (cfgBoot != null && label) {
+        Map boot = AuthoringIntentRecipeEngine.bootstrapConcreteFieldEditPrefetch(ops, cfgBoot, label)
+        if (Boolean.TRUE.equals(boot?.applied)) {
+          if (!fieldId) {
+            fieldId = (boot.resolvedFieldId ?: '').toString().trim()
+          }
+          if (!contentXml?.trim()) {
+            contentXml = (boot.contentXml ?: '').toString()
+            path = (boot.contentPath ?: path).toString().trim()
+          }
+          if (!(intentTel instanceof Map)) {
+            intentTel = new LinkedHashMap<>()
+          }
+          if (!intentTel.prefetchResolvedFieldId) {
+            intentTel.put('prefetchResolvedFieldId', fieldId)
+          }
+          if (!intentTel.prefetchSkipRedundantGetContentForListedPath) {
+            intentTel.put('prefetchSkipRedundantGetContentForListedPath', Boolean.TRUE.equals(boot.duplicateGetContentBanned))
+          }
+          if (!intentTel.recipeId) {
+            intentTel.put('recipeId', 'modify_page_content')
+            intentTel.put('outcome', 'matched')
+          }
+        }
+      }
+    }
+    String promptForIntent = (origUser ?: authorVisible)
+    boolean eligible =
+      prefetchHotpathAllowsForcedWriteContent(intentTel, outcomePhrase, promptForIntent) ||
+        serverConcreteFieldEditHotpathEligible(promptForIntent, outcomePhrase, fieldId, contentXml, path)
+    if (!eligible) {
+      return null
+    }
+    if (!isUsableHotpathOutcomePhrase(outcomePhrase, promptForIntent)) {
+      log.info(
+        'Tools-loop: server prefetch field hotpath skipped — outcome not literal publishable copy (needs expansion or tools lookup)'
+      )
+      return null
+    }
+    if (!fieldId || !outcomePhrase || !path) {
+      return null
+    }
+    String normPath = AuthoringPreviewContext.normalizeRepoPath(path)
+    if (!normPath) {
+      return null
+    }
+    String siteId = ''
+    try {
+      siteId = ops.resolveEffectiveSiteId('')
+    } catch (Throwable ignoredSite) {
+    }
+    try {
+      Map freshItem = ops.getContent(siteId, normPath) as Map
+      String freshXml = (freshItem?.contentXml ?: '').toString()
+      if (freshXml?.trim()) {
+        contentXml = freshXml
+      }
+    } catch (Throwable gex) {
+      log.warn(
+        'Tools-loop: server prefetch field hotpath GetContent failed path={} agentId={} reason={}',
+        normPath,
+        agentId,
+        gex.message ?: gex.toString()
+      )
+    }
+    if (!contentXml?.trim()) {
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'no_content_xml', false)
+      return null
+    }
+    if (!StudioToolOperations.looksLikeFullCrafterSiteContentItemDocument(normPath, contentXml)) {
+      log.warn(
+        'Tools-loop: server prefetch field hotpath aborted — on-disk item is not a full <page>/<component> document path={} agentId={}',
+        normPath,
+        agentId
+      )
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'corrupt_or_partial_item_xml_on_disk', true)
+      return null
+    }
+    String patched = AuthoringIntentRecipeEngine.patchContentXmlFieldValue(contentXml, fieldId, outcomePhrase)
+    if (!patched?.trim()) {
+      log.info(
+        'Tools-loop: server prefetch field hotpath skipped — could not patch field {} in contentXml (field may live in a nested component) agentId={}',
+        fieldId,
+        agentId
+      )
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'field_not_in_page_xml', false)
+      return null
+    }
+    if (!StudioToolOperations.looksLikeFullCrafterSiteContentItemDocument(normPath, patched)) {
+      log.warn(
+        'Tools-loop: server prefetch field hotpath aborted — patched body is not a full item document path={} agentId={}',
+        normPath,
+        agentId
+      )
+      markPrefetchHotpathAborted(toolsLoopSessionBundle, 'patch_produced_invalid_document', true)
+      return null
+    }
+    return completeServerPrefetchFieldWriteFromPatchedXml(
+      ops,
+      siteId,
+      normPath,
+      patched,
+      fieldId,
+      outcomePhrase,
+      toolsLoopSessionBundle,
+      byName,
+      origUser,
+      agentId,
+      sseOut,
+      toolTimingCtx
+    )
   }
 
   /** Server wrap-up when write + preview phrase verification succeeded — avoids an extra tools-loop LLM round. */
@@ -4079,6 +4734,73 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     }
   }
 
+  private static void markPrefetchHotpathAborted(Map toolsLoopSessionBundle, String reason, boolean corruptOnDisk = false) {
+    if (!(toolsLoopSessionBundle instanceof Map)) {
+      return
+    }
+    toolsLoopSessionBundle.put('prefetchHotpathWriteAborted', Boolean.TRUE)
+    if (reason?.trim()) {
+      toolsLoopSessionBundle.put('prefetchHotpathAbortReason', reason.trim())
+    }
+    if (corruptOnDisk) {
+      toolsLoopSessionBundle.put('prefetchHotpathCorruptItemXml', Boolean.TRUE)
+    }
+  }
+
+  private static String synthesizeCorruptSiteItemXmlMessage(String repoPath) {
+    String p = (repoPath ?: '').trim() ?: '(unknown path)'
+    return '## Cannot edit this content item\n\n' +
+      'The file **`' + p + '`** in the repository is **not** a complete Crafter content item (missing `<page>` / `<component>` root or required item markers). ' +
+      'That often happens after an earlier partial AI write.\n\n' +
+      '**Fix in Studio:** open **Git** / history for this file and **revert** to the last good version, then retry your edit.\n'
+  }
+
+  private static boolean toolWireIndicatesInvalidSiteItemDocument(String toolWireJson) {
+    String s = (toolWireJson ?: '').toString()
+    return s.contains('field fragment') ||
+      s.contains('root <page> or <component>') ||
+      s.contains('missing typical Crafter item markers')
+  }
+
+  /** Shrinks {@code update_content} tool results on the wire — keeps {@code contentXml} but drops bulky form XML. */
+  private static String compactUpdateContentToolWire(String rawJson, int maxChars) {
+    String s = (rawJson ?: '').toString()
+    if (!s.trim()) {
+      return s
+    }
+    try {
+      Object parsed = new JsonSlurper().parseText(s)
+      if (!(parsed instanceof Map)) {
+        return s.length() <= maxChars ? s : s.substring(0, maxChars)
+      }
+      Map m = new LinkedHashMap<>((Map) parsed)
+      if (m.containsKey('formDefinitionXml')) {
+        m.remove('formDefinitionXml')
+        m.put('formDefinitionXmlOmittedOnWire', Boolean.TRUE)
+      }
+      Object cx = m.get('contentXml')
+      if (cx instanceof String) {
+        String body = ((String) cx).trim()
+        int cap = Math.min(24_000, maxChars / 2)
+        if (body.length() > cap) {
+          m.put('contentXmlChars', body.length())
+          m.put(
+            'contentXml',
+            body.substring(0, cap) + '\n…[contentXml truncated on wire — call GetContent on this path for the full document]'
+          )
+        }
+      }
+      String out = JsonOutput.toJson(m)
+      if (out.length() <= maxChars) {
+        return out
+      }
+      return out.substring(0, maxChars) +
+        '\n…[update_content wire compacted; call GetContent for full contentXml]'
+    } catch (Throwable ignored) {
+      return s.length() <= maxChars ? s : s.substring(0, maxChars)
+    }
+  }
+
   private static String truncateNativeToolWireContent(
     String fnName,
     Object toolOutRaw,
@@ -4086,6 +4808,9 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     Map<String, String> generateImageDataUrlByToolCallId = null
   ) {
     String s = toolOutRaw != null ? toolOutRaw.toString() : ''
+    if ('update_content'.equals((fnName ?: '').toString().trim())) {
+      return compactUpdateContentToolWire(s, NATIVE_TOOLS_WIRE_JSON_MAX_CHARS)
+    }
     if ('GenerateImage'.equals((fnName ?: '').toString().trim())) {
       if (generateImageDataUrlByToolCallId != null && toolCallId?.toString()?.trim()) {
         String compact = ChatCompletionsToolWire.compactGenerateImageToolWire(s, toolCallId.trim(), generateImageDataUrlByToolCallId)
@@ -4144,6 +4869,8 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
     String authorVisibleForToolsLoop = authorVisibleRequestFromWire(wireMessages) ?: ''
     String frozenAuthorOutcomePhrase = extractAuthoringOutcomePhrase(authorVisibleForToolsLoop)
     String lastPreviewContentGoalPhrase = frozenAuthorOutcomePhrase ?: ''
+    int writeContentInvalidDocumentFailures = 0
+    String lastInvalidWriteContentPath = ''
     for (int round = 0; round < maxRounds; round++) {
       if (cancelRequested != null && cancelRequested.get()) {
         Thread.currentThread().interrupt()
@@ -4172,12 +4899,21 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
             (toolsLoopSessionBundle instanceof Map) ?
               (Map) toolsLoopSessionBundle.get('intentRecipeRoutingTelemetry') :
               null
-          if (prefetchHotpathAllowsForcedWriteContent(intentTel, frozenAuthorOutcomePhrase, authorVisibleForToolsLoop)) {
+          boolean hotpathAborted = Boolean.TRUE.equals(toolsLoopSessionBundle?.prefetchHotpathWriteAborted)
+          if (!hotpathAborted &&
+            prefetchHotpathAllowsForcedWriteContent(intentTel, frozenAuthorOutcomePhrase, authorVisibleForToolsLoop)) {
             toolChoice = [type: 'function', function: [name: 'WriteContent']]
             log.info(
               'Tools-loop tools-on: tool_choice forced to WriteContent (prefetch hotpath modify_page_content, round 0) agentId={} resolvedFieldId={}',
               agentId,
               intentTel?.prefetchResolvedFieldId ?: ''
+            )
+          } else if (hotpathAborted && wireToolsIncludeNamedTool(wireTools, 'GetContent')) {
+            toolChoice = [type: 'function', function: [name: 'GetContent']]
+            log.info(
+              'Tools-loop tools-on: tool_choice forced to GetContent (prefetch hotpath write aborted, round 0) agentId={} reason={}',
+              agentId,
+              toolsLoopSessionBundle?.prefetchHotpathAbortReason ?: ''
             )
           }
         }
@@ -4482,6 +5218,19 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
                   }
                 } else {
                   roundHadWriteFailure = true
+                  if (toolWireIndicatesInvalidSiteItemDocument(toolOut.toString())) {
+                    writeContentInvalidDocumentFailures++
+                    try {
+                      Object argsParsed = slurper.parseText(argsStr ?: '{}')
+                      if (argsParsed instanceof Map) {
+                        String wpath = repoPathFromToolArgsMap((Map) argsParsed)
+                        if (wpath) {
+                          lastInvalidWriteContentPath = wpath
+                        }
+                      }
+                    } catch (Throwable ignoredInvPath) {
+                    }
+                  }
                 }
               }
             } catch (Throwable ignoredWtrack) {
@@ -4544,6 +5293,26 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
         if (previewState.lastPreviewContentGoalPhrase) {
           lastPreviewContentGoalPhrase = previewState.lastPreviewContentGoalPhrase.toString()
         }
+        if (writeContentInvalidDocumentFailures >= 3 && !roundHadWriteSuccess) {
+          log.warn(
+            'Tools-loop: stopping after {} invalid WriteContent attempts (fragment/partial XML) round={} agentId={}',
+            writeContentInvalidDocumentFailures,
+            round,
+            agentId
+          )
+          assistantAccum = synthesizeCorruptSiteItemXmlMessage(lastInvalidWriteContentPath ?: '/site/website/index.xml')
+          finished = true
+          break
+        }
+        if (writeContentInvalidDocumentFailures >= 2 && !roundHadWriteSuccess && round < maxRounds - 1) {
+          wireMessages << [
+            role   : 'user',
+            content:
+              '[aiassistant: WriteContent blocked — internal]\n' +
+                '**WriteContent** failed repeatedly because **contentXml** was a **fragment**, not a full `<page>` / `<component>` document. ' +
+                '**Stop** calling **WriteContent** with invented or partial XML. Call **GetContent** on the anchored path, edit **one** existing field element in that full **contentXml**, then **WriteContent** the **entire** file once.\n'
+          ]
+        }
         if (anySuccessfulFetchHttpUrl) {
           try {
             String anchor = buildAuthoringIntentAnchorMessageForReferenceFetch(wireMessages)
@@ -4582,7 +5351,10 @@ Use CMS tools if repository work is still missing. **Do not** stream a new **## 
       boolean assistLooksLikePlanWithoutTools = assistantProsePromisedToolsButOmittedCalls(assistNoToolCalls)
       boolean userNeedsCmsTools = false
       try {
-        userNeedsCmsTools = AuthoringPreviewContext.authorVisibleSuggestsCmsTooling(userWireSnapshotForRecovery)
+        userNeedsCmsTools =
+          AuthoringPreviewContext.authorVisibleSuggestsCmsTooling(userWireSnapshotForRecovery) ||
+            AuthoringPreviewContext.anchoredSiteXmlFieldPlacementIntent(userWireSnapshotForRecovery) ||
+            AuthoringPreviewContext.isShortAffirmationContinuingPriorCmsWork(userWireSnapshotForRecovery)
       } catch (Throwable ignoredRec) {
       }
       boolean assistClaimsTurnComplete = assistantProseClaimsTurnCompleteDespitePlanBullets(assistNoToolCalls)
@@ -4737,15 +5509,45 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       byName,
       agentId,
       sseOut,
-      cancelRequested
+      cancelRequested,
+      toolTimingCtx
     )
+    if (serverHotpathText == null) {
+      serverHotpathText = tryServerPrefetchExternalContentFieldEditHotpath(
+        origUser,
+        authorVisible,
+        intentTel,
+        toolsLoopSessionBundle,
+        byName,
+        agentId,
+        sseOut,
+        cancelRequested,
+        toolTimingCtx
+      )
+    }
     if (serverHotpathText != null) {
       log.info(
-        'Tools-loop: server prefetch simple field edit hotpath completed (skipped native tool-loop LLM) agentId={} fieldId={}',
+        'Tools-loop: server prefetch field edit hotpath completed (skipped native tool-loop LLM) agentId={} fieldId={}',
         agentId,
         intentTel?.prefetchResolvedFieldId ?: ''
       )
       return serverHotpathText
+    }
+    if (Boolean.TRUE.equals(toolsLoopSessionBundle?.prefetchHotpathCorruptItemXml)) {
+      String corruptPath = ''
+      try {
+        StudioToolOperations opsEarly = (toolsLoopSessionBundle?.studioOps instanceof StudioToolOperations) ?
+          (StudioToolOperations) toolsLoopSessionBundle.studioOps :
+          null
+        corruptPath = opsEarly?.recipeEngineAuthoringBindings()?.contentPath ?: ''
+      } catch (Throwable ignoredCp) {
+      }
+      log.warn(
+        'Tools-loop: aborting tools loop — repository item XML is corrupt or partial path={} agentId={}',
+        corruptPath,
+        agentId
+      )
+      return synthesizeCorruptSiteItemXmlMessage(corruptPath)
     }
     List<Map> wireMessages = deepCloneWireMessages(baseWire)
     Map wmUser = lastUserWireMessage(wireMessages)
@@ -5513,7 +6315,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
    * Non-terminal {@code progress} phase: {@code input.progressMessage} is appended after the prefix (e.g. batch translate dispatch list).
    * @param taskDurationMs wall time for this tool invocation (terminal phases only); rendered as a subtle suffix.
    */
-  private void writeToolProgressSse(
+  private static void writeToolProgressSse(
     OutputStream o,
     String toolName,
     String phase,

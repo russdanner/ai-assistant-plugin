@@ -5,7 +5,7 @@
       "id": "modify_page_content",
       "title": "Modify page or component content",
       "description": "Change copy, tone, grammar, translate, or field values on a page or component XML item; author does not ask for new FreeMarker, form-definition schema, or site-wide discovery only.",
-      "matchHints": ["update", "change", "translate", "rewrite", "this page", "proofread", "grammar", "tone", "rephrase", "localize"],
+      "matchHints": ["update", "change", "translate", "rewrite", "this page", "proofread", "grammar", "tone", "rephrase", "localize", "look up", "lyrics", "fetch", "hero title"],
       "phases": {
         "context": {
           "hints": [
