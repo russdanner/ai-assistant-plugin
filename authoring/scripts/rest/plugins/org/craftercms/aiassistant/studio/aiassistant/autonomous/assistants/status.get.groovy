@@ -49,7 +49,7 @@ for (Map.Entry<String, Map> e : agents.entrySet()) {
       }
     }
   }
-  if (AutonomousAssistantStatus.ERROR.equals(st.get('status')?.toString())) {
+  if (AutonomousAssistantStatus.matches(st.get('status'), AutonomousAssistantStatus.ERROR)) {
     agentsInError.add([
       agentId  : aid,
       name     : agentDef.get('name')?.toString(),

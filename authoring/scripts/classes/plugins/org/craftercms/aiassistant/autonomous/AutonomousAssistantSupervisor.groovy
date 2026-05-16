@@ -272,8 +272,9 @@ final class AutonomousAssistantSupervisor {
             continue
           }
           String stName = st.get('status')?.toString()
-          if (AutonomousAssistantStatus.DISABLED == stName || AutonomousAssistantStatus.STOPPED == stName ||
-            AutonomousAssistantStatus.ERROR == stName) {
+          if (AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.DISABLED) ||
+            AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.STOPPED) ||
+            AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.ERROR)) {
             continue
           }
           boolean nextStep = Boolean.TRUE.equals(st.get('nextStepRequired')) ||

@@ -236,6 +236,24 @@ class AiOrchestrationTools {
     return raw
   }
 
+  /** XXE-hardened parse for untrusted form-definition.xml from the repository. */
+  private static Document parseFormDefinitionXmlSecure(String formXml) {
+    def factory = DocumentBuilderFactory.newInstance()
+    try {
+      factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
+    } catch (Throwable ignored) {}
+    try {
+      factory.setFeature('http://xml.org/sax/features/external-general-entities', false)
+      factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
+      factory.setFeature('http://apache.org/xml/features/nonvalidating/load-external-dtd', false)
+    } catch (Throwable ignored) {}
+    factory.setXIncludeAware(false)
+    factory.setExpandEntityReferences(false)
+    factory.setNamespaceAware(true)
+    return factory.newDocumentBuilder().parse(
+      new ByteArrayInputStream(formXml.getBytes(StandardCharsets.UTF_8)))
+  }
+
   /**
    * Collects {@code <field><id>...</id>} values from form-definition.xml for a compact hint to the model.
    * <p>Uses JDK {@link DocumentBuilderFactory} — {@code groovy.util.XmlSlurper} is not on Studio plugin script compile classpath.</p>
@@ -243,18 +261,7 @@ class AiOrchestrationTools {
   static List<String> extractFormFieldIdsFromFormDefinitionXml(String formXml) {
     if (!formXml?.trim()) return []
     try {
-      def factory = DocumentBuilderFactory.newInstance()
-      try {
-        factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
-      } catch (Throwable ignored) {}
-      try {
-        factory.setFeature('http://xml.org/sax/features/external-general-entities', false)
-        factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
-      } catch (Throwable ignored) {}
-      factory.setXIncludeAware(false)
-      factory.setExpandEntityReferences(false)
-      def doc = factory.newDocumentBuilder().parse(
-        new ByteArrayInputStream(formXml.getBytes(StandardCharsets.UTF_8)))
+      def doc = parseFormDefinitionXmlSecure(formXml)
       def fields = doc.getElementsByTagName('field')
       def ids = new LinkedHashSet<String>()
       for (int i = 0; i < fields.length; i++) {
@@ -278,14 +285,7 @@ class AiOrchestrationTools {
       return []
     }
     try {
-      def factory = DocumentBuilderFactory.newInstance()
-      try {
-        factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
-      } catch (Throwable ignored) {}
-      factory.setXIncludeAware(false)
-      factory.setExpandEntityReferences(false)
-      def doc = factory.newDocumentBuilder().parse(
-        new ByteArrayInputStream(formXml.getBytes(StandardCharsets.UTF_8)))
+      def doc = parseFormDefinitionXmlSecure(formXml)
       def fields = doc.getElementsByTagName('field')
       List<Map<String, String>> pairs = new ArrayList<>()
       for (int i = 0; i < fields.length; i++) {

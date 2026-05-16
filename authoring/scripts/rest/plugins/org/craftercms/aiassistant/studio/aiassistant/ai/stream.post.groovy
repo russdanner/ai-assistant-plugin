@@ -139,7 +139,7 @@ try {
     }
     return null
   }
-  def openAiApiKey = body?.openAiApiKey?.toString()
+  def llmApiKey = (body?.llmApiKey ?: body?.openAiApiKey)?.toString()
   def openAiModel = body?.llmModel?.toString()
   def imageModelRaw = body?.imageModel?.toString()
   def imageModel = null
@@ -197,7 +197,7 @@ try {
   try {
     try {
       def orchestration = new AiOrchestration(request, response, applicationContext, params, pluginConfig)
-      def result = orchestration.chatStreamWithSpringAi(agentId, promptForOrchestration.toString(), chatId, llm, openAiModel, openAiApiKey, imageModel, formEngineClientForward, formEngineItemPathRaw, enableTools, imageGenerator)
+      def result = orchestration.chatStreamWithSpringAi(agentId, promptForOrchestration.toString(), chatId, llm, openAiModel, llmApiKey, imageModel, formEngineClientForward, formEngineItemPathRaw, enableTools, imageGenerator)
       if (result != null) {
         if (response.isCommitted()) {
           log.warn('chatStreamWithSpringAi returned error map but response already committed (SSE). Client should read metadata.error from stream. result={}', result)

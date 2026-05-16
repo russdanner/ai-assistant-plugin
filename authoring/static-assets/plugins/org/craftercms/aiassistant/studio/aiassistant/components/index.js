@@ -1,6 +1,6 @@
 const { Fragment, jsx: jsx$1, jsxs } = craftercms.libs?.reactJsxRuntime;
 const require$$2 = craftercms.libs?.reactJsxRuntime && Object.prototype.hasOwnProperty.call(craftercms.libs?.reactJsxRuntime, 'default') ? craftercms.libs?.reactJsxRuntime['default'] : craftercms.libs?.reactJsxRuntime;
-const { useTheme, Box, Typography, CircularProgress, TableContainer, Paper, Table: Table$1, TableHead, TableBody, TableRow, TableCell, Stack: Stack$1, Tooltip, IconButton, Tabs, Tab, Button, Divider, TextField, Chip, FormControlLabel, Switch, Popover, paperClasses, GlobalStyles, Menu, MenuItem, ListItemIcon, ListItemText, Dialog, DialogContent, Alert, FormControl, InputLabel, Select, List, ListItem, Checkbox, ListItemButton, Badge, DialogTitle, DialogActions, Avatar, useMediaQuery, Autocomplete, ListItemSecondaryAction, FormLabel, FormGroup, Link, RadioGroup, Radio } = craftercms.libs.MaterialUI;
+const { useTheme, Box, CircularProgress, Typography, TableContainer, Paper, Table: Table$1, TableHead, TableBody, TableRow, TableCell, Stack: Stack$1, Tooltip, IconButton, Tabs, Tab, Button, Divider, TextField, Chip, FormControlLabel, Switch, Popover, paperClasses, GlobalStyles, Menu, MenuItem, ListItemIcon, ListItemText, Dialog, DialogContent, Alert, FormControl, InputLabel, Select, List, ListItem, Checkbox, ListItemButton, Badge, DialogTitle, DialogActions, Avatar, useMediaQuery, Autocomplete, ListItemSecondaryAction, FormLabel, FormGroup, Link, RadioGroup, Radio } = craftercms.libs.MaterialUI;
 const React = craftercms.libs.React;
 const { useRef, useState, useEffect, useCallback, useMemo, useLayoutEffect, useSyncExternalStore, createElement, forwardRef, useImperativeHandle } = craftercms.libs.React;
 const React__default = craftercms.libs.React && Object.prototype.hasOwnProperty.call(craftercms.libs.React, 'default') ? craftercms.libs.React['default'] : craftercms.libs.React;
@@ -417,14 +417,18 @@ async function streamChat(args) {
  * Part A = parsed timeline (intent / phases / errors); Part B = verbatim redacted lines.
  */
 const TEXT_PREVIEW_CHARS = 320;
+/** Query params that may carry secrets inside URL string values (not only JSON keys). */
+const SENSITIVE_URL_QUERY_PARAM_RE = /([?&])(token|previewToken|access_token|accessToken|api_key|apikey|authorization|bearer|crafterPreview|sessionId|sessionToken)=([^&\s"'<>]+)/gi;
 /** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
 function redactSessionLogLineForCopy(s) {
     return s
         .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
-        .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
+        .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"')
+        .replace(SENSITIVE_URL_QUERY_PARAM_RE, '$1$2=***')
+        .replace(/\bBearer\s+[A-Za-z0-9._+\-/=]+/gi, 'Bearer ***');
 }
 function previewText(s, max = TEXT_PREVIEW_CHARS) {
-    const t = (s || '').trim();
+    const t = redactSessionLogLineForCopy((s || '').trim());
     if (!t)
         return '(empty)';
     if (t.length <= max)
@@ -591,8 +595,9 @@ function buildParsedTimeline(lines) {
 }
 function formatSessionLogForDebugCopy(lines) {
     const generatedAt = new Date().toISOString();
-    const timeline = buildParsedTimeline(lines);
-    const verbatim = lines.map(redactSessionLogLineForCopy).join('\n');
+    const redactedLines = lines.map(redactSessionLogLineForCopy);
+    const timeline = buildParsedTimeline(redactedLines);
+    const verbatim = redactedLines.join('\n');
     return [
         '==============================================================================',
         'AI ASSISTANT — SESSION DEBUG LOG (for maintainers)',
@@ -28494,18 +28499,6 @@ function StudioDraggableImage(props) {
     }, []);
     if (!trimmed)
         return null;
-    if (isAbsoluteHttp && remoteHttpFetchFailed) {
-        return (jsx$1(Box, { sx: {
-                my: 1,
-                display: 'inline-block',
-                maxWidth: '100%',
-                borderRadius: 1,
-                border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
-                bgcolor: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[50],
-                px: 1.25,
-                py: 1
-            }, children: jsx$1(Typography, { variant: "caption", color: "text.secondary", component: "p", sx: { m: 0 }, children: "Image preview unavailable." }) }));
-    }
     const canDrag = !isRemote || Boolean(effectiveSite);
     const caption = isRemote
         ? 'Drag onto an image field in preview (imports when you drop)'
@@ -28540,7 +28533,7 @@ function StudioDraggableImage(props) {
                     justifyContent: 'center',
                     bgcolor: 'rgba(0,0,0,0.28)',
                     pointerEvents: 'none'
-                }, children: jsx$1(CircularProgress, { size: 28, sx: { color: '#fff' } }) })), jsxs(Box, { sx: {
+                }, children: jsx$1(CircularProgress, { size: 28, sx: { color: '#fff' } }) })), isAbsoluteHttp && remoteHttpFetchFailed && (jsx$1(Typography, { variant: "caption", color: "text.secondary", component: "p", sx: { px: 1, py: 0.5, m: 0 }, children: "Preview unavailable \u2014 drag still imports the remote URL." })), jsxs(Box, { sx: {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 0.5,
@@ -28684,15 +28677,43 @@ function wrapBareLongDataImageUrlsAsMarkdown(input, minUrlChars = 256) {
     }
     return parts.join('');
 }
-/** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
-function preprocessAssistantMarkdownImages(text) {
-    const longDataImageBlobRefMap = new Map();
+function textHasMarkdownFences(text) {
+    return text.includes('```') || text.includes('~~~');
+}
+/** GFM fences: ``` or ~~~ (same opener/closer run length). */
+const MARKDOWN_FENCE_RE = /(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1/g;
+/** Apply data:image compaction only outside fenced code blocks (preserve literal examples in fences). */
+function preprocessAssistantMarkdownImagesSegment(text, longDataImageBlobRefMap) {
     const normalized = normalizeLlmLiteralEscapes(text);
     const compactData = compactAllDataImageBase64Runs(normalized);
     const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
     const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
-    const displayText = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-    return { displayText, longDataImageBlobRefMap };
+    return wrapDataImageMarkdownDestInAngleBrackets(shortened);
+}
+/** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
+function preprocessAssistantMarkdownImages(text) {
+    const longDataImageBlobRefMap = new Map();
+    if (!text || !textHasMarkdownFences(text)) {
+        return {
+            displayText: preprocessAssistantMarkdownImagesSegment(text, longDataImageBlobRefMap),
+            longDataImageBlobRefMap
+        };
+    }
+    const parts = [];
+    let last = 0;
+    let m;
+    MARKDOWN_FENCE_RE.lastIndex = 0;
+    while ((m = MARKDOWN_FENCE_RE.exec(text)) !== null) {
+        if (m.index > last) {
+            parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last, m.index), longDataImageBlobRefMap));
+        }
+        parts.push(m[0]);
+        last = m.index + m[0].length;
+    }
+    if (last < text.length) {
+        parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last), longDataImageBlobRefMap));
+    }
+    return { displayText: parts.join(''), longDataImageBlobRefMap };
 }
 /**
  * Micromark / GFM can leave {@code ![alt](data:image/...;base64,...)} as plain text when the destination is huge.
@@ -35537,10 +35558,7 @@ const INTENT_RECIPE_ROUTING_KNOWN_KEYS = new Set([
     'engineEnabled',
     'minConfidence',
     'requestClarificationOnUnmatched',
-    'customRecipesPath',
-    'engineMaxSteps',
-    'engineMaxTotalChars',
-    'engineMaxFieldChars'
+    'customRecipesPath'
 ]);
 function defaultIntentRecipeRoutingFormState() {
     return {
@@ -72257,6 +72275,7 @@ function datasourceRepoPath(ds) {
     }
     return '';
 }
+/** Only the current Studio datasource type id — no legacy CrafterQ aliases; migrate old content types instead. */
 function isAiAssistantImgDatasource(ds) {
     const typed = ds;
     const t = (typed?.type ?? '').trim();

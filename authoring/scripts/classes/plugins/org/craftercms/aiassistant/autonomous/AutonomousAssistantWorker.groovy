@@ -54,8 +54,9 @@ final class AutonomousAssistantWorker {
       return
     }
     String initialStatus = state.get('status')?.toString()
-    if (AutonomousAssistantStatus.DISABLED == initialStatus || AutonomousAssistantStatus.STOPPED == initialStatus ||
-      AutonomousAssistantStatus.ERROR == initialStatus) {
+    if (AutonomousAssistantStatus.matches(initialStatus, AutonomousAssistantStatus.DISABLED) ||
+      AutonomousAssistantStatus.matches(initialStatus, AutonomousAssistantStatus.STOPPED) ||
+      AutonomousAssistantStatus.matches(initialStatus, AutonomousAssistantStatus.ERROR)) {
       return
     }
     long t0 = System.currentTimeMillis()
