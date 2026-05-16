@@ -5,11 +5,17 @@
 
 const TEXT_PREVIEW_CHARS = 320;
 
+/** Query params that may carry secrets inside URL string values (not only JSON keys). */
+const SENSITIVE_URL_QUERY_PARAM_RE =
+  /([?&])(token|previewToken|access_token|accessToken|api_key|apikey|authorization|bearer|crafterPreview|sessionId|sessionToken)=([^&\s"'<>]+)/gi;
+
 /** Best-effort redaction before copying the raw SSE debug log to the clipboard. */
 export function redactSessionLogLineForCopy(s: string): string {
   return s
     .replace(/("?(authorization|bearer|token|previewToken)"?\s*:\s*)"[^"]+"/gi, '$1"***"')
-    .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"');
+    .replace(/("?(?:\w*[Bb]earer\w*|[Tt]oken\w*|previewToken)"?\s*:\s*)"[^"]+"/g, '$1"***"')
+    .replace(SENSITIVE_URL_QUERY_PARAM_RE, '$1$2=***')
+    .replace(/\bBearer\s+[A-Za-z0-9._+\-/=]+/gi, 'Bearer ***');
 }
 
 function previewText(s: string, max = TEXT_PREVIEW_CHARS): string {

@@ -155,7 +155,14 @@ export function wrapBareLongDataImageUrlsAsMarkdown(input: string, minUrlChars =
   return parts.join('');
 }
 
-/** Apply data:image compaction only outside fenced ``` code blocks (preserve literal examples in fences). */
+function textHasMarkdownFences(text: string): boolean {
+  return text.includes('```') || text.includes('~~~');
+}
+
+/** GFM fences: ``` or ~~~ (same opener/closer run length). */
+const MARKDOWN_FENCE_RE = /(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1/g;
+
+/** Apply data:image compaction only outside fenced code blocks (preserve literal examples in fences). */
 function preprocessAssistantMarkdownImagesSegment(
   text: string,
   longDataImageBlobRefMap: Map<string, string>
@@ -173,17 +180,17 @@ export function preprocessAssistantMarkdownImages(text: string): {
   longDataImageBlobRefMap: Map<string, string>;
 } {
   const longDataImageBlobRefMap = new Map<string, string>();
-  if (!text || text.indexOf('```') < 0) {
+  if (!text || !textHasMarkdownFences(text)) {
     return {
       displayText: preprocessAssistantMarkdownImagesSegment(text, longDataImageBlobRefMap),
       longDataImageBlobRefMap
     };
   }
-  const fenceRe = /```[^\n]*\n[\s\S]*?```/g;
   const parts: string[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
-  while ((m = fenceRe.exec(text)) !== null) {
+  MARKDOWN_FENCE_RE.lastIndex = 0;
+  while ((m = MARKDOWN_FENCE_RE.exec(text)) !== null) {
     if (m.index > last) {
       parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last, m.index), longDataImageBlobRefMap));
     }
