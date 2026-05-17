@@ -3687,7 +3687,7 @@ For **content XML** (pages/components): do not invent a new element tree — pre
       new SystemMessage((systemText ?: '').toString()),
       new UserMessage(userForTools)
     ])
-    return StudioAiOrchestrationEngine.executeNativeToolsViaRestClientReturnText(
+    return executeNativeToolsViaRestClientReturnText(
       apiKey,
       model,
       prompt,
@@ -5608,7 +5608,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     List<Map> wireMessages = deepCloneWireMessages(baseWire)
     Map wmUser = lastUserWireMessage(wireMessages)
     Map<String, String> cqGenerateImageDataUrlByToolCallId = new LinkedHashMap<>()
-    Map loopOut = StudioAiOrchestrationEngine.runNativeToolLoopToAssistantText(
+    Map loopOut = runNativeToolLoopToAssistantText(
       apiKey,
       model,
       wireMessages,
@@ -5653,7 +5653,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
               'summary'
             )
             wireMessages << [role: 'user', content: buildPostReviewCorrectionUserMessage(rev)]
-            Map loopOut2 = StudioAiOrchestrationEngine.runNativeToolLoopToAssistantText(
+            Map loopOut2 = runNativeToolLoopToAssistantText(
               apiKey,
               model,
               wireMessages,
@@ -5797,7 +5797,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
     aiAssistantToolWorkerDiagPhase("openai_tools_worker_start agentId=${agentId ?: ''} model=${model ?: ''}")
     String text
     try {
-      text = StudioAiOrchestrationEngine.executeNativeToolsViaRestClientReturnText(
+      text = executeNativeToolsViaRestClientReturnText(
         apiKey,
         model,
         authoringChatPrompt,
@@ -6128,7 +6128,7 @@ Your last assistant message had a **plan-style heading** (## Plan, ## Revised Pl
       }
       String content
       if (StudioAiLlmKind.useToolsLoopChatRestClient(springAi.llm, springAi) && springAi.useTools) {
-        content = StudioAiOrchestrationEngine.executeNativeToolsViaRestClientReturnText(
+        content = executeNativeToolsViaRestClientReturnText(
           StudioAiLlmKind.toolsLoopChatApiKeyFromBundle(springAi),
           (springAi.resolvedChatModel ?: resolveChatModel(chatModel)),
           authoringChatPrompt,

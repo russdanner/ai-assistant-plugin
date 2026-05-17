@@ -46,7 +46,7 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 /**
- * Builds Spring AI tool callbacks for {@link plugins.org.craftercms.aiassistant.orchestration.StudioAiOrchestrationEngine}.
+ * Builds Spring AI tool callbacks for {@link plugins.org.craftercms.aiassistant.orchestration.AiOrchestration}.
  * <p>Core tools are {@link plugins.org.craftercms.aiassistant.tools.spi.StudioAiOrchestrationTool} classes under
  * {@code tools.cms}, {@code tools.development}, and {@code tools.general}, composed by
  * {@link plugins.org.craftercms.aiassistant.tools.catalog.StudioAiToolRegistry}; this class adds supplemental tools
