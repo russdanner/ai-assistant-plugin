@@ -1,0 +1,9 @@
+{
+  "siteId": "ai-assistant-e2e",
+  "description": "Disposable Studio site for AI Assistant plugin HTTP tests (delete when done).",
+  "sandboxBranch": "",
+  "remoteName": "",
+  "blueprintId": "org.craftercms.blueprint.empty",
+  "blueprintVersion": { "major": 1, "minor": 0, "patch": 0 },
+  "siteParams": {}
+}
