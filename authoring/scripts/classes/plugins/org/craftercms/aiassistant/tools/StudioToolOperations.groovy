@@ -1,5 +1,6 @@
 package plugins.org.craftercms.aiassistant.tools
 
+import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 
 import org.craftercms.studio.api.v2.event.site.SyncFromRepoEvent
@@ -150,6 +151,70 @@ class StudioToolOperations {
    * with a clear tool error instead of a partial Studio pipeline failure after IO.
    * Skipped for non-{@code .xml} paths (e.g. {@code .ftl}) where the body is not XML.
    */
+  /** {@code ==~} is full-string match in Groovy; Crafter items often have a license comment before {@code <page>}. */
+  private static boolean xmlBodyContainsCrafterItemRootElement(String xmlUtf8) {
+    String s = (xmlUtf8 ?: '').toString()
+    if (!s.trim()) {
+      return false
+    }
+    return (s =~ /(?is)<(page|component)(\s[^>]*)?>/).find() ||
+      (s =~ /(?is)<(page|component)\s*\/>/).find()
+  }
+
+  /**
+   * True when {@code xmlUtf8} looks like a full Crafter page/component item (same rules as write guard).
+   */
+  static boolean looksLikeFullCrafterSiteContentItemDocument(String pathLabel, String xmlUtf8) {
+    if (!isLikelyXmlRepositoryPath(pathLabel)) {
+      return true
+    }
+    String p = (pathLabel ?: '').toString().trim().toLowerCase(Locale.ROOT)
+    if (!p.startsWith('/site/')) {
+      return true
+    }
+    String t = (xmlUtf8 ?: '').toString().trim()
+    if (!t) {
+      return false
+    }
+    if (!xmlBodyContainsCrafterItemRootElement(t)) {
+      return false
+    }
+    if (!t.contains('<content-type>') && !t.contains('<file-name>') && !t.contains('<merge-strategy>')) {
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Refuses field fragments or non-item bodies for {@code /site/.../*.xml} writes (common LLM failure mode that
+   * passes SAX well-formedness but breaks Engine render with HTTP 500).
+   */
+  private static void assertCrafterSiteContentItemDocument(String pathLabel, String xmlUtf8) {
+    if (!isLikelyXmlRepositoryPath(pathLabel)) {
+      return
+    }
+    String p = (pathLabel ?: '').toString().trim().toLowerCase(Locale.ROOT)
+    if (!p.startsWith('/site/')) {
+      return
+    }
+    String t = (xmlUtf8 ?: '').toString().trim()
+    if (!t) {
+      return
+    }
+    if (!looksLikeFullCrafterSiteContentItemDocument(pathLabel, t)) {
+      if (!xmlBodyContainsCrafterItemRootElement(t)) {
+        throw new IllegalArgumentException(
+          "contentXml for '${pathLabel}' must be a full Crafter content item with root <page> or <component>, not a field fragment or partial snippet. " +
+            'Call GetContent (or update_content), edit field values in place, then WriteContent the entire document.'
+        )
+      }
+      throw new IllegalArgumentException(
+        "contentXml for '${pathLabel}' is missing typical Crafter item markers (<content-type>, <file-name>, or <merge-strategy>). " +
+          'Refusing to write — re-fetch with GetContent and send the full item XML.'
+      )
+    }
+  }
+
   private static void assertWellFormedUtf8Xml(String pathLabel, String xmlUtf8) {
     if (xmlUtf8 == null || !xmlUtf8.toString().trim()) {
       throw new IllegalArgumentException(
@@ -604,6 +669,40 @@ class StudioToolOperations {
     if (tool && !tool.equalsIgnoreCase('default')) return tool
     if (reqSite) return reqSite
     return tool
+  }
+
+  /**
+   * Snapshot of site id, preview/form repo path, content type id, and Engine preview URL for
+   * {@link plugins.org.craftercms.aiassistant.recipes.AuthoringIntentRecipeEngine}. REST scripts set
+   * {@code aiassistant.*} request attributes on the servlet thread before orchestration runs.
+   */
+  Map recipeEngineAuthoringBindings() {
+    String siteId = resolveEffectiveSiteId(null)
+    String contentPath = ''
+    String contentTypeId = ''
+    try {
+      contentPath = AuthoringPreviewContext.normalizeRepoPath(
+        request?.getAttribute('aiassistant.contentPath')?.toString()
+      ) ?: ''
+      if (!contentPath) {
+        contentPath = AuthoringPreviewContext.normalizeRepoPath(
+          request?.getAttribute('aiassistant.formEngineItemPath')?.toString()
+        ) ?: ''
+      }
+      contentTypeId = request?.getAttribute('aiassistant.contentTypeId')?.toString()?.trim() ?: ''
+    } catch (Throwable ignored) {
+    }
+    String previewUrl = ''
+    try {
+      previewUrl = AuthoringPreviewContext.buildEnginePreviewAbsoluteUrl(request, siteId, contentPath) ?: ''
+    } catch (Throwable ignoredPu) {
+    }
+    return Collections.unmodifiableMap([
+      siteId        : siteId ?: '',
+      contentPath   : contentPath ?: '',
+      contentTypeId : contentTypeId ?: '',
+      previewUrl    : previewUrl ?: ''
+    ] as Map)
   }
 
   /**
@@ -1756,6 +1855,7 @@ class StudioToolOperations {
         )
       }
       if (isLikelyXmlRepositoryPath(normalized)) {
+        assertCrafterSiteContentItemDocument(normalized, safeBody)
         assertWellFormedUtf8Xml(normalized, safeBody)
       }
       byte[] bytes = safeBody.getBytes(StandardCharsets.UTF_8)

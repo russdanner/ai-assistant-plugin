@@ -370,7 +370,7 @@ function AgentConfigurationDetailsContent(props: { readonly row: AutonomousTable
   const { row } = props;
   const d = (row.definition ?? {}) as Record<string, unknown>;
   const promptText = typeof d.prompt === 'string' ? d.prompt : '';
-  const apiRaw = d.openAiApiKey;
+  const apiRaw = d.llmApiKey;
   const apiKeyInConfig =
     (typeof apiRaw === 'string' && apiRaw.trim().length > 0) ||
     (apiRaw != null && typeof apiRaw !== 'string' && String(apiRaw).trim().length > 0);

@@ -64,10 +64,6 @@ final class StudioAiLlmKind {
 
   private static final Pattern SAFE_SCRIPT_LLM_ID = Pattern.compile('^[a-z0-9_-]{1,64}$')
 
-  static boolean isOpenAiNative(String normalizedKind) {
-    return OPENAI_NATIVE == (normalizedKind ?: '').toString()
-  }
-
   static boolean isScriptHostedLlm(String normalizedKind) {
     return (normalizedKind ?: '').toString().startsWith(SCRIPT_LLM_PREFIX)
   }

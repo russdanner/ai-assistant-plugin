@@ -77,12 +77,12 @@ export interface StreamChatArgs {
   llmModel?: string;
   /** OpenAI Images API model for GenerateImage; agent **imageModel** / request body **imageModel** (no default). */
   imageModel?: string;
-  /** GenerateImage backend: agent **imageGenerator** / POST **imageGenerator** (blank / openAiWire / none / script:{id}). */
+  /** GenerateImage backend: agent **imageGenerator** / POST **imageGenerator** (blank / llmWire / none / script:{id}). */
   imageGenerator?: string;
   /**
    * Optional key from widget ui.xml — server uses only if env/JVM key unset. Not recommended for production.
    */
-  openAiApiKey?: string;
+  llmApiKey?: string;
   /** Required by Studio plugin script API */
   siteId?: string;
   /**
@@ -173,7 +173,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
     llmModel,
     imageModel,
     imageGenerator,
-    openAiApiKey,
+    llmApiKey,
     siteId,
     previewToken,
     enableTools,
@@ -205,7 +205,7 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
   if (imageModel != null && String(imageModel).trim() !== '') requestBody.imageModel = String(imageModel).trim();
   if (imageGenerator != null && String(imageGenerator).trim() !== '')
     requestBody.imageGenerator = String(imageGenerator).trim();
-  if (openAiApiKey != null && String(openAiApiKey).trim() !== '') requestBody.openAiApiKey = String(openAiApiKey).trim();
+  if (llmApiKey != null && String(llmApiKey).trim() !== '') requestBody.llmApiKey = String(llmApiKey).trim();
   if (contentPath != null && String(contentPath).trim() !== '') requestBody.contentPath = String(contentPath).trim();
   if (contentTypeId != null && String(contentTypeId).trim() !== '')
     requestBody.contentTypeId = String(contentTypeId).trim();

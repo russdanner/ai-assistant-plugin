@@ -82,11 +82,11 @@ public class AiChatClient {
         def restClientBuilder = RestClient.builder()
         restClientBuilder.defaultHeaders { it.set(HttpHeaders.ACCEPT_ENCODING, "gzip, deflate") }
 
-        def openAiApi = new OpenAiApi("https://api.openai.com", openAIKey, restClientBuilder, webClientBuilder)
+        def llmApi = new OpenAiApi("https://api.openai.com", openAIKey, restClientBuilder, webClientBuilder)
 
-        def openAiChatOptions = OpenAiChatOptions.builder().withModel("gpt-4o-mini").build()
+        def llmChatOptions = OpenAiChatOptions.builder().withModel("gpt-4o-mini").build()
 
-        def chatModel = new OpenAiChatModel(openAiApi, openAiChatOptions)
+        def chatModel = new OpenAiChatModel(llmApi, llmChatOptions)
 
         this.chatClient = new DefaultChatClientBuilder(chatModel).build()
     }

@@ -69,7 +69,7 @@ for (Object raw : (List) agents) {
   String llmModel = a.llmModel?.toString()?.trim() ?: 'gpt-4o-mini'
   String imageModel = a.imageModel?.toString()?.trim() ?: ''
   String imageGenerator = a.imageGenerator?.toString()?.trim() ?: ''
-  String openAiApiKey = a.openAiApiKey?.toString()
+  String llmApiKey = a.llmApiKey?.toString()
   boolean manageOtherAgentsHumanTasks =
     Boolean.TRUE.equals(a.get('manageOtherAgentsHumanTasks')) ||
     'true'.equalsIgnoreCase(a.get('manageOtherAgentsHumanTasks')?.toString())
@@ -125,7 +125,7 @@ for (Object raw : (List) agents) {
     llmModel                    : llmModel,
     imageModel                  : imageModel,
     imageGenerator              : imageGenerator,
-    openAiApiKey                : openAiApiKey,
+    llmApiKey                : llmApiKey,
     manageOtherAgentsHumanTasks : manageOtherAgentsHumanTasks,
     startAutomatically          : startAutomatically,
     stopOnFailure               : stopOnFailure
@@ -157,15 +157,15 @@ for (Object fidObj : outIds) {
   String ps = prev.get('status')?.toString()
   boolean sa = startAutoByFullId.containsKey(fid) ? Boolean.TRUE.equals(startAutoByFullId.get(fid)) : true
 
-  if (AutonomousAssistantStatus.DISABLED == ps) {
+  if (AutonomousAssistantStatus.matches(ps, AutonomousAssistantStatus.DISABLED)) {
     AutonomousAssistantStateStore.mergeState(fid, prev)
     continue
   }
-  if (AutonomousAssistantStatus.ERROR == ps) {
+  if (AutonomousAssistantStatus.matches(ps, AutonomousAssistantStatus.ERROR)) {
     AutonomousAssistantStateStore.mergeState(fid, prev)
     continue
   }
-  if (AutonomousAssistantStatus.STOPPED == ps) {
+  if (AutonomousAssistantStatus.matches(ps, AutonomousAssistantStatus.STOPPED)) {
     boolean manualStop = Boolean.TRUE.equals(prev.get('manualStop')) ||
       'true'.equalsIgnoreCase(prev.get('manualStop')?.toString())
     // manualStop or !startAutomatically: restore. Else plain stopped + auto-start: keep ensureEntry waiting (system stop / re-sync).
@@ -186,7 +186,8 @@ if (!AutonomousAssistantSupervisor.isSupervisorEnabled()) {
       continue
     }
     String cst = cur.get('status')?.toString()
-    if (AutonomousAssistantStatus.DISABLED == cst || AutonomousAssistantStatus.ERROR == cst) {
+    if (AutonomousAssistantStatus.matches(cst, AutonomousAssistantStatus.DISABLED) ||
+      AutonomousAssistantStatus.matches(cst, AutonomousAssistantStatus.ERROR)) {
       continue
     }
     boolean preserveManual = Boolean.TRUE.equals(cur.get('manualStop')) ||

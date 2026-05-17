@@ -22,8 +22,38 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   'enabledBuiltInTools',
   'mcpEnabled',
   'mcpServers',
-  'disabledMcpTools'
+  'disabledMcpTools',
+  'intentRecipeRouting'
 ]);
+
+const INTENT_RECIPE_ROUTING_KNOWN_KEYS = new Set([
+  'enabled',
+  'engineEnabled',
+  'minConfidence',
+  'requestClarificationOnUnmatched',
+  'customRecipesPath'
+]);
+
+export interface IntentRecipeRoutingFormState {
+  enabled: boolean;
+  engineEnabled: boolean;
+  minConfidence: string;
+  requestClarificationOnUnmatched: boolean;
+  customRecipesPath: string;
+  /** Keys such as engineMaxSteps preserved when saving from Studio. */
+  intentRecipeRoutingExtra?: Record<string, unknown>;
+}
+
+export function defaultIntentRecipeRoutingFormState(): IntentRecipeRoutingFormState {
+  return {
+    enabled: false,
+    engineEnabled: false,
+    minConfidence: '0.55',
+    requestClarificationOnUnmatched: false,
+    customRecipesPath: '',
+    intentRecipeRoutingExtra: undefined
+  };
+}
 
 export interface ToolsPolicyFormState {
   mcpEnabled: boolean;
@@ -31,6 +61,7 @@ export interface ToolsPolicyFormState {
   disabledBuiltInTools: string[];
   enabledBuiltInTools: string[];
   disabledMcpTools: string[];
+  intentRecipeRouting: IntentRecipeRoutingFormState;
   /** Other top-level keys from tools.json preserved when saving. */
   extraFields?: Record<string, unknown>;
 }
@@ -42,8 +73,53 @@ export function defaultToolsPolicyFormState(): ToolsPolicyFormState {
     disabledBuiltInTools: [],
     enabledBuiltInTools: [],
     disabledMcpTools: [],
+    intentRecipeRouting: defaultIntentRecipeRoutingFormState(),
     extraFields: undefined
   };
+}
+
+function parseIntentRecipeRoutingFromUnknown(raw: unknown): IntentRecipeRoutingFormState {
+  const base = defaultIntentRecipeRoutingFormState();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return base;
+  }
+  const o = raw as Record<string, unknown>;
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (!INTENT_RECIPE_ROUTING_KNOWN_KEYS.has(k)) {
+      extra[k] = v;
+    }
+  }
+  let minC = base.minConfidence;
+  if (o.minConfidence != null) {
+    minC = String(o.minConfidence).trim() || base.minConfidence;
+  }
+  return {
+    enabled: Boolean(o.enabled),
+    engineEnabled: Boolean(o.engineEnabled),
+    minConfidence: minC,
+    requestClarificationOnUnmatched: Boolean(o.requestClarificationOnUnmatched),
+    customRecipesPath: o.customRecipesPath != null ? String(o.customRecipesPath).trim() : '',
+    intentRecipeRoutingExtra: Object.keys(extra).length ? extra : undefined
+  };
+}
+
+function intentRecipeRoutingToJsonObject(state: IntentRecipeRoutingFormState): Record<string, unknown> {
+  const obj: Record<string, unknown> = { ...(state.intentRecipeRoutingExtra ?? {}) };
+  obj.enabled = Boolean(state.enabled);
+  obj.engineEnabled = Boolean(state.engineEnabled);
+  const mc = Number(state.minConfidence.trim());
+  if (Number.isFinite(mc)) {
+    obj.minConfidence = mc;
+  }
+  if (state.requestClarificationOnUnmatched) {
+    obj.requestClarificationOnUnmatched = true;
+  }
+  const path = state.customRecipesPath.trim();
+  if (path) {
+    obj.customRecipesPath = path;
+  }
+  return obj;
 }
 
 function headersObjectFromPairs(pairs: McpHeaderPair[]): Record<string, string> | undefined {
@@ -117,6 +193,7 @@ export function parseToolsPolicyFromUnknown(raw: unknown): ToolsPolicyFormState 
     disabledBuiltInTools: asStringArray(o.disabledBuiltInTools),
     enabledBuiltInTools: asStringArray(o.enabledBuiltInTools),
     disabledMcpTools: asStringArray(o.disabledMcpTools),
+    intentRecipeRouting: parseIntentRecipeRoutingFromUnknown(o.intentRecipeRouting),
     extraFields: Object.keys(extraFields).length ? extraFields : undefined
   };
 }
@@ -135,6 +212,10 @@ export function parseToolsPolicyFromJsonText(text: string): { ok: true; state: T
 }
 
 export function validateToolsPolicy(state: ToolsPolicyFormState): { ok: true } | { ok: false; message: string } {
+  const mc = Number(state.intentRecipeRouting.minConfidence.trim());
+  if (state.intentRecipeRouting.enabled && (!Number.isFinite(mc) || mc < 0 || mc > 1)) {
+    return { ok: false, message: 'Intent recipe min confidence must be a number between 0 and 1.' };
+  }
   for (let i = 0; i < state.mcpServers.length; i++) {
     const r = state.mcpServers[i];
     const id = r.id.trim();
@@ -217,5 +298,16 @@ export function serializeToolsPolicyToJson(state: ToolsPolicyFormState): string 
   obj.mcpEnabled = Boolean(state.mcpEnabled);
   obj.mcpServers = mcpServers;
   obj.disabledMcpTools = [...new Set(state.disabledMcpTools.map((s) => s.trim()).filter(Boolean))];
+  const irr = intentRecipeRoutingToJsonObject(state.intentRecipeRouting);
+  if (
+    state.intentRecipeRouting.enabled ||
+    state.intentRecipeRouting.engineEnabled ||
+    state.intentRecipeRouting.requestClarificationOnUnmatched ||
+    state.intentRecipeRouting.customRecipesPath.trim() ||
+    (state.intentRecipeRouting.intentRecipeRoutingExtra &&
+      Object.keys(state.intentRecipeRouting.intentRecipeRoutingExtra).length > 0)
+  ) {
+    obj.intentRecipeRouting = irr;
+  }
   return JSON.stringify(obj, null, 2);
 }

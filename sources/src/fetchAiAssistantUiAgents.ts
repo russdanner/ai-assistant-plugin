@@ -38,8 +38,8 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
   const llmModel = childTextDirect(agentEl, 'llmModel');
   const imageModel = childTextDirect(agentEl, 'imageModel');
   const imageGenerator = childTextDirect(agentEl, 'imageGenerator');
-  const openAiApiKey =
-    childTextDirect(agentEl, 'openAiApiKey') ??
+  const llmApiKey =
+    childTextDirect(agentEl, 'llmApiKey') ??
     childTextDirect(agentEl, 'open-ai-api-key') ??
     childTextDirect(agentEl, 'open_ai_api_key');
   const out: AgentConfig = { id: id.trim(), label: label.trim(), icon, prompts: [] };
@@ -47,7 +47,7 @@ function parseAgentElement(agentEl: Element): AgentConfig | null {
   if (llmModel) out.llmModel = llmModel;
   if (imageModel) out.imageModel = imageModel;
   if (imageGenerator) out.imageGenerator = imageGenerator;
-  if (openAiApiKey?.trim()) out.openAiApiKey = openAiApiKey.trim();
+  if (llmApiKey?.trim()) out.llmApiKey = llmApiKey.trim();
   const enableToolsRaw = childTextDirect(agentEl, 'enableTools') ?? childTextDirect(agentEl, 'enable_tools');
   if (enableToolsRaw !== undefined && String(enableToolsRaw).trim() !== '') {
     const s = String(enableToolsRaw).trim().toLowerCase();

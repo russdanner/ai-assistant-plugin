@@ -15,7 +15,7 @@ final class StudioAiImageGenContext {
   final String imagesApiKey
   /** Absolute POST URL for {@code /v1/images/generations} on the built-in wire when applicable. */
   final String imagesGenerationsHttpUrl
-  /** Raw agent/request {@code imageGenerator} spec (e.g. blank, {@code openAiWire}, {@code script:mygen}). */
+  /** Raw agent/request {@code imageGenerator} spec (e.g. blank, {@code llmWire}, {@code script:mygen}). */
   final String generatorSpec
 
   StudioAiImageGenContext(

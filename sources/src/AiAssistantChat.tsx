@@ -42,7 +42,7 @@ import {
 import { formatSessionLogForDebugCopy } from './aiAssistantSessionDebugLog';
 import type { ExpertSkillConfig, PromptConfig } from './agentConfig';
 import type { AuthoringFormContextSnapshot } from './aiAssistantFormAuthoringTypes';
-import MarkdownMessage, { normalizeOpenAiLiteralEscapes } from './MarkdownMessage';
+import MarkdownMessage, { normalizeLlmLiteralEscapes } from './MarkdownMessage';
 import GenerateImageBlurredPlaceholder from './GenerateImageBlurredPlaceholder';
 import AssistantChatGeneratedImages from './AssistantChatGeneratedImages';
 import {
@@ -374,7 +374,7 @@ function looksLikeFollowUpPromptClause(t: string): boolean {
  * so authors can one-click send them like 📋 verification chips.
  */
 function extractFollowUpActionPrompts(markdown: string): string[] {
-  const raw = normalizeOpenAiLiteralEscapes((markdown || '').trim());
+  const raw = normalizeLlmLiteralEscapes((markdown || '').trim());
   if (!raw) return [];
   const lines = raw.split(/\r?\n/);
   const out: string[] = [];
@@ -1308,8 +1308,8 @@ export interface AiAssistantChatProps {
   imageModel?: string;
   /** GenerateImage backend: ui.xml **imageGenerator** / stream POST (blank / openAiWire / none / script:{id}). */
   imageGenerator?: string;
-  /** From ui.xml; server uses only if env/JVM OpenAI key unset. Testing only — not recommended. */
-  openAiApiKey?: string;
+  /** From ui.xml; server uses only if env/JVM provider key unset. Testing only — not recommended. */
+  llmApiKey?: string;
   initialMessages?: Array<{ role: string; content: string }>;
   /** Prompts from ui.xml agent config; shown above chat. When set, overrides API quick messages. */
   configPrompts?: PromptConfig[];
@@ -1351,7 +1351,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
     llmModel,
     imageModel,
     imageGenerator,
-    openAiApiKey,
+    llmApiKey,
     initialMessages,
     configPrompts,
     embedTarget = 'default',
@@ -1891,7 +1891,7 @@ export default function AiAssistantChat(props: Readonly<AiAssistantChatProps>) {
         ...(imageGenerator != null && String(imageGenerator).trim() !== ''
           ? { imageGenerator: String(imageGenerator).trim() }
           : {}),
-        openAiApiKey,
+        llmApiKey,
         siteId,
         ...(previewTokenForStream ? { previewToken: previewTokenForStream } : {}),
         ...(omitToolsThisSend ? { omitTools: true } : {}),

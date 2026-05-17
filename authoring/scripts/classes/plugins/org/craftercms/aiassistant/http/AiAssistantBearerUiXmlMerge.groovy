@@ -5,6 +5,7 @@ import org.dom4j.Element
 import org.dom4j.io.SAXReader
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import plugins.org.craftercms.aiassistant.authoring.AuthoringPreviewContext
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 
 import java.io.StringReader
@@ -90,6 +91,10 @@ final class AiAssistantBearerUiXmlMerge {
         out.put('llmModel', findDirectChildByLocalName(agentEl, 'llmModel')?.getTextTrim() ?: '')
         out.put('imageGenerator', findDirectChildByLocalName(agentEl, 'imageGenerator')?.getTextTrim() ?: '')
         out.put('llm', findDirectChildByLocalName(agentEl, 'llm')?.getTextTrim() ?: '')
+        String aieRaw =
+          findDirectChildByLocalName(agentEl, 'authoringIntentExpansion')?.getTextTrim() ?:
+            findDirectChildByLocalName(agentEl, 'authoring_intent_expansion')?.getTextTrim() ?: ''
+        out.put('authoringIntentExpansion', aieRaw)
         break
       }
     } catch (Throwable t) {
@@ -166,7 +171,8 @@ final class AiAssistantBearerUiXmlMerge {
     String imgGenBody =
       (body.imageGenerator ?: body.get('image-generator') ?: body.image_generator)?.toString()?.trim() ?: ''
     String llmTransportBody = (body.llm ?: body.get('llm'))?.toString()?.trim() ?: ''
-    if (imgBody && llmModelBody && imgGenBody && llmTransportBody) {
+    boolean aieBodySet = body.containsKey('authoringIntentExpansion') || body.containsKey('authoring_intent_expansion')
+    if (imgBody && llmModelBody && imgGenBody && llmTransportBody && aieBodySet) {
       return
     }
     String site = (siteId ?: '').toString().trim()
@@ -184,7 +190,8 @@ final class AiAssistantBearerUiXmlMerge {
     String xmlLlmModel = (extracted.llmModel ?: '').toString().trim()
     String xmlImgGen = (extracted.imageGenerator ?: '').toString().trim()
     String xmlLlmTransport = (extracted.llm ?: '').toString().trim()
-    if (!xmlImg && !xmlLlmModel && !xmlImgGen && !xmlLlmTransport) {
+    String xmlAie = (extracted.authoringIntentExpansion ?: '').toString().trim()
+    if (!xmlImg && !xmlLlmModel && !xmlImgGen && !xmlLlmTransport && !xmlAie) {
       log.debug(
         'Agent ui.xml merge: no overlay fields for stream agentId={} siteId={} (no <agent> with matching <crafterQAgentId>, or that row has no mergeable fields)',
         agent,
@@ -193,7 +200,7 @@ final class AiAssistantBearerUiXmlMerge {
       return
     }
     if (!imgBody && xmlImg) {
-      String imgNorm = AiOrchestration.normalizeOpenAiImagesApiModelId(xmlImg)
+      String imgNorm = AiOrchestration.normalizeImagesApiModelId(xmlImg)
       body.put('imageModel', imgNorm)
       log.info(
         'Agent ui.xml merge: copied imageModel="{}" into POST body (POST omitted it; fixes GenerateImage without asking the author) siteId={} agent={}',
@@ -220,6 +227,16 @@ final class AiAssistantBearerUiXmlMerge {
       log.info(
         'Agent ui.xml merge: copied llm="{}" into POST body (POST omitted it) siteId={} agent={}',
         xmlLlmTransport,
+        site,
+        agent
+      )
+    }
+    if (!aieBodySet && xmlAie) {
+      boolean aie = AuthoringPreviewContext.parseAuthoringIntentExpansion(xmlAie)
+      body.put('authoringIntentExpansion', Boolean.valueOf(aie))
+      log.info(
+        'Agent ui.xml merge: copied authoringIntentExpansion={} into POST body siteId={} agent={}',
+        aie,
         site,
         agent
       )

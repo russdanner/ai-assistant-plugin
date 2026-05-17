@@ -27,7 +27,7 @@ import StudioDraggableImage from './StudioDraggableImage';
  * sequences backslash+n or backslash+t instead of real newlines/tabs. Markdown then
  * shows one long line. Convert those literals to actual whitespace for display.
  */
-export function normalizeOpenAiLiteralEscapes(input: string): string {
+export function normalizeLlmLiteralEscapes(input: string): string {
   if (!input) return input;
   return input
     .replace(/\\r\\n/g, '\n')
@@ -155,18 +155,52 @@ export function wrapBareLongDataImageUrlsAsMarkdown(input: string, minUrlChars =
   return parts.join('');
 }
 
+function textHasMarkdownFences(text: string): boolean {
+  return text.includes('```') || text.includes('~~~');
+}
+
+/** GFM fences: ``` or ~~~ (same opener/closer run length). */
+const MARKDOWN_FENCE_RE = /(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1/g;
+
+/** Apply data:image compaction only outside fenced code blocks (preserve literal examples in fences). */
+function preprocessAssistantMarkdownImagesSegment(
+  text: string,
+  longDataImageBlobRefMap: Map<string, string>
+): string {
+  const normalized = normalizeLlmLiteralEscapes(text);
+  const compactData = compactAllDataImageBase64Runs(normalized);
+  const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
+  const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
+  return wrapDataImageMarkdownDestInAngleBrackets(shortened);
+}
+
 /** Normalize escapes, wrap bare {@code data:image} runs, shorten to blob refs, angle-bracket destinations. */
 export function preprocessAssistantMarkdownImages(text: string): {
   displayText: string;
   longDataImageBlobRefMap: Map<string, string>;
 } {
   const longDataImageBlobRefMap = new Map<string, string>();
-  const normalized = normalizeOpenAiLiteralEscapes(text);
-  const compactData = compactAllDataImageBase64Runs(normalized);
-  const withBareWrapped = wrapBareLongDataImageUrlsAsMarkdown(compactData);
-  const shortened = replaceLongDataImageMarkdownWithBlobRefs(withBareWrapped, longDataImageBlobRefMap);
-  const displayText = wrapDataImageMarkdownDestInAngleBrackets(shortened);
-  return { displayText, longDataImageBlobRefMap };
+  if (!text || !textHasMarkdownFences(text)) {
+    return {
+      displayText: preprocessAssistantMarkdownImagesSegment(text, longDataImageBlobRefMap),
+      longDataImageBlobRefMap
+    };
+  }
+  const parts: string[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  MARKDOWN_FENCE_RE.lastIndex = 0;
+  while ((m = MARKDOWN_FENCE_RE.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last, m.index), longDataImageBlobRefMap));
+    }
+    parts.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    parts.push(preprocessAssistantMarkdownImagesSegment(text.slice(last), longDataImageBlobRefMap));
+  }
+  return { displayText: parts.join(''), longDataImageBlobRefMap };
 }
 
 /**

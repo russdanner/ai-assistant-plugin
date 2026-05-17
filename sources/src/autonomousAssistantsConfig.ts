@@ -17,7 +17,7 @@ export interface AutonomousAgentDefinition {
   imageModel?: string;
   /** Optional GenerateImage backend (same semantics as interactive chat **imageGenerator**). */
   imageGenerator?: string;
-  openAiApiKey?: string;
+  llmApiKey?: string;
   /**
    * When true, the model may set `ownerAgentId` on new human tasks and dismiss/complete tasks owned by other agents.
    * Default false: only this agent’s tasks are modified.
@@ -241,7 +241,7 @@ function normalizeOne(raw: unknown): AutonomousAgentDefinition | null {
       o.imageGenerator != null && String(o.imageGenerator).trim() !== ''
         ? String(o.imageGenerator).trim()
         : undefined,
-    openAiApiKey: o.openAiApiKey != null ? String(o.openAiApiKey).trim() : undefined,
+    llmApiKey: o.llmApiKey != null ? String(o.llmApiKey).trim() : undefined,
     ...(manageCross !== undefined ? { manageOtherAgentsHumanTasks: manageCross } : {}),
     ...(startAuto === false ? { startAutomatically: false } : {}),
     ...(stopFail === false ? { stopOnFailure: false } : {}),

@@ -222,7 +222,7 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
                   llmModel: resolved.llmModel,
                   imageModel: resolved.imageModel,
                   imageGenerator: resolved.imageGenerator,
-                  openAiApiKey: resolved.openAiApiKey,
+                  llmApiKey: resolved.llmApiKey,
                   prompts: resolved.prompts,
                   ...(resolved.enableTools !== undefined ? { enableTools: resolved.enableTools } : {}),
                   ...(Array.isArray(resolved.enabledBuiltInTools) && resolved.enabledBuiltInTools.length > 0
@@ -345,7 +345,7 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
     const llmModel = (iceRaw.llmModel as string | undefined)?.trim();
     const imageModel = iceChatCfg.imageModel as string | undefined;
     const imageGenerator = (iceRaw.imageGenerator as string | undefined)?.trim();
-    const openAiApiKey = iceChatCfg.openAiApiKey as string | undefined;
+    const llmApiKey = iceChatCfg.llmApiKey as string | undefined;
     const configPrompts = Array.isArray(iceChatCfg.prompts)
       ? (iceChatCfg.prompts as Array<{ userText: string; additionalContext?: string }>)
       : undefined;
@@ -363,7 +363,7 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
           llmModel={llmModel || undefined}
           imageModel={imageModel}
           imageGenerator={imageGenerator || undefined}
-          openAiApiKey={openAiApiKey}
+          llmApiKey={llmApiKey}
           enableTools={iceEnableTools}
           enabledBuiltInTools={iceEnabledBuiltIn}
           expertSkills={iceExpertSkills}
@@ -509,7 +509,7 @@ export function AiAssistantHelper(props: Readonly<AiAssistantHelperProps>) {
                         llmModel={d.agent.llmModel}
                         imageModel={d.agent.imageModel}
                         imageGenerator={d.agent.imageGenerator}
-                        openAiApiKey={d.agent.openAiApiKey}
+                        llmApiKey={d.agent.llmApiKey}
                         enableTools={d.agent.enableTools}
                         enabledBuiltInTools={d.agent.enabledBuiltInTools}
                         expertSkills={d.agent.expertSkills}

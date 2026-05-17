@@ -23,7 +23,7 @@
 // provider (`resolveOpenAiApiKey` below) — that may be OpenAI or another vendor depending on Studio config, not Groq chat.
 //
 // Chat model id (required — Groq deprecates model ids over time; this sample does not bake a default):
-//   <llmModel>…</llmModel> or POST llmModel → `req.openAiModelParam` (Studio request field name — value is your Groq model id).
+//   <llmModel>…</llmModel> or POST llmModel → `req.llmModelParam` (Studio request field name — value is your Groq model id).
 // Example (slash form is normal on Groq): meta-llama/llama-4-scout-17b-16e-instruct
 // Site-wide optional model env: GROQ_LLM_MODEL or SCRIPT_LLM_MODEL
 // Model list: https://console.groq.com/docs/models
@@ -87,14 +87,14 @@ class GroqScriptLlmRuntime implements StudioAiLlmRuntime {
       k = System.getenv('SCRIPT_LLM_API_KEY')?.toString()?.trim()
     }
     if (!k) {
-      k = (req.openAiApiKeyFromRequest ?: '').toString().trim()
+      k = (req.llmApiKeyFromRequest ?: '').toString().trim()
     }
     return k
   }
 
-  /** Groq chat model id from agent/request, then optional site env (`openAiModelParam` is the Studio request field name). */
+  /** Groq chat model id from agent/request, then optional site env (`llmModelParam` is the Studio request field name). */
   private static String compatModelId(StudioAiRuntimeBuildRequest req) {
-    String m = (req.openAiModelParam ?: '').toString().trim()
+    String m = (req.llmModelParam ?: '').toString().trim()
     if (m) {
       return m
     }
@@ -140,12 +140,12 @@ class GroqScriptLlmRuntime implements StudioAiLlmRuntime {
     refuseIfChatBaseIsOpenAiApiHost(base)
     if (!apiKey) {
       throw new IllegalStateException(
-        'Script LLM groq: set GROQ_API_KEY (or SCRIPT_LLM_API_KEY), or testing-only per-agent <openAiApiKey>. Use a **gsk_** Groq key — a non-Groq vendor key in that slot returns HTTP 401 from Groq.'
+        'Script LLM groq: set GROQ_API_KEY (or SCRIPT_LLM_API_KEY), or testing-only per-agent <llmApiKey>. Use a **gsk_** Groq key — a non-Groq vendor key in that slot returns HTTP 401 from Groq.'
       )
     }
     if (base.contains('groq.com') && !apiKey.startsWith('gsk_')) {
       throw new IllegalStateException(
-        "Script LLM groq: API key must be a Groq Console key (starts with gsk_). If you put another vendor’s secret in <openAiApiKey>, Groq returns 401 — use GROQ_API_KEY on the Studio host or a gsk_ value for local testing."
+        "Script LLM groq: API key must be a Groq Console key (starts with gsk_). If you put another vendor’s secret in <llmApiKey>, Groq returns 401 — use GROQ_API_KEY on the Studio host or a gsk_ value for local testing."
       )
     }
     String modelName = compatModelId(req)
@@ -194,7 +194,7 @@ class GroqScriptLlmRuntime implements StudioAiLlmRuntime {
       modelName,
       req.enableTools,
       base,
-      AiOrchestration.openAiApiKeyLogPreview(apiKey),
+      AiOrchestration.llmApiKeyLogPreview(apiKey),
       apiKey.length()
     )
     int maxCompOut = 8192

@@ -3,7 +3,7 @@ import { take, takeUntil } from 'rxjs';
 import {
   Editor,
 } from 'tinymce';
-import { aiAssistantClosedMessageId, openAiAssistantMessageId, popoverWidgetId } from './consts';
+import { aiAssistantClosedMessageId, llmAssistantMessageId, popoverWidgetId } from './consts';
 import type { AiAssistantPopoverProps } from './AiAssistantPopover';
 
 export type AiAssistantMessage = {
@@ -14,7 +14,7 @@ export type AiAssistantMessage = {
 export interface CrafterCMSAiAssistantConfig {
   strings?: {
     /** Toolbar tooltip for the main “open assistant” button (`aiAssistantOpen`). */
-    openAiAssistant?: string;
+    llmAssistant?: string;
     /** Toolbar tooltip for the shortcuts menu (`aiAssistantShortcuts`). */
     aiAssistantShortcuts?: string;
   };
@@ -25,7 +25,7 @@ export interface CrafterCMSAiAssistantConfig {
     shortcuts?: { label: string; messages: AiAssistantMessage[] }[];
   }>;
   /** Opens the AI Assistant with the built message list (selection/context). */
-  onOpenAiAssistant?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
+  onOpenAssistant?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
   onShortcutClick?: (editor: Editor, api: unknown, messages: AiAssistantMessage[]) => void;
   emptyStateOptions?: unknown;
   AiAssistantPopoverProps?: Partial<AiAssistantPopoverProps>;
@@ -33,7 +33,7 @@ export interface CrafterCMSAiAssistantConfig {
 
 const BASE_CONFIG: Partial<CrafterCMSAiAssistantConfig> = {
   strings: {
-    openAiAssistant: 'Open AI Assistant',
+    llmAssistant: 'Open AI Assistant',
     aiAssistantShortcuts: 'AI Shortcuts'
   },
   prependMessages: [],
@@ -262,8 +262,8 @@ const handleChatActionClick = (editor: Editor, id: string, content: string) => {
   }
 };
 
-const tellStudioToOpenAiAssistant = (editor, props) => {
-  xb.post(openAiAssistantMessageId, props);
+const tellStudioToOpenAssistant = (editor, props) => {
+  xb.post(llmAssistantMessageId, props);
   xb.fromTopic(aiAssistantClosedMessageId)
     .pipe(take(1))
     .subscribe(() => {
@@ -317,7 +317,7 @@ const createDefaultHandler = (config) => {
           );
         });
     } else {
-      tellStudioToOpenAiAssistant(editor, {
+      tellStudioToOpenAssistant(editor, {
         ...config.AiAssistantPopoverProps,
         AiAssistantProps: {
           ...config.AiAssistantPopoverProps?.AiAssistantProps,
@@ -341,24 +341,24 @@ pluginManager.add('craftercms_aiassistant', function (editor: Editor) {
     ...configArg,
     strings: {
       ...mergedStrings,
-      openAiAssistant: mergedStrings.openAiAssistant ?? 'Open AI Assistant',
+      llmAssistant: mergedStrings.llmAssistant ?? 'Open AI Assistant',
       aiAssistantShortcuts: mergedStrings.aiAssistantShortcuts ?? 'AI Shortcuts'
     }
   };
 
-  const userOpen = configArg?.onOpenAiAssistant;
+  const userOpen = configArg?.onOpenAssistant;
   if (!userOpen || !configArg?.onShortcutClick) {
     const defaultHandler = createDefaultHandler(instanceConfig);
-    instanceConfig.onOpenAiAssistant = defaultHandler;
+    instanceConfig.onOpenAssistant = defaultHandler;
     instanceConfig.onShortcutClick = defaultHandler;
   } else {
-    instanceConfig.onOpenAiAssistant = userOpen;
+    instanceConfig.onOpenAssistant = userOpen;
     instanceConfig.onShortcutClick = configArg.onShortcutClick;
   }
 
   editor.ui.registry.addButton('aiAssistantOpen', {
     icon: 'ai',
-    tooltip: instanceConfig.strings.openAiAssistant,
+    tooltip: instanceConfig.strings.llmAssistant,
     onAction(api) {
       const content = getSelection(editor).trim() || getContent(editor);
       const messages: AiAssistantMessage[] = [...instanceConfig.prependMessages].map((item) => ({
@@ -369,7 +369,7 @@ pluginManager.add('craftercms_aiassistant', function (editor: Editor) {
       if (selection) {
         messages.push({ role: 'system', content: `Context: ${selection}` });
       }
-      instanceConfig.onOpenAiAssistant!(editor, api, messages);
+      instanceConfig.onOpenAssistant!(editor, api, messages);
     }
   });
   const registerShortcutsMenuButton = (buttonId: string) => {
@@ -426,7 +426,7 @@ pluginManager.add('craftercms_aiassistant', function (editor: Editor) {
         ...item,
         content: item.content.replace('{context}', content)
       }));
-      instanceConfig.onOpenAiAssistant!(editor, api, messages);
+      instanceConfig.onOpenAssistant!(editor, api, messages);
     },
     onItemAction(api, item: any) {
       const content = getSelection(editor).trim() || getContent(editor);

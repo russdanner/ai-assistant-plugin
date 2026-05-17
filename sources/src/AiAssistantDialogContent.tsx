@@ -81,7 +81,7 @@ export interface AiAssistantDialogContentProps {
   imageModel?: string;
   imageGenerator?: string;
   /** Testing only — prefer server env. See docs/using-and-extending/llm-configuration.md */
-  openAiApiKey?: string;
+  llmApiKey?: string;
   prompts?: Array<{ userText: string; additionalContext?: string }>;
   enableTools?: boolean;
   enabledBuiltInTools?: string[];
@@ -100,7 +100,7 @@ function AiAssistantDialogContent(props: Readonly<AiAssistantDialogContentProps>
     llmModel,
     imageModel,
     imageGenerator,
-    openAiApiKey,
+    llmApiKey,
     prompts,
     enableTools,
     enabledBuiltInTools,
@@ -114,7 +114,7 @@ function AiAssistantDialogContent(props: Readonly<AiAssistantDialogContentProps>
       llmModel={llmModel}
       imageModel={imageModel}
       imageGenerator={imageGenerator}
-      openAiApiKey={openAiApiKey}
+      llmApiKey={llmApiKey}
       enableTools={enableTools}
       enabledBuiltInTools={enabledBuiltInTools}
       expertSkills={expertSkills}

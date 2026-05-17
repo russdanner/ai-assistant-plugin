@@ -26,6 +26,7 @@ function datasourceRepoPath(ds: unknown): string {
   return '';
 }
 
+/** Only the current Studio datasource type id — no legacy CrafterQ aliases; migrate old content types instead. */
 function isAiAssistantImgDatasource(ds: unknown): boolean {
   const typed = ds as { type?: string } | undefined;
   const t = (typed?.type ?? '').trim();

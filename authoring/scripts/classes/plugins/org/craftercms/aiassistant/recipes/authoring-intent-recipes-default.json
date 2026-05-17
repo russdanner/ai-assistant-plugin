@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "recipes": [
+    {
+      "id": "modify_page_content",
+      "title": "Modify page or component content",
+      "description": "Change copy, tone, grammar, or field values on a page or component XML item in the same language; author does not ask to translate/localize, generate a new bitmap, change FreeMarker/templates, or run site-wide discovery only.",
+      "matchHints": ["update", "change", "rewrite", "proofread", "grammar", "tone", "rephrase", "look up", "fetch", "lyrics", "hero title"],
+      "phases": {
+        "context": {
+          "hints": [
+            "Load the target item with GetContent (and GetContentTypeFormDefinition with contentPath when the form model matters)."
+          ],
+          "engineSteps": [
+            {
+              "tool": "GetContent",
+              "args": { "siteId": "$siteId", "path": "$contentPath" }
+            },
+            {
+              "tool": "GetContentTypeFormDefinition",
+              "args": { "siteId": "$siteId", "contentPath": "$contentPath" }
+            }
+          ]
+        },
+        "action": [
+          "Use update_content or GetContent → revise XML → WriteContent; preserve <page>/<component> structure and node-selector shapes."
+        ],
+        "confirmation": [
+          "When an Engine preview URL exists, use GetPreviewHtml after substantive writes affecting rendered output."
+        ]
+      }
+    },
+    {
+      "id": "translate_content_item",
+      "title": "Translate or localize content",
+      "description": "Author explicitly asks to translate or localize page/component copy into another language. Use TranslateContentItem or TranslateContentBatch (with ListContentTranslationScope for full-page scope) — not update_content or same-language rewrite via GetContent→WriteContent.",
+      "matchHints": ["translate", "translation", "localize", "localise", "localization", "localisation", "language", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Chinese", "Korean", "Arabic", "Dutch", "Polish", "Russian"],
+      "phases": {
+        "context": {
+          "hints": [
+            "When the author means full page / everything visible / this page copy: ListContentTranslationScope once on the anchored contentPath, then TranslateContentBatch (same target language for every path) or TranslateContentItem per path — never call ListContentTranslationScope twice in one turn without a write in between.",
+            "When scope is only the open repository item: TranslateContentItem on that contentPath is enough; skip ListContentTranslationScope unless they expand scope mid-task.",
+            "GetContentTypeFormDefinition only when you need unknown field ids."
+          ],
+          "engineSteps": [
+            {
+              "tool": "GetContent",
+              "args": { "siteId": "$siteId", "path": "$contentPath" }
+            },
+            {
+              "tool": "GetContentTypeFormDefinition",
+              "args": { "siteId": "$siteId", "contentPath": "$contentPath" }
+            }
+          ]
+        },
+        "action": [
+          "TranslateContentItem or TranslateContentBatch with explicit target language/locale from the author message; reuse the first ListContentTranslationScope result for batch paths."
+        ],
+        "confirmation": [
+          "Optional GetPreviewHtml when preview URL exists after substantive translation writes."
+        ]
+      }
+    },
+    {
+      "id": "generate_image",
+      "title": "Generate image (bitmap)",
+      "description": "Author wants a new AI-generated image, illustration, hero art, cover, logo, or picture — not a CMS XML field edit, translation, or template change. Use GenerateImage in the first tool round unless they explicitly ask to save into a repository field in the same turn.",
+      "matchHints": ["generate", "draw", "image", "picture", "illustration", "hero", "cover", "banner", "logo", "artwork", "graphic", "bitmap", "sketch", "paint"],
+      "toolsLoopAllowlist": ["GenerateImage"],
+      "toolsLoopAllowlistBypassIfAuthorMentions": ["WriteContent", "write content", "save to", "update_content", "image-picker", "static-assets", "upload to repo"],
+      "phases": {
+        "context": [
+          "Build the GenerateImage prompt from the author's exact words plus any page/topic context already in the message; do not run GetContent unless subject detail for the prompt is still missing."
+        ],
+        "action": [
+          "Call GenerateImage in the first tool round with a concrete prompt; optional size/quality only when the author specified them."
+        ],
+        "confirmation": [
+          "Wrap up in short prose only — the bitmap appears in the Studio chat image strip, not markdown image syntax."
+        ]
+      }
+    },
+    {
+      "id": "template_display_change",
+      "title": "Template / display (FTL) change",
+      "description": "Author explicitly wants layout, FreeMarker, listing markup, dates formatting in code, or how the page renders.",
+      "matchHints": ["template", "ftl", "freemarker", "render", "layout", "listing", "cards", "display"],
+      "phases": {
+        "context": [
+          "GetContent on page/component XML; read display-template; follow sections_o keys to component templates when the shell is not the listing."
+        ],
+        "action": [
+          "Read templates with GetContent or analyze_template (read-only) before update_template; persist with WriteContent on .ftl paths."
+        ],
+        "confirmation": [
+          "GetPreviewHtml when preview URL is available."
+        ]
+      }
+    },
+    {
+      "id": "publish_item",
+      "title": "Publish or go live",
+      "description": "Author wants to publish the current item or a named path to live/staging.",
+      "matchHints": ["publish", "go live", "deploy", "push to live", "release"],
+      "phases": {
+        "context": [
+          "Confirm siteId and target path from Studio context or author text."
+        ],
+        "action": [
+          "Use publish_content with path/contentPath; avoid unnecessary discovery reads when context already has the item path."
+        ],
+        "confirmation": [
+          "Summarize publish package outcome from tool result."
+        ]
+      }
+    },
+    {
+      "id": "new_content_item",
+      "title": "Create new page or component",
+      "description": "Author asks to create, draft, or write a new item (new URL or new component), not only edit the open file.",
+      "matchHints": ["create", "new page", "new article", "draft", "write a", "add a page"],
+      "phases": {
+        "context": {
+          "hints": [
+            "ListStudioContentTypes (siteId only) then exact catalog match; GetContentTypeFormDefinition for resolved contentTypeId; GetContent on one sibling of the same type when siblings exist."
+          ],
+          "engineSteps": [
+            {
+              "tool": "ListStudioContentTypes",
+              "args": { "siteId": "$siteId", "searchable": false }
+            }
+          ]
+        },
+        "action": [
+          "WriteContent the new item with correct conventions (objectId, dates, file-name, sections)."
+        ],
+        "confirmation": [
+          "Tell the author how to preview the new route; optional GetPreviewHtml."
+        ]
+      }
+    }
+  ]
+}

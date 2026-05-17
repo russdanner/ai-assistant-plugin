@@ -101,7 +101,8 @@ switch (action) {
         Map agentDef = (e.value instanceof Map) ? (Map) e.value : [:]
         Map st = AutonomousAssistantStateStore.getState(aid) ?: [:]
         String pst = st.get('status')?.toString()
-        if (AutonomousAssistantStatus.DISABLED.equals(pst) || AutonomousAssistantStatus.ERROR.equals(pst)) {
+        if (AutonomousAssistantStatus.matches(pst, AutonomousAssistantStatus.DISABLED) ||
+          AutonomousAssistantStatus.matches(pst, AutonomousAssistantStatus.ERROR)) {
           continue
         }
         boolean sa = cqParseStartAutomatically(agentDef)

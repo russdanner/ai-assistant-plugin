@@ -35,14 +35,14 @@ class AnthropicSpringAiLlmRuntime implements StudioAiLlmRuntime {
   @Override
   Map buildSessionBundle(StudioAiRuntimeBuildRequest req) {
     def orch = req.orchestration
-    String apiKey = StudioAiProviderCredentials.resolveAnthropicApiKey(req.openAiApiKeyFromRequest)
+    String apiKey = StudioAiProviderCredentials.resolveAnthropicApiKey(req.llmApiKeyFromRequest)
     if (!apiKey?.trim()) {
       throw new IllegalStateException(
-        'LLM is Claude (Anthropic) but no API key was found. Set ANTHROPIC_API_KEY or JVM crafter.anthropic.apiKey on Studio. For local testing only, optional agent <openAiApiKey> in ui.xml.'
+        'LLM is Claude (Anthropic) but no API key was found. Set ANTHROPIC_API_KEY or JVM crafter.anthropic.apiKey on Studio. For local testing only, optional agent <llmApiKey> in ui.xml.'
       )
     }
-    String modelName = StudioAiProviderCredentials.resolveAnthropicChatModel(req.openAiModelParam)
-    String openAiOnlyImageKey = AiOrchestration.resolveOpenAiApiKey(null)
+    String modelName = StudioAiProviderCredentials.resolveAnthropicChatModel(req.llmModelParam)
+    String llmOnlyImageKey = AiOrchestration.resolveLlmApiKey(null)
     def tools
     if (req.enableTools) {
       def expertSpecs = orch.readExpertSkillSpecsFromRequest()
@@ -50,7 +50,7 @@ class AnthropicSpringAiLlmRuntime implements StudioAiLlmRuntime {
         req.toolResultConverter,
         req.studioOps,
         req.toolProgressListener,
-        openAiOnlyImageKey,
+        llmOnlyImageKey,
         null,
         req.fullSuppressRepoWrites,
         req.protectedFormItemPath,
@@ -78,7 +78,7 @@ class AnthropicSpringAiLlmRuntime implements StudioAiLlmRuntime {
       modelName,
       req.enableTools,
       StudioAiProviderCredentials.anthropicApiKeySourceForLog(),
-      AiOrchestration.openAiApiKeyLogPreview(apiKey),
+      AiOrchestration.llmApiKeyLogPreview(apiKey),
       apiKey.length()
     )
     return [

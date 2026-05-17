@@ -14,7 +14,7 @@ One endpoint: **agent ID + full prompt in, streamed response out**. The UI does 
 |--|--|
 | **Method** | `POST` |
 | **URL** | Plugin script path: `/studio/api/2/plugin/script/plugins/org/craftercms/aiassistant/studio/aiassistant/ai/stream?siteId=...` (script at `authoring/scripts/rest/plugins/org/craftercms/aiassistant/studio/aiassistant/ai/stream.post.groovy`; path follows Trello pattern: plugin id path + extra segment so Studio resolves pluginId and classpath). |
-| **Request body** | JSON: `{ "agentId": "<uuid>", "prompt": "<full prompt>", "chatId": "<optional>", "llm": "openAI \| claude \| …", "llmModel": "<optional>", "imageModel": "<optional; required for GenerateImage when no agent imageModel — GPT Image id, e.g. gpt-image-1>", "openAiApiKey": "<optional testing>" }` — see **[chat-and-tools-runtime.md § REST body](chat-and-tools-runtime.md#rest-body-advanced)**. |
+| **Request body** | JSON: `{ "agentId": "<uuid>", "prompt": "<full prompt>", "chatId": "<optional>", "llm": "openAI \| claude \| …", "llmModel": "<optional>", "imageModel": "<optional; required for GenerateImage when no agent imageModel — GPT Image id, e.g. gpt-image-1>", "llmApiKey": "<optional testing>" }` — see **[chat-and-tools-runtime.md § REST body](chat-and-tools-runtime.md#rest-body-advanced)**. |
 | **Request headers** | Standard Studio session cookies / auth for the plugin REST call. Outbound chat traffic goes to **your configured LLM provider** (OpenAI-compatible **`/v1/chat/completions`**, Anthropic, or site **`script:{id}`**), not to a separate hosted SaaS chat stack. |
 | **Response** | `Content-Type: text/event-stream` — SSE chunks consumed by **`AiAssistantChat`**. |
 

@@ -1,9 +1,9 @@
-export const logoWidgetId = 'craftercms.components.aiassistant.OpenAILogo';
+export const logoWidgetId = 'craftercms.components.aiassistant.AssistantLogo';
 export const chatWidgetId = 'craftercms.components.aiassistant.MainChat';
 export const popoverWidgetId = 'craftercms.components.aiassistant.ChatPopover';
 export const dialogContentWidgetId = 'craftercms.components.aiassistant.DialogContent';
 export const aiAssistantClosedMessageId = 'craftercms.aiassistant.PanelClosed';
-export const openAiAssistantMessageId = 'craftercms.aiassistant.OpenPanel';
+export const llmAssistantMessageId = 'craftercms.aiassistant.OpenPanel';
 export const helperWidgetId = 'craftercms.components.aiassistant.Helper';
 /** Tools panel widget: scheduled autonomous OpenAI assistants (prototype). */
 export const autonomousAssistantsWidgetId = 'craftercms.components.aiassistant.AutonomousAssistants';

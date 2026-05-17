@@ -63,6 +63,14 @@ final class AutonomousAssistantSupervisor {
     }
   }
 
+  /** {@link ThreadPoolExecutor#submit} wraps runnables in {@code FutureTask}; {@link #execute} does not. */
+  private static AutonomousAgentRunRunnable autonomousRunnableFromRejectedTask(Runnable r) {
+    if (r instanceof AutonomousAgentRunRunnable) {
+      return (AutonomousAgentRunRunnable) r
+    }
+    return null
+  }
+
   static synchronized void ensureStarted() {
     if (supervisorExec == null || supervisorExec.isShutdown()) {
       supervisorExec = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
@@ -115,8 +123,9 @@ final class AutonomousAssistantSupervisor {
       RejectedExecutionHandler saturated = new RejectedExecutionHandler() {
         @Override
         void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-          if (r instanceof AutonomousAgentRunRunnable) {
-            RUNNING.remove(((AutonomousAgentRunRunnable) r).agentId)
+          AutonomousAgentRunRunnable ar = autonomousRunnableFromRejectedTask(r)
+          if (ar != null) {
+            RUNNING.remove(ar.agentId)
           }
           log.warn(
             'Autonomous worker pool saturated; task rejected (not run on supervisor thread). active={} poolSize={} queue={}',
@@ -263,8 +272,9 @@ final class AutonomousAssistantSupervisor {
             continue
           }
           String stName = st.get('status')?.toString()
-          if (AutonomousAssistantStatus.DISABLED == stName || AutonomousAssistantStatus.STOPPED == stName ||
-            AutonomousAssistantStatus.ERROR == stName) {
+          if (AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.DISABLED) ||
+            AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.STOPPED) ||
+            AutonomousAssistantStatus.matches(stName, AutonomousAssistantStatus.ERROR)) {
             continue
           }
           boolean nextStep = Boolean.TRUE.equals(st.get('nextStepRequired')) ||
@@ -286,7 +296,8 @@ final class AutonomousAssistantSupervisor {
           if (RUNNING.putIfAbsent(agentId, Boolean.TRUE) != null) {
             continue
           }
-          workerPool.submit(new AutonomousAgentRunRunnable(siteId, agentId, agentDef))
+          // execute() (not submit()) so rejection handler receives AutonomousAgentRunRunnable, not a FutureTask wrapper.
+          workerPool.execute(new AutonomousAgentRunRunnable(siteId, agentId, agentDef))
         }
       }
     } catch (Throwable t) {

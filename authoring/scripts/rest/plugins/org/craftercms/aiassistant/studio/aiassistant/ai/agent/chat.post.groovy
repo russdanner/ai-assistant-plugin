@@ -57,11 +57,29 @@ if (AuthoringPreviewContext.isFormEngineSurface(body?.authoringSurface)) {
     promptForOrchestration, request, siteIdBody ?: params?.siteId, body?.contentPath, body?.studioPreviewPageUrl)
 }
 def chatId = body.chatId?.toString()
-def openAiApiKey = body.openAiApiKey?.toString()
+def llmApiKey = body.apiKey?.toString()
 if (siteIdBody) {
   try {
     request.setAttribute('aiassistant.siteId', siteIdBody)
   } catch (Throwable ignored) {}
+}
+def normContentPath = AuthoringPreviewContext.normalizeRepoPath(body?.contentPath?.toString())
+if (normContentPath) {
+  try {
+    request.setAttribute('aiassistant.contentPath', normContentPath)
+  } catch (Throwable ignoredCp) {}
+}
+def normFormItemPath = AuthoringPreviewContext.normalizeRepoPath(body?.formEngineItemPath?.toString())
+if (normFormItemPath) {
+  try {
+    request.setAttribute('aiassistant.formEngineItemPath', normFormItemPath)
+  } catch (Throwable ignoredFp) {}
+}
+def ctIdBody = body?.contentTypeId?.toString()?.trim()
+if (ctIdBody) {
+  try {
+    request.setAttribute('aiassistant.contentTypeId', ctIdBody)
+  } catch (Throwable ignoredCt) {}
 }
 def previewTokenBody = body?.previewToken?.toString()?.trim()
 if (previewTokenBody) {
@@ -82,11 +100,11 @@ if (body instanceof Map && siteForBearer && agentId) {
   }
 }
 def llm = body.llm?.toString()
-def openAiModel = body.llmModel?.toString()
+def llmModel = body.llmModel?.toString()
 def imageModelRaw = body.imageModel?.toString()
 def imageModel = null
 if (imageModelRaw?.trim()) {
-  imageModel = AiOrchestration.normalizeOpenAiImagesApiModelId(imageModelRaw.trim())
+  imageModel = AiOrchestration.normalizeImagesApiModelId(imageModelRaw.trim())
   if (body instanceof Map) {
     try {
       body.put('imageModel', imageModel)
@@ -118,8 +136,13 @@ try {
     def omitTools = AuthoringPreviewContext.isTruthy(body?.omitTools)
     def enableToolsRequested = AuthoringPreviewContext.parseEnableTools(body?.enableTools)
     def enableTools = omitTools ? false : enableToolsRequested
+    def authoringIntentExpansion = AuthoringPreviewContext.parseAuthoringIntentExpansion(body?.authoringIntentExpansion)
+    try {
+      request.setAttribute('aiassistant.authoringIntentExpansion', Boolean.valueOf(authoringIntentExpansion))
+    } catch (Throwable ignoredAie) {
+    }
     def orchestration = new AiOrchestration(request, response, applicationContext, params, pluginConfig)
-    return orchestration.chatProxy(agentId, promptForOrchestration, chatId, llm, openAiModel, openAiApiKey, imageModel, formEngineClientForward, formEngineItemPathRaw, enableTools, imageGenerator)
+    return orchestration.chatProxy(agentId, promptForOrchestration, chatId, llm, llmModel, llmApiKey, imageModel, formEngineClientForward, formEngineItemPathRaw, enableTools, imageGenerator)
   } finally {
     ToolPromptsSiteContext.exit()
   }

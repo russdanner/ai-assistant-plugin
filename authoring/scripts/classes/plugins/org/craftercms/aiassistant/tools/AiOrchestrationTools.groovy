@@ -11,6 +11,8 @@ import plugins.org.craftercms.aiassistant.imagegen.StudioAiImageGeneratorFactory
 import plugins.org.craftercms.aiassistant.mcp.StudioAiMcpClient
 import plugins.org.craftercms.aiassistant.orchestration.AiOrchestration
 import plugins.org.craftercms.aiassistant.orchestration.chatcompletions.ChatCompletionsToolWire
+import plugins.org.craftercms.aiassistant.tools.spi.StudioAiToolContext
+import plugins.org.craftercms.aiassistant.tools.spi.StudioAiToolProgress
 import plugins.org.craftercms.aiassistant.playbook.CrafterizingPlaybookLoader
 import plugins.org.craftercms.aiassistant.prompt.ToolPrompts
 import plugins.org.craftercms.aiassistant.rag.ExpertSkillVectorRegistry
@@ -44,7 +46,11 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 /**
- * Builds Spring AI tool callbacks used by AiOrchestration.
+ * Builds Spring AI tool callbacks for {@link plugins.org.craftercms.aiassistant.orchestration.StudioAiOrchestrationEngine}.
+ * <p>Core tools are {@link plugins.org.craftercms.aiassistant.tools.spi.StudioAiOrchestrationTool} classes under
+ * {@code tools.cms}, {@code tools.development}, and {@code tools.general}, composed by
+ * {@link plugins.org.craftercms.aiassistant.tools.catalog.StudioAiToolRegistry}; this class adds supplemental tools
+ * (translate, image, MCP, site user tools).</p>
  * <p><strong>Every</strong> {@link FunctionToolCallback} must call {@code .inputSchema(...)} — OpenAI rejects
  * bare {@code Map.class} schemas ("object schema missing properties").</p>
  */
@@ -130,7 +136,8 @@ class AiOrchestrationTools {
   /**
    * Reads content type id from page/component XML: {@code <content-type>} (any prefix / case), else {@code display-template} path heuristic.
    */
-  private static String extractContentTypeIdFromItemXml(String xml) {
+  /** Used by {@link plugins.org.craftercms.aiassistant.recipes.AuthoringIntentRecipeEngine} to mirror GetContentTypeFormDefinition resolution. */
+  static String extractContentTypeIdFromItemXml(String xml) {
     if (!xml?.trim()) return null
     def relaxed = (xml =~ /(?is)<(?:[\w.-]+:)?content-type\s*>\s*([^<]+?)\s*<\/(?:[\w.-]+:)?content-type\s*>/)
     if (relaxed.find()) {
@@ -157,7 +164,8 @@ class AiOrchestrationTools {
    * Sandbox repository path from CMS tool arguments. Prefer {@code path}; also accept {@code contentPath}
    * (same key as {@code update_content} / authoring context) and a few other aliases models send.
    */
-  private static String repoPathFromToolInput(Map input) {
+  /** Used by {@link plugins.org.craftercms.aiassistant.recipes.AuthoringIntentRecipeEngine} for GetContent-style path keys. */
+  static String repoPathFromToolInput(Map input) {
     if (input == null) return ''
     def s = input.path?.toString()?.trim()
     if (s) return s
@@ -177,24 +185,83 @@ class AiOrchestrationTools {
   }
 
   /**
+   * Repairs common model JSON mistakes for {@link plugins.org.craftercms.aiassistant.tools.cms.WriteContentTool}
+   * (e.g. {@code "contentXml,"} keys, {@code xml}/{@code body} aliases).
+   */
+  static Map normalizeWriteContentToolArgsMap(Map raw) {
+    if (!(raw instanceof Map)) {
+      return [:]
+    }
+    Map out = new LinkedHashMap()
+    for (def entry : raw.entrySet()) {
+      String k = entry.key?.toString()
+      if (!k) {
+        continue
+      }
+      String nk = k.replaceAll(/[,;:\s]+$/, '').trim()
+      if (!nk) {
+        continue
+      }
+      if (!out.containsKey(nk)) {
+        out.put(nk, entry.value)
+      }
+    }
+    if (!out.contentXml) {
+      for (String alias : ['xml', 'body', 'content', 'itemXml', 'item_xml', 'updatedXml', 'updated_xml']) {
+        if (out.get(alias) != null) {
+          out.contentXml = out.get(alias)
+          break
+        }
+      }
+    }
+    if (!out.path && out.contentPath) {
+      out.path = out.contentPath
+    }
+    if (!out.contentPath && out.path) {
+      out.contentPath = out.path
+    }
+    return out
+  }
+
+  /** Normalizes WriteContent {@code tool_calls} arguments JSON before {@link FunctionToolCallback#call}. */
+  static String normalizeWriteContentToolArgsJson(String argsStr) {
+    String raw = (argsStr ?: '{}').toString()
+    try {
+      def parsed = new JsonSlurper().parseText(raw)
+      if (parsed instanceof Map) {
+        return JsonOutput.toJson(normalizeWriteContentToolArgsMap((Map) parsed))
+      }
+    } catch (Throwable ignored) {
+    }
+    return raw
+  }
+
+  /** XXE-hardened parse for untrusted form-definition.xml from the repository. */
+  private static Document parseFormDefinitionXmlSecure(String formXml) {
+    def factory = DocumentBuilderFactory.newInstance()
+    try {
+      factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
+    } catch (Throwable ignored) {}
+    try {
+      factory.setFeature('http://xml.org/sax/features/external-general-entities', false)
+      factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
+      factory.setFeature('http://apache.org/xml/features/nonvalidating/load-external-dtd', false)
+    } catch (Throwable ignored) {}
+    factory.setXIncludeAware(false)
+    factory.setExpandEntityReferences(false)
+    factory.setNamespaceAware(true)
+    return factory.newDocumentBuilder().parse(
+      new ByteArrayInputStream(formXml.getBytes(StandardCharsets.UTF_8)))
+  }
+
+  /**
    * Collects {@code <field><id>...</id>} values from form-definition.xml for a compact hint to the model.
    * <p>Uses JDK {@link DocumentBuilderFactory} — {@code groovy.util.XmlSlurper} is not on Studio plugin script compile classpath.</p>
    */
-  private static List<String> extractFormFieldIdsFromFormDefinitionXml(String formXml) {
+  static List<String> extractFormFieldIdsFromFormDefinitionXml(String formXml) {
     if (!formXml?.trim()) return []
     try {
-      def factory = DocumentBuilderFactory.newInstance()
-      try {
-        factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
-      } catch (Throwable ignored) {}
-      try {
-        factory.setFeature('http://xml.org/sax/features/external-general-entities', false)
-        factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
-      } catch (Throwable ignored) {}
-      factory.setXIncludeAware(false)
-      factory.setExpandEntityReferences(false)
-      def doc = factory.newDocumentBuilder().parse(
-        new ByteArrayInputStream(formXml.getBytes(StandardCharsets.UTF_8)))
+      def doc = parseFormDefinitionXmlSecure(formXml)
       def fields = doc.getElementsByTagName('field')
       def ids = new LinkedHashSet<String>()
       for (int i = 0; i < fields.length; i++) {
@@ -210,6 +277,90 @@ class AiOrchestrationTools {
       log.debug('extractFormFieldIdsFromFormDefinitionXml failed: {}', t.toString())
       return []
     }
+  }
+
+  /** {@code <field>} {@code <id>} + {@code <title>} pairs for label → id matching (Studio form-definition.xml). */
+  static List<Map<String, String>> extractFormFieldTitleIdPairsFromFormDefinitionXml(String formXml) {
+    if (!formXml?.trim()) {
+      return []
+    }
+    try {
+      def doc = parseFormDefinitionXmlSecure(formXml)
+      def fields = doc.getElementsByTagName('field')
+      List<Map<String, String>> pairs = new ArrayList<>()
+      for (int i = 0; i < fields.length; i++) {
+        def fieldEl = fields.item(i) as Element
+        String id = ''
+        String title = ''
+        for (int c = 0; c < fieldEl.childNodes.length; c++) {
+          def node = fieldEl.childNodes.item(c)
+          if (node?.nodeType != org.w3c.dom.Node.ELEMENT_NODE) {
+            continue
+          }
+          String local = node.localName ?: node.nodeName
+          if ('id'.equalsIgnoreCase(local) && !id) {
+            id = node.textContent?.trim() ?: ''
+          } else if ('title'.equalsIgnoreCase(local) && !title) {
+            title = node.textContent?.trim() ?: ''
+          }
+        }
+        if (id) {
+          pairs.add([id: id, title: title ?: id] as Map<String, String>)
+        }
+      }
+      return pairs
+    } catch (Throwable t) {
+      log.debug('extractFormFieldTitleIdPairsFromFormDefinitionXml failed: {}', t.toString())
+      return []
+    }
+  }
+
+  static String normalizeFormFieldLabelForMatch(String raw) {
+    if (!raw?.trim()) {
+      return ''
+    }
+    return raw
+      .trim()
+      .toLowerCase(Locale.ROOT)
+      .replace('\u00a0', ' ')
+      .replaceAll(/[^\p{L}\p{N}\s_-]+/, ' ')
+      .replaceAll(/\s+/, ' ')
+      .trim()
+  }
+
+  /**
+   * Maps author wording (e.g. "hero title") to a single field {@code id} via form-definition {@code <title>} text.
+   * Returns empty when ambiguous or no match.
+   */
+  static String resolveFieldIdFromFormDefinitionByAuthorLabel(String formXml, String authorLabelPhrase) {
+    String want = normalizeFormFieldLabelForMatch(authorLabelPhrase)
+    if (!want || !formXml?.trim()) {
+      return ''
+    }
+    List<Map<String, String>> pairs = extractFormFieldTitleIdPairsFromFormDefinitionXml(formXml)
+    String exactId = ''
+    List<String> fuzzyIds = new ArrayList<>()
+    for (Map<String, String> pair : pairs) {
+      String id = pair.get('id')?.trim() ?: ''
+      String titleNorm = normalizeFormFieldLabelForMatch(pair.get('title'))
+      if (!id || !titleNorm) {
+        continue
+      }
+      if (titleNorm == want) {
+        exactId = id
+        break
+      }
+      if (titleNorm.contains(want) || want.contains(titleNorm)) {
+        fuzzyIds.add(id)
+      }
+    }
+    if (exactId) {
+      return exactId
+    }
+    if (fuzzyIds.size() == 1) {
+      return fuzzyIds.get(0)
+    }
+    return ''
   }
 
   /**
@@ -234,7 +385,7 @@ class AiOrchestrationTools {
     '{"type":"object","properties":{"siteId":{"type":"string"},"path":{"type":"string","description":"Repository path starting with /"},"contentPath":{"type":"string","description":"Same as path; use either."},"contentXml":{"type":"string","description":"Complete file body. For /site/.../*.xml items: full <page> or <component> document preserving existing field element names from the content type; never replace with an unrelated XML schema."},"unlock":{"type":"string","description":"true or false"}},"required":["siteId","contentXml"]}'
   private static final String SCHEMA_LIST_PAGES =
     '{"type":"object","properties":{"siteId":{"type":"string"},"size":{"type":"integer","description":"max items, default 1000"}},"required":["siteId"]}'
-  private static final String SCHEMA_LIST_CONTENT_TRANSLATION_SCOPE =
+  private static final String SCHEMA_LIST_CONTENT_DEPENDENCY_SCOPE =
     '{"type":"object","properties":{"siteId":{"type":"string"},"contentPath":{"type":"string","description":"Root page or component XML under /site/... ending in .xml"},"path":{"type":"string","description":"Alias for contentPath"},"chunkSize":{"type":"integer","description":"Paths per batch for GetContent/WriteContent rounds (default 1 — one item at a time; max 50)"},"maxItems":{"type":"integer","description":"Optional max items in scope (default 300, cap 2000)"},"maxDepth":{"type":"integer","description":"Optional max reference depth from root (default 40, cap 100)"}},"required":["siteId"]}'
   private static final String SCHEMA_CRAFTERIZING_PLAYBOOK =
     '{"type":"object","properties":{"topic":{"type":"string","description":"Optional focus keyword for future use; full playbook is returned regardless."}}}'
@@ -254,7 +405,7 @@ class AiOrchestrationTools {
     '{"type":"object","properties":{"siteId":{"type":"string"},"contentPath":{"type":"string","description":"One page or component XML under /site/... ending in .xml"},"path":{"type":"string","description":"Alias for contentPath"},"instructions":{"type":"string","description":"Same task for every item when translating a page tree (e.g. translate author-visible copy to Arabic ar-SA; preserve XML)"},"writeResults":{"type":"boolean","description":"If true (default), WriteContent after a valid LLM bundle"},"unlock":{"type":"string","description":"Unlock flag for WriteContent (default true)"},"llmModel":{"type":"string","description":"OpenAI chat model for this item only (inner completion). Omit for server default smaller model (e.g. gpt-4o-mini). Alias: model"},"readTimeoutMs":{"type":"integer","description":"OpenAI HTTP read timeout ms (default 600000)"}},"required":["siteId","instructions"]}'
 
   private static final String SCHEMA_TRANSLATE_CONTENT_BATCH =
-    '{"type":"object","properties":{"siteId":{"type":"string"},"instructions":{"type":"string","description":"Same instruction for every path (e.g. translate author-visible copy to French fr-FR)"},"paths":{"type":"array","items":{"type":"string"},"description":"List of /site/.../*.xml paths"},"contentPaths":{"type":"array","items":{"type":"string"},"description":"Alias for paths"},"pathChunks":{"type":"array","description":"Optional: **pathChunks** from ListContentTranslationScope — same shape as that tool (outer array of chunks; each chunk is an array of path strings). Server flattens to paths.","items":{"type":"array","items":{"type":"string","description":"/site/.../*.xml repository path"}}},"maxConcurrency":{"type":"integer","description":"Parallel workers for this batch only (default from agent ui.xml translateBatchConcurrency, else 25; hard cap 64)"},"writeResults":{"type":"boolean"},"unlock":{"type":"string"},"llmModel":{"type":"string"},"model":{"type":"string"},"readTimeoutMs":{"type":"integer"}},"required":["siteId","instructions"]}'
+    '{"type":"object","properties":{"siteId":{"type":"string"},"instructions":{"type":"string","description":"Same instruction for every path (e.g. translate author-visible copy to French fr-FR)"},"paths":{"type":"array","items":{"type":"string"},"description":"List of /site/.../*.xml paths"},"contentPaths":{"type":"array","items":{"type":"string"},"description":"Alias for paths"},"pathChunks":{"type":"array","description":"Optional: **pathChunks** from ListContentDependencyScope — same shape as that tool (outer array of chunks; each chunk is an array of path strings). Server flattens to paths.","items":{"type":"array","items":{"type":"string","description":"/site/.../*.xml repository path"}}},"maxConcurrency":{"type":"integer","description":"Parallel workers for this batch only (default from agent ui.xml translateBatchConcurrency, else 25; hard cap 64)"},"writeResults":{"type":"boolean"},"unlock":{"type":"string"},"llmModel":{"type":"string"},"model":{"type":"string"},"readTimeoutMs":{"type":"integer"}},"required":["siteId","instructions"]}'
 
   /** Site sandbox Groovy under {@code config/studio/scripts/aiassistant/user-tools/} (manifest {@code registry.json}). */
   private static final String SCHEMA_INVOKE_SITE_USER_TOOL =
@@ -262,7 +413,7 @@ class AiOrchestrationTools {
 
   private static final int TRANSLATE_BATCH_MAX_PATHS = 100
 
-  /** When false, {@code TransformContentSubgraph} / {@code GetContentSubgraph} are not registered — use {@code ListContentTranslationScope} + {@code TranslateContentBatch} or {@code TranslateContentItem} per path. */
+  /** When false, {@code TransformContentSubgraph} is not registered — use {@code ListContentDependencyScope} + {@code TranslateContentBatch} or {@code TranslateContentItem} per path. */
   private static final boolean ENABLE_TRANSFORM_CONTENT_SUBGRAPH_BULK = false
 
   private static final int TRANSFORM_SUBGRAPH_MAX_CHARS = 280_000
@@ -447,11 +598,11 @@ class AiOrchestrationTools {
     Map gotItem
     try {
       gotItem = ops.getContent(siteId, contentPath) as Map
-    } catch (Throwable t) {
+    } catch (Throwable getEx) {
       return [
         error      : true,
         action     : actionTag,
-        message    : 'GetContent failed before inner translate: ' + (t.message ?: t.toString()),
+        message    : 'GetContent failed before inner translate: ' + (getEx.message ?: getEx.toString()),
         siteId     : siteId,
         contentPath: contentPath,
       ]
@@ -516,7 +667,7 @@ class AiOrchestrationTools {
     AiOrchestration.aiAssistantToolWorkerDiagPhase("${diag}_await_inner_openai_raw_item chars=${itemXml.length()}")
     long tOpenAi = System.nanoTime()
     String assistantXml =
-      AiOrchestration.openAiSimpleCompletionAssistantText(
+      AiOrchestration.toolsLoopSimpleCompletionAssistantText(
         apiKey,
         llmModel,
         sys,
@@ -526,7 +677,7 @@ class AiOrchestrationTools {
         diag
       )
     log.debug(
-      '{} DIAG innerOpenAiRawItem wallMs={} assistantChars={}',
+      '{} DIAG innerRawItem wallMs={} assistantChars={}',
       diag,
       (System.nanoTime() - tOpenAi) / 1_000_000L,
       (assistantXml ?: '').length()
@@ -544,9 +695,9 @@ class AiOrchestrationTools {
     String cleaned = stripOptionalMarkdownFences(assistantXml)
     String outItem = ContentSubgraphAggregator.extractLikelySingleItemRootXml(cleaned)
     if (!outItem?.trim()) {
-      String t = cleaned.trim()
-      if (t.startsWith('<') && (t.contains('<page') || t.contains('<component'))) {
-        outItem = t
+      String trimmed = cleaned.trim()
+      if (trimmed.startsWith('<') && (trimmed.contains('<page') || trimmed.contains('<component'))) {
+        outItem = trimmed
       }
     }
     if (!outItem?.trim()) {
@@ -601,11 +752,11 @@ class AiOrchestrationTools {
     Map w
     try {
       w = ops.writeContent(siteId, contentPath, outItem.trim(), unlock) as Map
-    } catch (Throwable t) {
+    } catch (Throwable writeEx) {
       return [
         error      : true,
         action     : actionTag,
-        message    : 'WriteContent failed: ' + (t.message ?: t.toString()),
+        message    : 'WriteContent failed: ' + (writeEx.message ?: writeEx.toString()),
         siteId     : siteId,
         contentPath: contentPath,
       ]
@@ -623,7 +774,7 @@ class AiOrchestrationTools {
 
   /**
    * Loads subgraph via {@link ContentSubgraphAggregator#build}, one non-streaming OpenAI completion (bundle + instructions only), optional {@link ContentSubgraphAggregator#apply}.
-   * Inner completion model when {@code llmModel}/{@code model} omitted: {@link AiOrchestration#openAiTransformSubgraphDefaultInnerModel(String)} (smaller model in same family as main chat).
+   * Inner completion model when {@code llmModel}/{@code model} omitted: {@link AiOrchestration#transformSubgraphDefaultInnerModel(String)} (smaller model in same family as main chat).
    * @param toolDiagKey prefix for {@link AiOrchestration#aiAssistantToolWorkerDiagPhase} and logs ({@code TransformContentSubgraph} vs {@code TranslateContentItem})
    * @param resultAction {@code action} field in returned maps
    */
@@ -683,7 +834,7 @@ class AiOrchestrationTools {
       maxDepth = null
     }
     String explicitInnerLlm = input?.llmModel?.toString()?.trim() ?: input?.model?.toString()?.trim()
-    String llmModel = explicitInnerLlm ?: AiOrchestration.openAiTransformSubgraphDefaultInnerModel(defaultChatModel)
+    String llmModel = explicitInnerLlm ?: AiOrchestration.transformSubgraphDefaultInnerModel(defaultChatModel)
     int innerMaxOutTokens =
       'TranslateContentItem'.equals(diag)
         ? AiOrchestration.resolveTranslateContentItemMaxOutTokens()
@@ -750,7 +901,7 @@ class AiOrchestrationTools {
         error        : true,
         action       : actionTag,
         message      :
-          "Subgraph bundle is ${subgraphXml.length()} characters (limit ${TRANSFORM_SUBGRAPH_MAX_CHARS}). Narrow maxItems/maxDepth or use ListContentTranslationScope + per-path GetContent/WriteContent.",
+          "Subgraph bundle is ${subgraphXml.length()} characters (limit ${TRANSFORM_SUBGRAPH_MAX_CHARS}). Narrow maxItems/maxDepth or use ListContentDependencyScope + per-path GetContent/WriteContent.",
         documentCount: built?.documentCount,
         paths        : built?.paths,
         truncated    : built?.truncated,
@@ -835,7 +986,7 @@ class AiOrchestrationTools {
       "${diag}_await_inner_openai_completion model=${llmModel} bundleChars=${subgraphXml.length()}"
     )
     long tOpenAi = System.nanoTime()
-    String assistantXml = AiOrchestration.openAiSimpleCompletionAssistantText(
+    String assistantXml = AiOrchestration.toolsLoopSimpleCompletionAssistantText(
       apiKey,
       llmModel,
       sys,
@@ -844,11 +995,11 @@ class AiOrchestrationTools {
       readTimeoutMs,
       diag
     )
-    long openAiMs = (System.nanoTime() - tOpenAi) / 1_000_000L
+    long ms = (System.nanoTime() - tOpenAi) / 1_000_000L
     log.debug(
-      '{} DIAG innerOpenAiSimpleCompletion wallMs={} assistantXmlChars={} maxOutTokens={}',
+      '{} DIAG innerSimpleCompletion wallMs={} assistantXmlChars={} maxOutTokens={}',
       diag,
-      openAiMs,
+      ms,
       (assistantXml ?: '').length(),
       innerMaxOutTokens
     )
@@ -1205,7 +1356,7 @@ class AiOrchestrationTools {
     List<String> paths = collectTranslateBatchPaths(input)
     if (paths.isEmpty()) {
       throw new IllegalArgumentException(
-        'Provide non-empty paths: paths or contentPaths (array of /site/.../*.xml), or pathChunks from ListContentTranslationScope'
+        'Provide non-empty paths: paths or contentPaths (array of /site/.../*.xml), or pathChunks from ListContentDependencyScope'
       )
     }
     if (paths.size() > TRANSLATE_BATCH_MAX_PATHS) {
@@ -1514,54 +1665,7 @@ class AiOrchestrationTools {
    * {@code phase} is {@code start}, {@code done}, {@code warn}, or {@code error}; {@code toolResultOrNull} is set for {@code done}/{@code warn}.
    */
   static Map runWithToolProgress(String toolName, Map rawInput, Closure listener, Closure work) {
-    def input = (rawInput != null) ? rawInput : [:]
-    if (AiOrchestration.aiAssistantPipelineCancelEffective()) {
-      AiOrchestration.aiAssistantToolWorkerDiagPhase("tool_skipped_pipeline_cancelled name=${toolName}")
-      log.warn(
-        'AI Assistant tool skipped (author Stop / SSE disconnect / pipeline cancel or worker interrupt): tool={}',
-        toolName
-      )
-      return [
-        ok       : false,
-        error    : true,
-        cancelled: true,
-        message  : 'Request was stopped; this tool call was not executed (no repository or side-effect work performed).',
-        tool     : toolName
-      ] as Map
-    }
-    long t0 = System.nanoTime()
-    if (listener) {
-      try {
-        listener.call(toolName, 'start', input, null, null, null)
-      } catch (Throwable ignored) {}
-    }
-    try {
-      def result = work.call()
-      if ('GenerateImage'.equals(toolName) && result instanceof Map) {
-        String wireTcId = ChatCompletionsToolWire.nativeToolCallIdBindingGet()
-        if (wireTcId && !((Map) result).inlineImageRef) {
-          Map enriched = new LinkedHashMap<>((Map) result)
-          enriched.put('inlineImageRef', wireTcId)
-          result = enriched
-        }
-      }
-      long elapsedMs = (System.nanoTime() - t0) / 1_000_000L
-      if (listener) {
-        try {
-          def phase = isToolResultWarning(result) ? 'warn' : 'done'
-          listener.call(toolName, phase, input, null, result, elapsedMs)
-        } catch (Throwable ignored2) {}
-      }
-      return (Map) result
-    } catch (Throwable t) {
-      long elapsedMs = (System.nanoTime() - t0) / 1_000_000L
-      if (listener) {
-        try {
-          listener.call(toolName, 'error', input, t, null, elapsedMs)
-        } catch (Throwable ignored3) {}
-      }
-      throw t
-    }
+    return StudioAiToolProgress.runWithToolProgress(toolName, rawInput, listener, work)
   }
 
   /**
@@ -1572,12 +1676,12 @@ class AiOrchestrationTools {
   static List buildWithDefaultWireConverter(
     StudioToolOperations ops,
     Closure toolProgressListener = null,
-    String openAiApiKeyForImages = null,
+    String apiKeyForImages = null,
     String imageModel = null,
     boolean fullSuppressRepoWrites = false,
     String protectedFormItemPath = null,
     List<Map> expertSkillSpecs = null,
-    String openAiTextModel = null,
+    String textModel = null,
     String llmNormalized = null,
     String imageGeneratorParam = null,
     Collection agentEnabledBuiltInTools = null
@@ -1588,12 +1692,12 @@ class AiOrchestrationTools {
       converter,
       ops,
       toolProgressListener,
-      openAiApiKeyForImages,
+      apiKeyForImages,
       imageModel,
       fullSuppressRepoWrites,
       protectedFormItemPath,
       expertSkillSpecs,
-      openAiTextModel,
+      textModel,
       llmNormalized,
       imageGeneratorParam,
       agentEnabledBuiltInTools
@@ -1604,14 +1708,14 @@ class AiOrchestrationTools {
    * @param converter Spring AI tool result converter or Groovy closure {@code (Object result, Type returnType) -> String}; passed via {@code invokeMethod} so site Groovy compiles without {@code ToolCallResultConverter} on the script classpath
    * @param ops Studio tool operations
    * @param toolProgressListener optional progress callback for streaming chat (see {@link #runWithToolProgress})
-   * @param openAiApiKeyForImages API key for the built-in **image** HTTP wire and for embedding/RAG inner calls when applicable (see {@link StudioAiImageGeneratorFactory})
+   * @param apiKeyForImages API key for the built-in **image** HTTP wire and for embedding/RAG inner calls when applicable (see {@link StudioAiImageGeneratorFactory})
    * @param imageModel resolved default image model from agent/request for the built-in images wire (e.g. gpt-image-1); optional per-call {@code model} in tool args; ignored for pure {@code script:…} image backends unless the script reads it from context
    * @param fullSuppressRepoWrites when true (form engine + client JSON apply but no item path), omit write/publish/revert tools entirely
    * @param protectedFormItemPath normalized repo path of the open form item — when set (and not full suppress), write/publish/revert stay registered but are rejected only for this path; {@code update_content} for this path steers toward {@code aiassistantFormFieldUpdates}
    * @param expertSkillSpecs normalized maps {@code skillId},{@code name},{@code url},{@code description} from the chat request; when non-empty and an OpenAI API key is available, registers {@code QueryExpertGuidance}
-   * @param openAiTextModel resolved OpenAI chat model id for inner completions ({@code TranslateContentItem} / bulk subgraph when enabled) default {@code llmModel}; ignored when no API key
+   * @param textModel resolved OpenAI chat model id for inner completions ({@code TranslateContentItem} / bulk subgraph when enabled) default {@code llmModel}; ignored when no API key
    * @param llmNormalized {@link plugins.org.craftercms.aiassistant.llm.StudioAiLlmKind#normalize} result for the active session (image wire defaults)
-   * @param imageGeneratorParam optional {@code openAiWire} (default when blank), {@code none}|{@code off}|{@code disabled}, or {@code script:id} — see site docs
+   * @param imageGeneratorParam optional {@code wire} (default when blank), {@code none}|{@code off}|{@code disabled}, or {@code script:id} — see site docs
    * <p>Built-in tool visibility may be constrained by site {@code /scripts/aiassistant/config/tools.json} — see {@link StudioAiAssistantProjectConfig}.
  * Optional <strong>MCP</strong> servers register additional {@code mcp_*} tools when {@code mcpEnabled} is JSON {@code true} in the same file — see {@link StudioAiAssistantProjectConfig#mcpClientEnabled} and {@link plugins.org.craftercms.aiassistant.mcp.StudioAiMcpClient}.</p>
    */
@@ -1619,19 +1723,33 @@ class AiOrchestrationTools {
     Object converter,
     StudioToolOperations ops,
     Closure toolProgressListener = null,
-    String openAiApiKeyForImages = null,
+    String apiKeyForImages = null,
     String imageModel = null,
     boolean fullSuppressRepoWrites = false,
     String protectedFormItemPath = null,
     List<Map> expertSkillSpecs = null,
-    String openAiTextModel = null,
+    String textModel = null,
     String llmNormalized = null,
     String imageGeneratorParam = null,
     Collection agentEnabledBuiltInTools = null
   ) {
-    Map aiProjectToolCfg = StudioAiAssistantProjectConfig.load(ops)
-    def normProtected = AuthoringPreviewContext.normalizeRepoPath(protectedFormItemPath)
-    boolean pathProtect = normProtected.length() > 0
+    def ctx = StudioAiToolContext.fromBuildParams(
+      converter,
+      ops,
+      toolProgressListener,
+      apiKeyForImages,
+      imageModel,
+      fullSuppressRepoWrites,
+      protectedFormItemPath,
+      expertSkillSpecs,
+      textModel,
+      llmNormalized,
+      imageGeneratorParam,
+      agentEnabledBuiltInTools
+    )
+    Map aiProjectToolCfg = ctx.aiProjectToolCfg
+    def normProtected = ctx.normProtectedFormItemPath
+    boolean pathProtect = ctx.pathProtectFormItem
     List<Map> expertSpecs = new ArrayList<>()
     if (expertSkillSpecs instanceof List) {
       for (Object o : (List) expertSkillSpecs) {
@@ -1640,7 +1758,7 @@ class AiOrchestrationTools {
         }
       }
     }
-    String embKey = (openAiApiKeyForImages ?: '').toString().trim()
+    String embKey = (apiKeyForImages ?: '').toString().trim()
     def expertEmbedModel =
       (!expertSpecs.isEmpty() && embKey) ? ExpertSkillVectorRegistry.buildEmbeddingModel(embKey) : null
     Map<String, String> expertUrlBySkillId = new HashMap<>()
@@ -1651,12 +1769,12 @@ class AiOrchestrationTools {
         expertUrlBySkillId.put(sid, u)
       }
     }
-    String openAiChatModelResolved = (openAiTextModel ?: '').toString().trim() ?: 'gpt-4o-mini'
+    String llmChatModelResolved = (textModel ?: '').toString().trim() ?: 'gpt-4o-mini'
 
     def generateTextNoToolsTool = null
     if (embKey) {
       final String apiKeyGen = embKey
-      final String defaultModelGen = openAiChatModelResolved
+      final String defaultModelGen = llmChatModelResolved
       generateTextNoToolsTool = FunctionToolCallback.builder('GenerateTextNoTools', new Function<Map, Map>() {
         @Override Map apply(Map input) {
           runWithToolProgress('GenerateTextNoTools', input, toolProgressListener, {
@@ -1703,7 +1821,7 @@ class AiOrchestrationTools {
               readTimeout = 180_000
             }
             readTimeout = Math.min(600_000, Math.max(60_000, readTimeout))
-            String text = AiOrchestration.openAiSimpleCompletionAssistantText(
+            String text = AiOrchestration.toolsLoopSimpleCompletionAssistantText(
               apiKeyGen,
               modelUse,
               innerSystem,
@@ -1729,13 +1847,11 @@ class AiOrchestrationTools {
     }
 
     def transformContentSubgraphTool = null
-    /** Legacy / alternate name models and prompts still emit; same implementation as TransformContentSubgraph. */
-    def getContentSubgraphAliasTool = null
     def translateContentItemTool = null
     def translateContentBatchTool = null
     if (embKey && !fullSuppressRepoWrites) {
       final String apiKeyFinal = embKey
-      final String defaultModelFinal = openAiChatModelResolved
+      final String defaultModelFinal = llmChatModelResolved
       final String normProtFinal = normProtected
       final boolean pathProtectFinal = pathProtect
       final Closure progressFinal = toolProgressListener
@@ -1799,19 +1915,6 @@ class AiOrchestrationTools {
           .inputType(Map.class)
           .invokeMethod('toolCallResultConverter', converter)
           .build()
-        getContentSubgraphAliasTool = FunctionToolCallback.builder('GetContentSubgraph', new Function<Map, Map>() {
-          @Override Map apply(Map input) {
-            runWithToolProgress('GetContentSubgraph', input, toolProgressListener, {
-              logToolInvocation('GetContentSubgraph', (Map) (input ?: [:]))
-              runTransformContentSubgraph(ops, input, apiKeyFinal, defaultModelFinal, normProtFinal, pathProtectFinal)
-            })
-          }
-        })
-          .description(ToolPrompts.getDESC_TRANSFORM_CONTENT_SUBGRAPH())
-          .inputSchema(SCHEMA_TRANSFORM_CONTENT_SUBGRAPH)
-          .inputType(Map.class)
-          .invokeMethod('toolCallResultConverter', converter)
-          .build()
       }
     }
 
@@ -1832,10 +1935,10 @@ class AiOrchestrationTools {
       .invokeMethod('toolCallResultConverter', converter)
       .build()
 
-    def listContentTranslationScopeTool = FunctionToolCallback.builder('ListContentTranslationScope', new Function<Map, Map>() {
+    def listContentDependencyScopeTool = FunctionToolCallback.builder('ListContentDependencyScope', new Function<Map, Map>() {
       @Override Map apply(Map input) {
-        runWithToolProgress('ListContentTranslationScope', input, toolProgressListener, {
-          logToolInvocation('ListContentTranslationScope', (Map) (input ?: [:]))
+        runWithToolProgress('ListContentDependencyScope', input, toolProgressListener, {
+          logToolInvocation('ListContentDependencyScope', (Map) (input ?: [:]))
           def siteId = ops.resolveEffectiveSiteId(input?.siteId?.toString()?.trim())
           def contentPath = input?.contentPath?.toString()?.trim() ?: input?.path?.toString()?.trim()
           Integer maxItems = null
@@ -1874,8 +1977,8 @@ class AiOrchestrationTools {
         })
       }
     })
-      .description(ToolPrompts.DESC_LIST_CONTENT_TRANSLATION_SCOPE)
-      .inputSchema(SCHEMA_LIST_CONTENT_TRANSLATION_SCOPE)
+      .description(ToolPrompts.DESC_LIST_CONTENT_DEPENDENCY_SCOPE)
+      .inputSchema(SCHEMA_LIST_CONTENT_DEPENDENCY_SCOPE)
       .inputType(Map.class)
       .invokeMethod('toolCallResultConverter', converter)
       .build()
@@ -2400,7 +2503,7 @@ class AiOrchestrationTools {
 
     def tools = [
       getContentTool,
-      listContentTranslationScopeTool,
+      listContentDependencyScopeTool,
     ] as ArrayList
     if (generateTextNoToolsTool != null) {
       tools.add(generateTextNoToolsTool)
@@ -2413,9 +2516,6 @@ class AiOrchestrationTools {
     }
     if (transformContentSubgraphTool != null) {
       tools.add(transformContentSubgraphTool)
-    }
-    if (getContentSubgraphAliasTool != null) {
-      tools.add(getContentSubgraphAliasTool)
     }
     tools.addAll([
       listStudioContentTypesTool,
@@ -2449,7 +2549,7 @@ class AiOrchestrationTools {
       ops,
       llmNormForImg,
       imageGenSpec,
-      (openAiApiKeyForImages ?: '').toString().trim(),
+      (apiKeyForImages ?: '').toString().trim(),
       imageModel
     )
     if (imageGen != null) {
@@ -2457,7 +2557,7 @@ class AiOrchestrationTools {
         ops,
         llmNormForImg,
         imageGenSpec,
-        (openAiApiKeyForImages ?: '').toString().trim(),
+        (apiKeyForImages ?: '').toString().trim(),
         imageModel
       )
       def generateImageTool = FunctionToolCallback.builder('GenerateImage', new Function<Map, Map>() {
@@ -2632,6 +2732,9 @@ class AiOrchestrationTools {
       }
       String n = ((FunctionToolCallback) t).getToolDefinition().name()
       boolean allow = keep.contains(n)
+      if (!allow && 'ListContentDependencyScope'.equals(n) && keep.contains('ListContentTranslationScope')) {
+        allow = true
+      }
       if (!allow && mcpAll && n != null && n.startsWith('mcp_')) {
         allow = true
       }
@@ -2652,6 +2755,16 @@ class AiOrchestrationTools {
       return true
     }
     return n.startsWith('mcp_')
+  }
+
+  /**
+   * {@code enabledBuiltInTools} may still list {@code ListContentTranslationScope} from before the wire rename.
+   */
+  private static boolean builtInWhitelistAllows(String wireName, Set<String> wl) {
+    if (wl.contains(wireName)) {
+      return true
+    }
+    return 'ListContentDependencyScope'.equals(wireName) && wl.contains('ListContentTranslationScope')
   }
 
   /**
@@ -2681,7 +2794,7 @@ class AiOrchestrationTools {
         if (isExtensionCatalogToolName(n)) {
           continue
         }
-        if (!wl.contains(n)) {
+        if (!builtInWhitelistAllows(n, wl)) {
           it.remove()
         }
       } else if (StudioAiAssistantProjectConfig.isToolNameDisabled(n, bl)) {

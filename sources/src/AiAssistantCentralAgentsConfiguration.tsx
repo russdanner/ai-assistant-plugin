@@ -17,6 +17,7 @@ import {
   Box,
   Button,
   Checkbox,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -36,13 +37,29 @@ import {
   Select,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography
 } from '@mui/material';
 import type { PromptConfig } from './agentConfig';
 import { normalizeEnabledBuiltInToolsRaw } from './agentConfig';
-import { fetchAiAssistantScriptsIndex, type AiAssistantScriptsIndexItem } from './aiAssistantScriptsApi';
+import AiAssistantSiteOrchestrationToolsForm from './AiAssistantSiteOrchestrationToolsForm';
+import {
+  defaultToolsPolicyFormState,
+  parseToolsPolicyFromJsonText,
+  serializeToolsPolicyToJson,
+  validateToolsPolicy,
+  type ToolsPolicyFormState
+} from './aiAssistantToolsMcpUiModel';
+import {
+  fetchAiAssistantScriptsIndex,
+  fetchOptionalStudioSandboxUtf8,
+  postAiAssistantScriptsMutate,
+  TOOLS_JSON_SANDBOX_PATH,
+  type AiAssistantScriptsIndexItem
+} from './aiAssistantScriptsApi';
 import {
   STUDIO_AI_BUILTIN_TOOL_IDS,
   STUDIO_AI_CLAUDE_CHAT_MODELS,
@@ -317,6 +334,13 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
   /** Chat quick-prompt rows while the edit dialog is open (trimmed on save). */
   const [chatPromptRows, setChatPromptRows] = useState<PromptConfig[]>([]);
   const [agentDialogFullscreen, setAgentDialogFullscreen] = useState(false);
+  const [agentDialogTab, setAgentDialogTab] = useState<'general' | 'advanced'>('general');
+  const [siteOrchPolicy, setSiteOrchPolicy] = useState<ToolsPolicyFormState>(() => defaultToolsPolicyFormState());
+  const [siteOrchLoaded, setSiteOrchLoaded] = useState(false);
+  const [siteOrchLoading, setSiteOrchLoading] = useState(false);
+  const [siteOrchDirty, setSiteOrchDirty] = useState(false);
+  const [siteOrchError, setSiteOrchError] = useState<string | null>(null);
+  const [savingSiteOrch, setSavingSiteOrch] = useState(false);
   const [scriptsIndexRows, setScriptsIndexRows] = useState<{
     llm: AiAssistantScriptsIndexItem[];
     imageGen: AiAssistantScriptsIndexItem[];
@@ -324,6 +348,78 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
 
   const scriptsRowsRef = React.useRef(scriptsIndexRows);
   scriptsRowsRef.current = scriptsIndexRows;
+
+  const resetSiteOrchDraft = useCallback(() => {
+    setSiteOrchPolicy(defaultToolsPolicyFormState());
+    setSiteOrchLoaded(false);
+    setSiteOrchDirty(false);
+    setSiteOrchError(null);
+    setSiteOrchLoading(false);
+    setSavingSiteOrch(false);
+  }, []);
+
+  const loadSiteOrchPolicy = useCallback(async () => {
+    if (!siteId) {
+      resetSiteOrchDraft();
+      return;
+    }
+    setSiteOrchLoading(true);
+    setSiteOrchError(null);
+    try {
+      const text = await fetchOptionalStudioSandboxUtf8(siteId, TOOLS_JSON_SANDBOX_PATH);
+      const parsed = parseToolsPolicyFromJsonText(text.trim() ? text : '');
+      if (!parsed.ok) {
+        setSiteOrchError(parsed.message);
+        setSiteOrchPolicy(defaultToolsPolicyFormState());
+      } else {
+        setSiteOrchPolicy(parsed.state);
+      }
+      setSiteOrchLoaded(true);
+    } catch (e) {
+      setSiteOrchError(e instanceof Error ? e.message : String(e));
+      setSiteOrchPolicy(defaultToolsPolicyFormState());
+      setSiteOrchLoaded(true);
+    } finally {
+      setSiteOrchLoading(false);
+    }
+  }, [siteId, resetSiteOrchDraft]);
+
+  const saveSiteOrchPolicy = useCallback(async () => {
+    if (!siteId) return;
+    const v = validateToolsPolicy(siteOrchPolicy);
+    if (!v.ok) {
+      setSiteOrchError(v.message);
+      return;
+    }
+    setSavingSiteOrch(true);
+    setSiteOrchError(null);
+    try {
+      const json = serializeToolsPolicyToJson(siteOrchPolicy);
+      await firstValueFrom(
+        writeConfiguration(siteId, 'scripts/aiassistant/config/tools.json', 'studio', json)
+      );
+      const roundTrip = parseToolsPolicyFromJsonText(json);
+      if (roundTrip.ok) {
+        setSiteOrchPolicy(roundTrip.state);
+      }
+      setSiteOrchDirty(false);
+      await postAiAssistantScriptsMutate(siteId, { action: 'refreshSync' }).catch(() => {});
+    } catch (e) {
+      setSiteOrchError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingSiteOrch(false);
+    }
+  }, [siteId, siteOrchPolicy]);
+
+  useEffect(() => {
+    if (draft == null || editIndex === null || agentDialogTab !== 'advanced') {
+      return;
+    }
+    if (siteOrchLoaded || siteOrchLoading || siteOrchDirty) {
+      return;
+    }
+    void loadSiteOrchPolicy();
+  }, [draft, editIndex, agentDialogTab, siteOrchLoaded, siteOrchLoading, siteOrchDirty, loadSiteOrchPolicy]);
 
   const loadScriptsSandboxIndex = useCallback(async () => {
     if (!siteId) {
@@ -403,6 +499,8 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
 
   const openAddChat = () => {
     setFormError(null);
+    setAgentDialogTab('general');
+    resetSiteOrchDraft();
     setAgentDialogFullscreen(false);
     setChatPromptRows([]);
     setDraft({
@@ -420,6 +518,8 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
 
   const openAddAutonomous = () => {
     setFormError(null);
+    setAgentDialogTab('general');
+    resetSiteOrchDraft();
     setAgentDialogFullscreen(false);
     setChatPromptRows([]);
     setDraft({
@@ -438,6 +538,8 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
 
   const openEdit = (index: number) => {
     setFormError(null);
+    setAgentDialogTab('general');
+    resetSiteOrchDraft();
     setAgentDialogFullscreen(false);
     const entry = sanitizeScriptLlmModelField(catalog.agents[index]);
     setDraft({ ...entry });
@@ -447,7 +549,9 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
 
   const closeDialog = () => {
     setFormError(null);
+    setAgentDialogTab('general');
     setAgentDialogFullscreen(false);
+    resetSiteOrchDraft();
     setEditIndex(null);
     setDraft(null);
   };
@@ -808,9 +912,53 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                   : presets.includes(String(draft.llmModel ?? '').trim())
                     ? String(draft.llmModel ?? '').trim()
                     : '__custom__';
+              const advancedSiteOrchestrationPanel =
+                !siteId ? null : (
+                  <Stack spacing={2} sx={{ width: '100%' }}>
+                    <Divider />
+                    <Typography variant="subtitle2">Site orchestration (tools.json)</Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Built-in allowlists and intent recipe routing apply site-wide. MCP servers are edited under
+                      Project Tools → AI Assistant → Tools and MCP.
+                    </Typography>
+                    {siteOrchError ? (
+                      <Alert severity="error" onClose={() => setSiteOrchError(null)}>
+                        {siteOrchError}
+                      </Alert>
+                    ) : null}
+                    {siteOrchLoading ? (
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <CircularProgress size={22} />
+                        <Typography variant="body2" color="text.secondary">
+                          Loading tools.json…
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <>
+                        <AiAssistantSiteOrchestrationToolsForm
+                          value={siteOrchPolicy}
+                          onChange={(next) => {
+                            setSiteOrchPolicy(next);
+                            setSiteOrchDirty(true);
+                          }}
+                        />
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<SaveRounded />}
+                          disabled={savingSiteOrch || !siteOrchDirty}
+                          onClick={() => void saveSiteOrchPolicy()}
+                        >
+                          {savingSiteOrch ? 'Saving…' : 'Save site orchestration'}
+                        </Button>
+                      </>
+                    )}
+                  </Stack>
+                );
+
               const llmVendorImageRows = (
-                <>
-                  <FormControl fullWidth size="small">
+                <Stack spacing={2} sx={{ width: '100%' }}>
+                  <FormControl fullWidth size="small" variant="outlined">
                     <InputLabel id="cq-central-llm-v">LLM provider</InputLabel>
                     <Select
                       labelId="cq-central-llm-v"
@@ -838,7 +986,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                   {sp.vendor === 'script' ? (
                     <>
                       <Stack direction="row" spacing={1} alignItems="flex-start">
-                        <FormControl fullWidth size="small" sx={{ flex: 1 }}>
+                        <FormControl fullWidth size="small" variant="outlined" sx={{ flex: 1 }}>
                           <InputLabel id="cq-central-script-llm-pick">Script LLM</InputLabel>
                           <Select
                             labelId="cq-central-script-llm-pick"
@@ -897,7 +1045,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                     </>
                   ) : (
                     <>
-                      <FormControl fullWidth size="small">
+                      <FormControl fullWidth size="small" variant="outlined">
                         <InputLabel id="cq-central-llm-m">LLM model</InputLabel>
                         <Select
                           labelId="cq-central-llm-m"
@@ -927,7 +1075,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                       ) : null}
                     </>
                   )}
-                  <FormControl fullWidth size="small">
+                  <FormControl fullWidth size="small" variant="outlined">
                     <InputLabel id="cq-central-img-gen">Image generator</InputLabel>
                     <Select
                       labelId="cq-central-img-gen"
@@ -959,7 +1107,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                   {imgK === 'script' ? (
                     <>
                       <Stack direction="row" spacing={1} alignItems="flex-start">
-                        <FormControl fullWidth size="small" sx={{ flex: 1 }}>
+                        <FormControl fullWidth size="small" variant="outlined" sx={{ flex: 1 }}>
                           <InputLabel id="cq-central-script-img-pick">Image script</InputLabel>
                           <Select
                             labelId="cq-central-script-img-pick"
@@ -1017,7 +1165,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                     fullWidth
                     size="small"
                   />
-                </>
+                </Stack>
               );
               return (
                 <Stack spacing={2} sx={{ mt: 1 }}>
@@ -1032,6 +1180,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         checked={mode === 'autonomous'}
                         onChange={(ev) => {
                           const autonomous = ev.target.checked;
+                          setAgentDialogTab('general');
                           setChatPromptRows(autonomous ? [] : []);
                           setDraft((d) => {
                             if (!d) return d;
@@ -1061,6 +1210,16 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                   />
                   {mode === 'chat' ? (
                     <>
+                      <Tabs
+                        value={agentDialogTab}
+                        onChange={(_, v) => setAgentDialogTab(v as 'general' | 'advanced')}
+                        sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 40 }}
+                      >
+                        <Tab label="General" value="general" />
+                        <Tab label="Advanced" value="advanced" />
+                      </Tabs>
+                      {agentDialogTab === 'general' ? (
+                        <Stack spacing={2} sx={{ pt: 2.5, width: '100%' }}>
                       <TextField
                         label="Label"
                         value={String(draft.label ?? '')}
@@ -1118,14 +1277,6 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         }
                         label="Open chat in a floating dialog (default: Experience Builder tools panel)"
                       />
-                      {draft.enableTools !== false ? (
-                        <CmsToolCheckboxes
-                          draft={draft}
-                          onToggle={(toolId, checked) =>
-                            setDraft((d) => (d ? setToolCheckedOnEntry(d, toolId, checked) : d))
-                          }
-                        />
-                      ) : null}
                       <Box>
                         <FormLabel
                           component="legend"
@@ -1225,9 +1376,37 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                           Add prompt
                         </Button>
                       </Box>
+                        </Stack>
+                      ) : (
+                        <Stack spacing={2} sx={{ pt: 2.5, width: '100%' }}>
+                          {draft.enableTools !== false ? (
+                            <CmsToolCheckboxes
+                              draft={draft}
+                              onToggle={(toolId, checked) =>
+                                setDraft((d) => (d ? setToolCheckedOnEntry(d, toolId, checked) : d))
+                              }
+                            />
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              Turn on <strong>Enable CMS tools</strong> on the General tab to choose per-agent CMS tools.
+                            </Typography>
+                          )}
+                          {advancedSiteOrchestrationPanel}
+                        </Stack>
+                      )}
                     </>
                   ) : (
                     <>
+                      <Tabs
+                        value={agentDialogTab}
+                        onChange={(_, v) => setAgentDialogTab(v as 'general' | 'advanced')}
+                        sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 40 }}
+                      >
+                        <Tab label="General" value="general" />
+                        <Tab label="Advanced" value="advanced" />
+                      </Tabs>
+                      {agentDialogTab === 'general' ? (
+                        <Stack spacing={2} sx={{ pt: 2.5, width: '100%' }}>
                       <TextField
                         label="Agent name"
                         value={String(draft.name ?? '')}
@@ -1257,7 +1436,7 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                           'list their internal names, and suggest one-line social posts for each.'
                         }
                       />
-                      <FormControl fullWidth size="small">
+                      <FormControl fullWidth size="small" variant="outlined">
                         <InputLabel id="cq-central-scope">Scope</InputLabel>
                         <Select
                           labelId="cq-central-scope"
@@ -1271,6 +1450,9 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         </Select>
                       </FormControl>
                       {llmVendorImageRows}
+                        </Stack>
+                      ) : (
+                        <Stack spacing={2} sx={{ pt: 2.5, width: '100%' }}>
                       <CmsToolCheckboxes
                         draft={draft}
                         onToggle={(toolId, checked) =>
@@ -1309,6 +1491,9 @@ const AiAssistantCentralAgentsConfiguration = forwardRef<
                         }
                         label="Stop on failure"
                       />
+                      {advancedSiteOrchestrationPanel}
+                        </Stack>
+                      )}
                     </>
                   )}
                 </Stack>

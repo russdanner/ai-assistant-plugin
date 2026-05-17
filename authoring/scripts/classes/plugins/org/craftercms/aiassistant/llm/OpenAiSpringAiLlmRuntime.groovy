@@ -38,22 +38,22 @@ class OpenAiSpringAiLlmRuntime implements StudioAiLlmRuntime {
   Map buildSessionBundle(StudioAiRuntimeBuildRequest req) {
     def orch = req.orchestration
     String llmNorm = (req.llmNormalized ?: StudioAiLlmKind.OPENAI_NATIVE).toString()
-    String apiKey = StudioAiProviderCredentials.resolveApiKey(llmNorm, req.openAiApiKeyFromRequest)
+    String apiKey = StudioAiProviderCredentials.resolveApiKey(llmNorm, req.llmApiKeyFromRequest)
     if (!apiKey?.trim()) {
       throw new IllegalStateException(StudioAiProviderCredentials.missingApiKeyMessage(llmNorm))
     }
-    if (StudioAiProviderCredentials.isLikelyWidgetOnlyServerKeyMissing(llmNorm, apiKey, req.openAiApiKeyFromRequest)) {
+    if (StudioAiProviderCredentials.isLikelyWidgetOnlyServerKeyMissing(llmNorm, apiKey, req.llmApiKeyFromRequest)) {
       log.warn(
         'API key is taken from widget/request (testing path). llm={} apiKeyPreview={} apiKeyChars={}. Prefer server env/JVM keys for production.',
         llmNorm,
-        AiOrchestration.openAiApiKeyLogPreview(apiKey),
+        AiOrchestration.llmApiKeyLogPreview(apiKey),
         apiKey.length()
       )
     }
-    String modelName = StudioAiProviderCredentials.resolveChatModelId(llmNorm, req.openAiModelParam)
-    String wireBase = StudioAiProviderCredentials.wireOpenAiRestBaseUrl(llmNorm)
+    String modelName = StudioAiProviderCredentials.resolveChatModelId(llmNorm, req.llmModelParam)
+    String wireBase = StudioAiProviderCredentials.wireLlmRestBaseUrl(llmNorm)
     def imageModel = AiOrchestration.imageModelFromRequestOrNull(req.imageModelParam)
-    String openAiOnlyImageKey = AiOrchestration.resolveOpenAiApiKey(null)
+    String llmOnlyImageKey = AiOrchestration.resolveLlmApiKey(null)
     def tools
     if (req.enableTools) {
       def expertSpecs = orch.readExpertSkillSpecsFromRequest()
@@ -61,7 +61,7 @@ class OpenAiSpringAiLlmRuntime implements StudioAiLlmRuntime {
         req.toolResultConverter,
         req.studioOps,
         req.toolProgressListener,
-        openAiOnlyImageKey,
+        llmOnlyImageKey,
         imageModel,
         req.fullSuppressRepoWrites,
         req.protectedFormItemPath,
@@ -74,13 +74,13 @@ class OpenAiSpringAiLlmRuntime implements StudioAiLlmRuntime {
     } else {
       tools = []
     }
-    def openAiApi = OpenAiApi.builder().baseUrl(wireBase).apiKey(apiKey).build()
+    def llmApi = OpenAiApi.builder().baseUrl(wireBase).apiKey(apiKey).build()
     def options = OpenAiChatOptions.builder()
       .model(modelName)
       .internalToolExecutionEnabled(req.enableTools)
       .build()
     def chatModel = OpenAiChatModel.builder()
-      .openAiApi(openAiApi)
+      .openAiApi(llmApi)
       .defaultOptions(options)
       .build()
     def chatClient = new DefaultChatClientBuilder(chatModel).build()
@@ -92,7 +92,7 @@ class OpenAiSpringAiLlmRuntime implements StudioAiLlmRuntime {
       req.enableTools,
       wireBase,
       StudioAiProviderCredentials.apiKeyResolutionSourceForLog(llmNorm),
-      AiOrchestration.openAiApiKeyLogPreview(apiKey),
+      AiOrchestration.llmApiKeyLogPreview(apiKey),
       apiKey.length()
     )
     return [
