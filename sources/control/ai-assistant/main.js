@@ -16,10 +16,10 @@ var CRAFTERQ_HELPER_WIDGET_ID = 'craftercms.components.aiassistant.Helper';
 /** Matches <plugin id="…"> in ui.xml for this Studio plugin */
 var CRAFTERQ_PLUGIN_ID = 'org.craftercms.aiassistant.studio';
 
-/** Default form-engine agents when ui.xml lists none. `id` must match `AI_ASSISTANT_DEFAULT_AGENT_ID` in `sources/src/agentConfig.ts`. */
+/** Default form-engine agents when ui.xml lists none. `id` must match `AI_ASSISTANT_DEFAULT_AGENT_ID` in `sources/src/agentConfig.ts` (empty). */
 var AIASSISTANT_FALLBACK_AGENTS = [
   {
-    id: '019c7237-478b-7f98-9a5c-87144c3fb010',
+    id: '',
     label: 'Content assistant',
     llm: 'openAI',
     llmModel: 'gpt-4o-mini',

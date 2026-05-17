@@ -46,8 +46,8 @@ export interface IntentRecipeRoutingFormState {
 
 export function defaultIntentRecipeRoutingFormState(): IntentRecipeRoutingFormState {
   return {
-    enabled: false,
-    engineEnabled: false,
+    enabled: true,
+    engineEnabled: true,
     minConfidence: '0.55',
     requestClarificationOnUnmatched: false,
     customRecipesPath: '',
@@ -95,8 +95,8 @@ function parseIntentRecipeRoutingFromUnknown(raw: unknown): IntentRecipeRoutingF
     minC = String(o.minConfidence).trim() || base.minConfidence;
   }
   return {
-    enabled: Boolean(o.enabled),
-    engineEnabled: Boolean(o.engineEnabled),
+    enabled: 'enabled' in o ? Boolean(o.enabled) : true,
+    engineEnabled: 'engineEnabled' in o ? Boolean(o.engineEnabled) : true,
     minConfidence: minC,
     requestClarificationOnUnmatched: Boolean(o.requestClarificationOnUnmatched),
     customRecipesPath: o.customRecipesPath != null ? String(o.customRecipesPath).trim() : '',

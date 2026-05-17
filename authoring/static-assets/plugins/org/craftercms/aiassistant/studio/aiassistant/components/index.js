@@ -30569,7 +30569,7 @@ function buildPriorTurnsContextBlock(prior) {
 }
 function AiAssistantChat(props) {
     const theme = useTheme();
-    const { agentId: agentIdProp, llm, llmModel, imageModel, imageGenerator, openAiApiKey, initialMessages, configPrompts, embedTarget = 'default', getAuthoringFormContext, formEngineClientJsonApply, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
+    const { agentId: agentIdProp, llm, llmModel, imageModel, imageGenerator, llmApiKey, initialMessages, configPrompts, embedTarget = 'default', getAuthoringFormContext, formEngineClientJsonApply, enableTools, enabledBuiltInTools, expertSkills, translateBatchConcurrency } = props;
     /** Widget **`agentId`** from agent configuration (UUID when applicable). */
     const agentId = agentIdProp?.trim() ?? '';
     const siteId = useActiveSiteId() ?? 'default';
@@ -31043,7 +31043,7 @@ function AiAssistantChat(props) {
                 ...(imageGenerator != null && String(imageGenerator).trim() !== ''
                     ? { imageGenerator: String(imageGenerator).trim() }
                     : {}),
-                openAiApiKey,
+                llmApiKey,
                 siteId,
                 ...(previewTokenForStream ? { previewToken: previewTokenForStream } : {}),
                 ...(omitToolsThisSend ? { omitTools: true } : {}),
@@ -31669,11 +31669,15 @@ const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'AI Assistant';
 /** Matches historical widget JSON label when Studio omitted the stable agent id element (same string as pre-2026 installs). */
 const LEGACY_OMITTED_AGENT_LABEL = 'C\u0072after\u0051';
 /**
- * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in defaults (same UUID everywhere).
+ * Default **{@code crafterQAgentId}** when none is configured (empty — authors must set id in ui.xml / agents file).
  */
-const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+const AI_ASSISTANT_DEFAULT_AGENT_ID = '';
 /**
- * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
+ * Legacy sample agent id from pre-2026 blueprint installs (duplicate-detection only; not a runtime default).
+ */
+const AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+/**
+ * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID}). Not used for new
  * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
  */
 const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'C\u0072after\u0051 content';
@@ -31772,7 +31776,7 @@ function dedupeAgentsByStableKey(agents) {
 /**
  * Remove (a) JSON placeholder rows (label exactly {@link AI_ASSISTANT_AGENT_LABEL_FALLBACK}) whenever another agent
  * has a non-placeholder label (Studio may still attach a non-sample id to the fallback row), and
- * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_DEFAULT_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
+ * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
  * when at least one other row looks author-defined — typical duplicate Helper menu (Studio merges blueprint + site `ui.xml`).
  */
 function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
@@ -31798,7 +31802,7 @@ function dropPlaceholderAgentsWhenRicherMatchesExist(agents) {
         const label = (a.label || '').trim();
         if (hasRicher && (label === AI_ASSISTANT_AGENT_LABEL_FALLBACK || label === LEGACY_OMITTED_AGENT_LABEL))
             return false;
-        if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
+        if (id === AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL)
             return false;
         return true;
     });
@@ -35562,8 +35566,8 @@ const INTENT_RECIPE_ROUTING_KNOWN_KEYS = new Set([
 ]);
 function defaultIntentRecipeRoutingFormState() {
     return {
-        enabled: false,
-        engineEnabled: false,
+        enabled: true,
+        engineEnabled: true,
         minConfidence: '0.55',
         requestClarificationOnUnmatched: false,
         customRecipesPath: '',
@@ -35598,8 +35602,8 @@ function parseIntentRecipeRoutingFromUnknown(raw) {
         minC = String(o.minConfidence).trim() || base.minConfidence;
     }
     return {
-        enabled: Boolean(o.enabled),
-        engineEnabled: Boolean(o.engineEnabled),
+        enabled: 'enabled' in o ? Boolean(o.enabled) : true,
+        engineEnabled: 'engineEnabled' in o ? Boolean(o.engineEnabled) : true,
         minConfidence: minC,
         requestClarificationOnUnmatched: Boolean(o.requestClarificationOnUnmatched),
         customRecipesPath: o.customRecipesPath != null ? String(o.customRecipesPath).trim() : '',
