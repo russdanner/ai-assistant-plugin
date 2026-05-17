@@ -28,8 +28,8 @@ import java.util.Set
  *   ],
  *   "disabledMcpTools": ["mcp_docs_search"],
  *   "intentRecipeRouting": {
- *     "enabled": false,
- *     "engineEnabled": false,
+ *     "enabled": true,
+ *     "engineEnabled": true,
  *     "engineMaxSteps": 8,
  *     "engineMaxTotalChars": 200000,
  *     "engineMaxFieldChars": 120000,
@@ -190,7 +190,11 @@ final class StudioAiAssistantProjectConfig {
   }
 
   static boolean intentRecipeRoutingEnabled(Map cfg) {
-    Boolean.TRUE.equals(intentRecipeRoutingSection(cfg).get('enabled'))
+    Map m = intentRecipeRoutingSection(cfg)
+    if (!m.containsKey('enabled')) {
+      return true
+    }
+    Boolean.TRUE.equals(m.get('enabled'))
   }
 
   static boolean intentRecipeRequestClarificationOnUnmatched(Map cfg) {
@@ -231,10 +235,14 @@ final class StudioAiAssistantProjectConfig {
 
   /**
    * When {@code intentRecipeRouting.enabled} is true and a recipe matches: run {@code engineSteps} on the Studio JVM
-   * before the main tools loop (see {@code AuthoringIntentRecipeEngine}). Default {@code false}.
+   * before the main tools loop (see {@code AuthoringIntentRecipeEngine}). Default {@code true} when omitted.
    */
   static boolean intentRecipeEngineEnabled(Map cfg) {
-    Boolean.TRUE.equals(intentRecipeRoutingSection(cfg).get('engineEnabled'))
+    Map m = intentRecipeRoutingSection(cfg)
+    if (!m.containsKey('engineEnabled')) {
+      return true
+    }
+    Boolean.TRUE.equals(m.get('engineEnabled'))
   }
 
   /** Max deterministic steps per matched recipe (clamped {@code 1–32}, default {@code 8}). */

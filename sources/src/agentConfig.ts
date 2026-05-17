@@ -97,12 +97,17 @@ export const AI_ASSISTANT_AGENT_LABEL_FALLBACK = 'AI Assistant';
 const LEGACY_OMITTED_AGENT_LABEL = 'C\u0072after\u0051';
 
 /**
- * Default **{@code crafterQAgentId}** used in examples, preview defaults, and built-in defaults (same UUID everywhere).
+ * Default **{@code crafterQAgentId}** when none is configured (empty — authors must set id in ui.xml / agents file).
  */
-export const AI_ASSISTANT_DEFAULT_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+export const AI_ASSISTANT_DEFAULT_AGENT_ID = '';
 
 /**
- * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_DEFAULT_AGENT_ID}). Not used for new
+ * Legacy sample agent id from pre-2026 blueprint installs (duplicate-detection only; not a runtime default).
+ */
+export const AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID = '019c7237-478b-7f98-9a5c-87144c3fb010';
+
+/**
+ * Exact label from an old merged Helper sample row (**id** {@link AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID}). Not used for new
  * installs; {@link dropPlaceholderAgentsWhenRicherMatchesExist} drops this duplicate when authors add real agents.
  */
 export const AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL = 'C\u0072after\u0051 content';
@@ -200,7 +205,7 @@ export function dedupeAgentsByStableKey(agents: AgentConfig[]): AgentConfig[] {
 /**
  * Remove (a) JSON placeholder rows (label exactly {@link AI_ASSISTANT_AGENT_LABEL_FALLBACK}) whenever another agent
  * has a non-placeholder label (Studio may still attach a non-sample id to the fallback row), and
- * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_DEFAULT_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
+ * (b) the legacy shipped sample row (**{@link AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID}** + **{@link AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL}**)
  * when at least one other row looks author-defined — typical duplicate Helper menu (Studio merges blueprint + site `ui.xml`).
  */
 export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[]): AgentConfig[] {
@@ -221,7 +226,7 @@ export function dropPlaceholderAgentsWhenRicherMatchesExist(agents: AgentConfig[
     const id = (a.id || '').trim();
     const label = (a.label || '').trim();
     if (hasRicher && (label === AI_ASSISTANT_AGENT_LABEL_FALLBACK || label === LEGACY_OMITTED_AGENT_LABEL)) return false;
-    if (id === AI_ASSISTANT_DEFAULT_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
+    if (id === AI_ASSISTANT_LEGACY_SHIPPED_AGENT_ID && label === AI_ASSISTANT_LEGACY_SHIPPED_SAMPLE_LABEL) return false;
     return true;
   });
 }
